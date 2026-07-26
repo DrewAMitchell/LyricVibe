@@ -11,13 +11,12 @@ LyricVibe is a Chrome extension that overlays perfectly synced, word-by-word ani
 
 ---
 
-## 🆕 Latest update (v0.4.2)
+## 🆕 Latest update (v0.4.3)
 
-Fixed the wrong-artist bug where lyrics from a completely different song would 
-show up mid-track. Also fixed false "API down" warnings that were firing on 
-slow-but-healthy requests. Detection is now faster and more reliable across 
-all three platforms, and if the lyrics server ever actually goes down, 
-LyricVibe now falls back to your offline cache automatically.
+- added a new theme called flow which makes a reading experince great.
+- fixed lyrics fetching warning issue.
+- added a new sync button to automatically reset or sync lyrics speed and animation.
+- made a whole extension better.
 
 ---
 
