@@ -5,6 +5,7 @@ import types
 from pathlib import Path
 from unittest.mock import patch
 
+from native.guide_audio_feedback import LiveTapClickMixer
 from native.guide_viewer import SessionBuffer, RATE
 
 
@@ -65,6 +66,9 @@ class FakeCapture:
         self.stop_calls += 1
         return {'state': 'stopped'}
 
+    def status(self):
+        return {'state': 'recording'}
+
 
 class FakeOutput:
     def __init__(self, **settings):
@@ -73,6 +77,7 @@ class FakeOutput:
         self.abort_calls = 0
         self.close_calls = 0
         self.close_failures_remaining = 0
+        self.time = 0.0
 
     def start(self):
         self.start_calls += 1
@@ -85,6 +90,20 @@ class FakeOutput:
         if self.close_failures_remaining:
             self.close_failures_remaining -= 1
             raise RuntimeError('private playback device detail')
+
+    def emit(self, frames, *, current_time=1.0, dac_time=1.01):
+        self.time = current_time
+        block = bytearray(frames * 2)
+        try:
+            self.settings['callback'](block, frames,
+                                      types.SimpleNamespace(currentTime=current_time,
+                                                            outputBufferDacTime=dac_time),
+                                      types.SimpleNamespace())
+        except Exception as error:
+            callback_stop = sys.modules['sounddevice'].CallbackStop
+            if not isinstance(error, callback_stop):
+                raise
+        return bytes(block)
 
 
 class FakeWorker:
@@ -150,17 +169,19 @@ class GuideViewerLifecycleTests(unittest.TestCase):
         self.assertIsInstance(self.viewer.output, FakeOutput)
         self.assertEqual(self.viewer.output.start_calls, 1)
         self.assertIn('Microphone off.', self.viewer.status_text.get())
+        self.assertEqual(self.capture.start_calls, [])
 
     def test_note_changes_group_under_one_syllable_entrance(self):
         self.viewer.use_microphone.set(False)
         self.viewer.use_taps.set(True)
         self.viewer.start()
         self.viewer.started_at = 100.0
-        with patch('native.guide_viewer.time.monotonic', return_value=100.5):
-            self.viewer.tap()
-        for stamp in (100.8, 101.1):
-            with patch('native.guide_viewer.time.monotonic', return_value=stamp):
-                self.viewer.tap(kind='manual-note-change')
+        self.viewer.output_pcm = bytes(64_000)
+        self.viewer.tap()
+        self.viewer.output_frame = 8_000
+        self.viewer.tap(kind='manual-note-change')
+        self.viewer.output_frame = 12_800
+        self.viewer.tap(kind='manual-note-change')
         self.assertEqual(len(self.viewer.taps), 3)
         self.assertEqual([tap['withinTapOrdinal'] for tap in self.viewer.taps], [None, 1, 1])
         self.assertEqual(sum(tap['kind'] == 'manual-syllable-onset' for tap in self.viewer.taps), 1)
@@ -174,6 +195,9 @@ class GuideViewerLifecycleTests(unittest.TestCase):
         self.viewer.worker = worker
         self.viewer.output = output
         self.viewer.output_pcm = bytes(640)
+        mixer = LiveTapClickMixer()
+        mixer.schedule(0)
+        self.viewer.click_mixer = mixer
         self.viewer.input_queue.put((0, {'pcmS16LE': bytes(640)}))
         self.viewer.buffer.begin(0, 0)
         self.viewer.started_at = 1
@@ -188,6 +212,8 @@ class GuideViewerLifecycleTests(unittest.TestCase):
         self.assertEqual(output.close_calls, 1)
         self.assertIs(self.viewer.output, output)
         self.assertEqual(self.viewer.output_pcm, b'')
+        self.assertIsNone(self.viewer.click_mixer)
+        self.assertEqual(mixer.mix(bytes(640), 0), bytes(640))
         self.assertTrue(self.viewer.input_queue.empty())
         self.assertIn('Playback cleanup failed', self.viewer.status_text.get())
 
@@ -231,6 +257,40 @@ class GuideViewerLifecycleTests(unittest.TestCase):
             self.viewer.tap()
         self.assertEqual(len(self.viewer.taps), 1)
         self.viewer.stop()
+
+    def test_output_callback_drives_playhead_and_mixes_opt_in_clicks_without_mutating_guide_pcm(self):
+        self.viewer.use_microphone.set(False)
+        self.viewer.use_taps.set(True)
+        self.viewer.click_feedback.set(True)
+
+        self.viewer.start()
+        original_pcm = bytes(64_000)
+        self.viewer.output_pcm = original_pcm
+        self.assertIn('Starting', self.viewer.playback_text.get())
+        self.viewer.draw()
+        self.assertTrue(self.viewer.canvas.find_withtag('output-playhead'))
+
+        first_block = self.viewer.output.emit(320, current_time=1.0, dac_time=1.02)
+        self.assertEqual(first_block, bytes(640))
+        self.assertEqual(self.viewer.output_frame, 320)
+        self.assertEqual(self.viewer.output_playhead_frame, 0)
+        self.assertEqual(self.viewer.output_buffer_dac_time, 1.02)
+        self.assertEqual(self.viewer.playback_state, 'playing')
+
+        self.viewer.output.time = 1.04
+        self.viewer.tap()
+        self.assertEqual(self.viewer.taps[-1]['outputFrame'], 320)
+        clicked_block = self.viewer.output.emit(320, current_time=1.02, dac_time=1.04)
+        self.assertTrue(any(clicked_block))
+        self.assertEqual(self.viewer.output_pcm, original_pcm)
+        self.viewer.output.time = 1.06
+        self.viewer.tick()
+        self.assertIn('Playing', self.viewer.playback_text.get())
+        self.assertTrue(self.viewer.canvas.find_withtag('output-playhead'))
+
+        self.viewer.stop()
+        self.assertEqual(self.viewer.playback_state, 'stopped')
+        self.assertIn('Stopped', self.viewer.playback_text.get())
 
 
 if __name__ == '__main__':

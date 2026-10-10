@@ -5,6 +5,7 @@ import argparse
 from collections import deque
 import hashlib
 import json
+import math
 from pathlib import Path
 import queue
 import shutil
@@ -14,6 +15,7 @@ import time
 import numpy as np
 
 from .companion import _validate_score
+from .guide_audio_feedback import LiveTapClickMixer
 from .guide_capture import GuideCapture, list_input_devices
 from .guide_features import GuideFeatureStream
 from .guide_worker import GuideWorker
@@ -118,6 +120,11 @@ class GuideViewer:
         self.output = None
         self.output_pcm = b''
         self.output_frame = 0
+        self.output_playhead_frame = 0
+        self.output_buffer_dac_time = None
+        self.output_buffer_dac_frame = 0
+        self.playback_state = 'stopped'
+        self.click_mixer = None
         self.output_done = False
         self.worker = None
         self.last_inference = 0
@@ -183,6 +190,9 @@ class GuideViewer:
         self.microphone_check.pack(side='left')
         self.tap_check = ttk.Checkbutton(modes, text='Timing taps', variable=self.use_taps)
         self.tap_check.pack(side='left', padx=8)
+        self.click_feedback = tk.BooleanVar(value=False)
+        self.click_feedback_check = ttk.Checkbutton(modes, text='Audible tap clicks', variable=self.click_feedback)
+        self.click_feedback_check.pack(side='left', padx=8)
         self.tap_button = ttk.Button(modes, text='Entrance', command=self.tap)
         self.tap_button.pack(side='right')
         ttk.Button(modes, text='Note change', command=lambda: self.tap(kind='manual-note-change')).pack(side='right', padx=4)
@@ -196,6 +206,8 @@ class GuideViewer:
         self.canvas.pack(fill='both', expand=True)
         self.legend = ttk.Label(pane, text='Space: syllable entrance · Shift+Space: note change within a held syllable', wraplength=800)
         self.legend.pack(anchor='w', pady=(8, 3))
+        self.playback_text = tk.StringVar(value='Stopped · output DAC clock 0.00 s')
+        ttk.Label(pane, textvariable=self.playback_text).pack(anchor='w')
         self.status_text = tk.StringVar(value=error or 'Idle. Microphone opens only when you press Start.')
         self.status_label = ttk.Label(pane, textvariable=self.status_text, wraplength=800)
         self.status_label.pack(anchor='w')
@@ -272,6 +284,12 @@ class GuideViewer:
             self.space_down = False
             self.elapsed_ms = 0
             self.output_pcm, self.output_frame, self.output_done = pcm, 0, False
+            self.output_playhead_frame = 0
+            self.output_buffer_dac_time = None
+            self.output_buffer_dac_frame = 0
+            self.playback_state = 'starting'
+            self.click_mixer = LiveTapClickMixer() if self.click_feedback.get() else None
+            self.playback_text.set('Starting · output DAC clock 0.00 s')
             self.mode = ('Acoustic cues + provisional word follower' if self.worker is not None
                          else 'Acoustic cues only') if self.use_microphone.get() else 'Manual syllable taps'
             def incoming(chunk):
@@ -280,12 +298,22 @@ class GuideViewer:
                 except queue.Full:
                     pass  # the next delivered frame exposes the gap and resets continuity
             def outgoing(outdata, frames, clock, status):
-                start = self.output_frame * 2
+                first_frame = self.output_frame
+                start = first_frame * 2
                 block = self.output_pcm[start:start + frames * 2]
-                outdata[:] = block + bytes(frames * 2 - len(block))
+                block += bytes(frames * 2 - len(block))
+                if self.click_mixer is not None:
+                    block = self.click_mixer.mix(block, first_frame)
+                outdata[:] = block
                 self.output_frame += frames
+                self.output_buffer_dac_time = getattr(clock, 'outputBufferDacTime', None)
+                self.output_buffer_dac_frame = first_frame
+                self._refresh_output_playhead(clock_current=getattr(clock, 'currentTime', None))
+                if not self.output_done:
+                    self.playback_state = 'playing'
                 if start + frames * 2 >= len(self.output_pcm):
                     self.output_done = True
+                    self.playback_state = 'stopped'
                     raise sd.CallbackStop
             self.output = sd.RawOutputStream(samplerate=RATE, channels=1, dtype='int16',
                                               blocksize=320, callback=outgoing)
@@ -299,6 +327,7 @@ class GuideViewer:
             self.device_box.configure(state='disabled')
             self.microphone_check.configure(state='disabled')
             self.tap_check.configure(state='disabled')
+            self.click_feedback_check.configure(state='disabled')
             self.prepare_button.configure(state='disabled')
             self.status_text.set(f'{self.mode}. ' + ('Microphone active. ' if self.use_microphone.get() else 'Microphone off. ') + ('Space: syllable entrance. Shift+Space: note change.' if self.use_taps.get() else 'Sing in rhythm.'))
             self.canvas.focus_set()
@@ -308,9 +337,11 @@ class GuideViewer:
 
     def stop(self):
         if self.buffer.active and self.started_at:
-            self.elapsed_ms = min(CLIP_MS, round((time.monotonic() - self.started_at) * 1000))
+            self._refresh_output_playhead()
+            self.elapsed_ms = min(CLIP_MS, round(self.output_playhead_frame * 1000 / RATE))
         self.buffer.stop()
         self.space_down = False
+        self.playback_state = 'stopped'
         errors = []
         if self.worker is not None:
             try:
@@ -333,6 +364,9 @@ class GuideViewer:
                 errors.append('Playback cleanup failed; press Stop to retry.')
             else:
                 self.output = None
+        if self.click_mixer is not None:
+            self.click_mixer.clear()
+            self.click_mixer = None
         self.output_pcm = b''
         while not self.input_queue.empty():
             try:
@@ -345,9 +379,30 @@ class GuideViewer:
         self.device_box.configure(state='readonly')
         self.microphone_check.configure(state='normal')
         self.tap_check.configure(state='normal')
+        self.click_feedback_check.configure(state='normal')
         self.prepare_button.configure(state='disabled' if errors else 'normal')
         self.status_text.set(' '.join(errors) if errors else 'Stopped. Raw buffers cleared. Prepare the word follower again for another word-matching trial.')
+        self.playback_text.set(f'Stopped · output DAC clock {self.elapsed_ms / 1000:.2f} s')
         return not errors
+
+    def _refresh_output_playhead(self, *, clock_current=None):
+        """Estimate heard position from the output stream's DAC clock only."""
+        dac_time = self.output_buffer_dac_time
+        stream = self.output
+        if clock_current is None and stream is not None:
+            try:
+                clock_current = stream.time
+            except Exception:
+                clock_current = None
+        if (isinstance(dac_time, (int, float)) and not isinstance(dac_time, bool)
+                and isinstance(clock_current, (int, float)) and not isinstance(clock_current, bool)
+                and math.isfinite(dac_time) and math.isfinite(clock_current)):
+            estimate = self.output_buffer_dac_frame + round((clock_current - dac_time) * RATE)
+            bound = min(self.output_frame, len(self.output_pcm) // 2)
+            self.output_playhead_frame = max(self.output_playhead_frame, min(bound, max(0, estimate)))
+        elif self.output_frame:
+            self.output_playhead_frame = max(self.output_playhead_frame,
+                                             min(self.output_frame, len(self.output_pcm) // 2))
 
     def space_press(self, event):
         if event.widget.winfo_class() in ('TEntry', 'Entry', 'TCombobox', 'Text'):
@@ -367,14 +422,19 @@ class GuideViewer:
             return
         if not self.buffer.active or not self.use_taps.get() or len(self.taps) >= 512:
             return
-        guide_ms = round((time.monotonic() - self.started_at) * 1000)
+        self._refresh_output_playhead()
+        guide_ms = round(self.output_playhead_frame * 1000 / RATE)
         if guide_ms < 0 or guide_ms > CLIP_MS or (self.taps and guide_ms - self.taps[-1]['guideTimeMs'] < 50):
             return
         parent = next((tap['ordinal'] for tap in reversed(self.taps)
                        if tap['kind'] == 'manual-syllable-onset'), None) if kind == 'manual-note-change' else None
+        click_frame = self.output_frame
         self.taps.append({'ordinal': len(self.taps) + 1, 'guideTimeMs': guide_ms,
                           'approximateSourceMs': max(0, self.clip_start + guide_ms - self.buffer.delay_ms),
-                          'kind': kind, 'withinTapOrdinal': parent, 'unitId': None, 'calibrated': False})
+                          'outputFrame': self.output_playhead_frame, 'kind': kind, 'withinTapOrdinal': parent,
+                          'unitId': None, 'calibrated': False})
+        if self.click_feedback.get() and self.click_mixer is not None:
+            self.click_mixer.schedule(click_frame)
         entrances = sum(tap['kind'] == 'manual-syllable-onset' for tap in self.taps)
         self.result_text.set(f'{entrances} entrances · {len(self.taps) - entrances} note changes. Unassigned to lyrics; no score edits.')
 
@@ -411,7 +471,10 @@ class GuideViewer:
                 self.stop()
                 self.status_text.set('Word worker timed out. Capture and playback stopped; prepare again to retry.')
         if self.buffer.active:
-            self.elapsed_ms = min(CLIP_MS, round((now - self.started_at) * 1000))
+            self._refresh_output_playhead()
+            self.elapsed_ms = min(CLIP_MS, round(self.output_playhead_frame * 1000 / RATE))
+            state_text = 'Playing' if self.playback_state == 'playing' else 'Starting'
+            self.playback_text.set(f'{state_text} · output DAC clock {self.elapsed_ms / 1000:.2f} s')
             state = self.capture.status()
             if self.output_done or state['state'] in ('failed', 'limit_reached') or now - self.started_at > 13:
                 self.stop()
@@ -432,11 +495,12 @@ class GuideViewer:
 
     def draw(self):
         frames = self.features.snapshot()['frames']
-        if not frames and not self.taps:
+        if not frames and not self.taps and not self.buffer.active:
             return
         width, height = max(1, self.canvas.winfo_width()), max(1, self.canvas.winfo_height())
         render_key = (width, height, frames[-1]['centerSample'] if frames else None,
-                      len(self.taps), len(self.events), self.elapsed_ms if not frames else None)
+                      len(self.taps), len(self.events), self.elapsed_ms if not frames else None,
+                      self.output_playhead_frame // max(1, RATE // 10), self.playback_state)
         if render_key == self.render_key:
             return
         self.render_key = render_key
@@ -451,7 +515,10 @@ class GuideViewer:
             ppm = f'P6\n{width} {height}\n255\n'.encode() + rgb.tobytes()
             self.photo = self.tk.PhotoImage(data=ppm, format='PPM')
             self.canvas.create_image(0, 0, image=self.photo, anchor='nw')
-        start, end = (frames[0]['timeMs'], frames[-1]['timeMs']) if frames else (0, max(1000, self.elapsed_ms))
+        playhead_ms = round(self.output_playhead_frame * 1000 / RATE)
+        start, end = ((frames[0]['timeMs'], max(frames[-1]['timeMs'], playhead_ms)) if frames
+                      else (0, max(1000, self.elapsed_ms, playhead_ms,
+                                  self.taps[-1]['guideTimeMs'] if self.taps else 0)))
         def x(ms):
             return (ms - start) / max(1, end - start) * width
         for frame in frames:
@@ -473,6 +540,10 @@ class GuideViewer:
                 color = '#d5a2fa' if note else '#8ce7b0'
                 self.canvas.create_line(px, height // 2 if note else 0, px, height, fill=color, width=2)
                 self.canvas.create_text(px + 4, height - 42, text=('~' if note else '') + str(tap['ordinal']), fill=color, anchor='nw')
+        if self.buffer.active and start <= playhead_ms <= end:
+            px = x(playhead_ms)
+            self.canvas.create_line(px, 0, px, height, fill='#f4f7fb', width=2, tags='output-playhead')
+            self.canvas.create_text(px + 4, 8, text='DAC', anchor='nw', fill='#f4f7fb', tags='output-playhead')
         self.canvas.create_text(8, 8, text=f'{start / 1000:.2f}–{end / 1000:.2f} s guide', anchor='nw', fill='white')
 
     def export(self):
@@ -490,7 +561,7 @@ class GuideViewer:
                    'clockBasis': 'input frame estimate; separate output/input latency and human delay unmeasured',
                    'mode': self.mode, 'captureStatus': self.capture.status() if self.trial_microphone_enabled else None,
                    'captureEpoch': self.trial_epoch,
-                   'tapClockBasis': 'monotonic time since output.start returned; latency uncalibrated',
+                   'tapClockBasis': 'outputBufferDacTime-anchored output frame estimate; input/output latency uncalibrated',
                    'microphoneEnabled': self.trial_microphone_enabled, 'tapsEnabled': self.trial_taps_enabled, 'taps': self.taps,
                    'events': self.events, 'features': self.features.snapshot()}
         # Never silently replace an earlier trial.
