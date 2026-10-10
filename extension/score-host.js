@@ -129,6 +129,18 @@
       if (message.type === 'LV_SCORE_GET') return { ok: true, score: record.score, review: record.review || [], tabId, mediaKey: key, analysis: await root.LvAnalysis?.analysisStatus() };
       if (message.expectedRevision !== record.score.revision) throw fail('REVISION_CONFLICT', 'The score changed. Reload it before editing.');
       let next;
+      if (message.type === 'LV_NATIVE_ALIGNMENT_IMPORT') {
+        if (!editorSourceBound(sender, tabId, key)) throw fail('EDITOR_REQUIRED', 'Import alignment from the editor opened for this source.');
+        const receipt = LvScore.validateAlignmentReceipt(record.score, message.receipt);
+        const pending = new Map((record.review || []).map(proposal => [proposal.wordId, proposal]));
+        for (const proposal of receipt.proposals) pending.set(proposal.wordId, proposal);
+        record.review = [...pending.values()].slice(-5000);
+        record.diagnostics = { adapter: receipt.adapter, model: receipt.model, method: 'native-supplied-lyrics-alignment', automaticAdmissionEnabled: false };
+        await liveIdentity(tabId, key);
+        await chrome.storage.local.set({ [keyFor(key)]: record });
+        await publish(tabId, record);
+        return { ok: true, score: record.score, review: record.review, tabId, mediaKey: key };
+      }
       if (message.type === 'LV_SCORE_OPERATION') next = LvScore.applyOperation(record.score, message.operation, message.expectedRevision);
       else if (message.type === 'LV_SCORE_IMPORT') {
         LvScore.validateScore(message.score);
@@ -161,6 +173,10 @@
         next = LvScore.applyAlignment(record.score, proposals, record.score.revision);
         record.review = (record.review || []).filter(p => !selected.has(p.wordId));
       } else throw fail('MESSAGE_UNKNOWN', 'Unknown score operation.');
+      // A changed score revision invalidates pending timing evidence, including
+      // its offset mapping. New analysis windows can extend review only while
+      // no score edit, acceptance, import or undo intervenes.
+      if (message.type !== 'LV_ALIGNMENT_PROPOSALS') record.review = [];
       if (message.type !== 'LV_SCORE_UNDO') record.history = [...(record.history || []), record.score].slice(-30);
       record.score = next;
       await liveIdentity(tabId, key);
@@ -169,7 +185,7 @@
       return { ok: true, score: next, review: record.review || [], tabId, mediaKey: key };
     });
   }
-  const types = new Set(['LV_ANALYSIS_CACHE_CLEAR_REQUEST', 'LV_EDITOR_OPEN', 'LV_SCORE_GET', 'LV_SCORE_OPERATION', 'LV_SCORE_IMPORT', 'LV_SCORE_UNDO', 'LV_SCORE_SEEK', 'LV_SCORE_TRANSPORT', 'LV_SCORE_REVIEW_APPLY', 'LV_ANALYSIS_START', 'LV_ANALYSIS_STOP', 'LV_ANALYSIS_STATUS', 'LV_ALIGNMENT_PROPOSALS']);
+  const types = new Set(['LV_ANALYSIS_CACHE_CLEAR_REQUEST', 'LV_EDITOR_OPEN', 'LV_SCORE_GET', 'LV_SCORE_OPERATION', 'LV_SCORE_IMPORT', 'LV_NATIVE_ALIGNMENT_IMPORT', 'LV_SCORE_UNDO', 'LV_SCORE_SEEK', 'LV_SCORE_TRANSPORT', 'LV_SCORE_REVIEW_APPLY', 'LV_ANALYSIS_START', 'LV_ANALYSIS_STOP', 'LV_ANALYSIS_STATUS', 'LV_ALIGNMENT_PROPOSALS']);
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!types.has(message?.type)) return;
     // Only this extension can submit score mutations; content scripts supply their own tab ID.

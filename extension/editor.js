@@ -282,11 +282,20 @@
   function renderReview() {
     state.reviewRevision = state.score.revision;
     $('review-list').replaceChildren(...state.review.map(proposal => {
-      const word = state.score.phrases.flatMap(phrase => phrase.words).find(word => word.id === proposal.wordId);
-      const protection = helpers.reviewProtection(word);
-      const row = el('label', 'review-row'); const check = el('input'); check.type = 'checkbox'; check.value = proposal.wordId; check.disabled = Boolean(protection);
-      const details = el('span'); details.append(el('strong', '', word?.text || proposal.wordId), el('span', 'muted small', `${seconds(proposal.startMs)}–${seconds(proposal.endMs)}s · ${protection || 'Uncertain anchor'}`));
-      row.dataset.tip = `Evidence: ${proposal.evidenceId}\nRaw model confidence is not calibrated for singing.`; row.append(check, details); return row;
+      const phrase = state.score.phrases.find(phrase => phrase.words.some(word => word.id === proposal.wordId));
+      const word = phrase?.words.find(word => word.id === proposal.wordId);
+      const outside = phrase && !phrase.endEstimated && (proposal.startMs < phrase.startMs || proposal.endMs > phrase.endMs);
+      const protection = helpers.reviewProtection(word) || (outside ? 'Adjust phrase bounds before accepting' : '');
+      const row = el('div', 'review-row'); const check = el('input'); check.type = 'checkbox'; check.value = proposal.wordId; check.disabled = Boolean(protection); check.setAttribute('aria-label', `Accept timing for ${word?.text || proposal.wordId}`);
+      const details = el('span'); details.append(el('strong', '', word?.text || proposal.wordId), el('span', 'muted small', `${word ? `${seconds(word.startMs)}–${seconds(word.endMs)} → ` : ''}${seconds(proposal.startMs)}–${seconds(proposal.endMs)}s`), el('span', 'muted small', protection || 'Needs review'));
+      const audition = el('button', 'quiet', live ? 'Audition' : 'Silent preview'); audition.type = 'button';
+      audition.onclick = async () => {
+        const startMs = helpers.seekTarget(proposal.startMs + state.score.offsetMs - 250, state.score.source.durationMs);
+        const endMs = helpers.seekTarget(proposal.endMs + state.score.offsetMs + 350, state.score.source.durationMs);
+        await transport('setLoop', { startMs, endMs }); await seekTo(startMs); await transport('play');
+        $('review-status').textContent = `${live ? 'Auditioning' : 'Silent preview'} ${word?.text || proposal.wordId} · ${seconds(startMs)}–${seconds(endMs)}s`;
+      };
+      row.dataset.tip = `Evidence: ${proposal.evidenceId}\nRaw model confidence is not calibrated for singing.`; row.append(check, details, audition); return row;
     }));
     $('review-apply').disabled = true;
     $('review-status').textContent = `Revision ${state.reviewRevision} · ${state.review.length} proposals`;
@@ -328,6 +337,8 @@
     $('files-open').onclick = () => $('files-dialog').showModal();
     $('settings').onclick = () => { if (runtime?.openOptionsPage) runtime.openOptionsPage(); else notice('Settings are available in the installed extension. This is a synthetic file preview.'); };
     $('review-open').onclick = () => { renderReview(); $('review-dialog').showModal(); };
+    $('review-stop').onclick = async () => { await transport('pause'); await transport('clearLoop'); };
+    $('review-dialog').addEventListener('close', async () => { await transport('pause'); await transport('clearLoop'); });
     $('review-list').onchange = () => { $('review-apply').disabled = !$('review-list').querySelector('input:checked'); };
     $('review-apply').onclick = async () => { const wordIds = [...$('review-list').querySelectorAll('input:checked')].map(input => input.value); if (!wordIds.length) return; await mutate('LV_SCORE_REVIEW_APPLY', { wordIds }, 'Selected timing proposals accepted'); $('review-status').textContent = $('notice').textContent; };
     $('export').onclick = () => {
@@ -337,7 +348,25 @@
     $('import-file').onchange = () => { $('import').disabled = !$('import-file').files.length; $('file-status').textContent = ''; };
     $('import').onclick = async () => {
       const file = $('import-file').files[0]; if (!file) return;
-      try { if (file.size > 5 * 1024 * 1024) throw new Error('Score file exceeds the 5 MB limit.'); const score = helpers.assertImport(state.score, JSON.parse(await file.text()), core); await mutate('LV_SCORE_IMPORT', { score }, 'Score imported'); $('file-status').textContent = $('notice').textContent; } catch (cause) { $('file-status').textContent = `${cause.code || 'INVALID_FILE'} · ${cause.message}`; }
+      try {
+        if (file.size > 5 * 1024 * 1024) throw new Error('JSON file exceeds the 5 MB limit.');
+        if (state.draft || state.busy) throw new Error('Apply or discard your current draft before importing.');
+        const incoming = JSON.parse(await file.text());
+        if (incoming.version === 'lyricvibe.alignment.v1') {
+          const receipt = core.validateAlignmentReceipt(state.score, incoming);
+          state.busy = true;
+          try {
+            if (live) { const result = await send('LV_NATIVE_ALIGNMENT_IMPORT', { receipt, expectedRevision: state.score.revision }); setReview(result.review); }
+            else setReview(receipt.proposals);
+          } finally { state.busy = false; }
+          notice('Timing suggestions loaded. Audition before accepting; no timing changed.', 'success');
+          $('files-dialog').close(); renderReview(); $('review-dialog').showModal();
+        } else {
+          const score = helpers.assertImport(state.score, incoming, core);
+          await mutate('LV_SCORE_IMPORT', { score }, 'Score imported');
+          $('file-status').textContent = $('notice').textContent;
+        }
+      } catch (cause) { $('file-status').textContent = `${cause.code || 'INVALID_FILE'} · ${cause.message}`; }
     };
     document.addEventListener('keydown', event => {
       const editing = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName);

@@ -51,7 +51,7 @@ function makeHarness() {
       message = { tabId: 1, mediaKey: `youtube:${ID_A}`, sessionId: 'session-1', ...message };
       if (sender.url === undefined && sender.tab) sender = { ...sender, url: chrome.runtime.getURL('analysis/offscreen.html') };
     }
-    if (message.type === 'LV_SCORE_REVIEW_APPLY' && sender.url === undefined) {
+    if (['LV_SCORE_REVIEW_APPLY', 'LV_NATIVE_ALIGNMENT_IMPORT'].includes(message.type) && sender.url === undefined) {
       const tabId = message.tabId ?? sender.tab?.id ?? 1;
       const mediaKey = message.mediaKey || `youtube:${ID_A}`;
       message = { tabId, ...message };
@@ -77,6 +77,59 @@ function makeHarness() {
 
 function recordFor(h, id = ID_A) { return h.values[`lvScore:youtube:${id}`]; }
 function firstWord(score) { return score.phrases.flatMap(p => p.words)[0]; }
+
+function nativeReceipt(score) {
+  const word = firstWord(score);
+  return { version: 'lyricvibe.alignment.v1', mediaKey: scoreCore.mediaKey(score.source), lyricsHash: score.lyrics.contentHash, expectedRevision: score.revision, adapter: 'test-forced-alignment', model: 'explicit-fixture', automaticAdmissionEnabled: false, proposals: [{ wordId: word.id, startMs: word.startMs + 100, endMs: word.endMs + 100, accepted: false, evidenceId: 'native-fixture' }] };
+}
+
+test('native receipt import queues source-bound review without changing timing; accept and undo work', async () => {
+  const h = makeHarness(), score = await h.ensure(), receipt = nativeReceipt(score);
+  const result = await h.dispatch({ type: 'LV_NATIVE_ALIGNMENT_IMPORT', tabId: 1, mediaKey: receipt.mediaKey, expectedRevision: score.revision, receipt });
+  assert.equal(result.ok, true);
+  assert.equal(result.score.revision, score.revision);
+  assert.equal(firstWord(result.score).startMs, firstWord(score).startMs);
+  assert.equal(result.review.length, 1);
+  assert.equal(recordFor(h).history.length, 0);
+  const accepted = await h.dispatch({ type: 'LV_SCORE_REVIEW_APPLY', tabId: 1, mediaKey: receipt.mediaKey, expectedRevision: score.revision, wordIds: [firstWord(score).id] });
+  assert.equal(accepted.ok, true);
+  assert.equal(firstWord(accepted.score).startMs, receipt.proposals[0].startMs);
+  const undone = await h.dispatch({ type: 'LV_SCORE_UNDO', expectedRevision: accepted.score.revision });
+  assert.equal(undone.ok, true);
+  assert.equal(firstWord(undone.score).startMs, firstWord(score).startMs);
+});
+
+test('native receipt rejects a mismatched editor, video, lyric hash, revision, or automatic admission', async () => {
+  const h = makeHarness(), score = await h.ensure(), receipt = nativeReceipt(score);
+  const message = { type: 'LV_NATIVE_ALIGNMENT_IMPORT', tabId: 1, mediaKey: receipt.mediaKey, expectedRevision: score.revision, receipt };
+  const unbound = await h.dispatch(message, { id: 'test-extension', url: 'chrome-extension://test/editor.html?sourceTab=2' });
+  assert.equal(unbound.error.code, 'EDITOR_REQUIRED');
+  for (const [patch, code] of [
+    [{ mediaKey: `youtube:${ID_B}` }, 'SOURCE_MISMATCH'],
+    [{ lyricsHash: HASH }, 'LYRIC_REVISION_MISMATCH'],
+    [{ expectedRevision: 1 }, 'REVISION_CONFLICT'],
+    [{ automaticAdmissionEnabled: true }, 'INVALID_ALIGNMENT_RECEIPT'],
+    [{ proposals: [{ ...receipt.proposals[0], accepted: true }] }, 'INVALID_ALIGNMENT_RECEIPT'],
+    [{ proposals: [{ ...receipt.proposals[0], endMs: Infinity }] }, 'INVALID_ALIGNMENT_RECEIPT'],
+    [{ proposals: [receipt.proposals[0], receipt.proposals[0]] }, 'INVALID_ALIGNMENT_RECEIPT'],
+  ]) {
+    const result = await h.dispatch({ ...message, receipt: { ...receipt, ...patch } });
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, code);
+  }
+  assert.equal(recordFor(h).review.length, 0);
+});
+
+test('an offset edit invalidates pending native evidence instead of rebinding stale anchors', async () => {
+  const h = makeHarness(), score = await h.ensure(), receipt = nativeReceipt(score);
+  await h.dispatch({ type: 'LV_NATIVE_ALIGNMENT_IMPORT', tabId: 1, mediaKey: receipt.mediaKey, expectedRevision: score.revision, receipt });
+  const changed = await h.dispatch({ type: 'LV_SCORE_OPERATION', operation: { type: 'setOffset', offsetMs: 1000 }, expectedRevision: score.revision });
+  assert.equal(changed.ok, true);
+  assert.equal(changed.review.length, 0);
+  assert.equal(firstWord(changed.score).startMs, firstWord(score).startMs);
+  const stale = await h.dispatch({ type: 'LV_NATIVE_ALIGNMENT_IMPORT', tabId: 1, mediaKey: receipt.mediaKey, expectedRevision: changed.score.revision, receipt });
+  assert.equal(stale.error.code, 'REVISION_CONFLICT');
+});
 
 test('host persists separate exact-video scores even when lookup metadata matches', async () => {
   const h = makeHarness();

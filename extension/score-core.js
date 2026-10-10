@@ -442,5 +442,28 @@
     return x;
   }
 
-  return { VERSION, ScoreError, mediaKey, parseLrc, createScore, validateScore, activeAt, revealProgress, applyOperation, applyAlignment };
+  function validateAlignmentReceipt(score, receipt) {
+    validateScore(score);
+    const bad = message => fail("INVALID_ALIGNMENT_RECEIPT", message);
+    if (!receipt || receipt.version !== 'lyricvibe.alignment.v1' || receipt.automaticAdmissionEnabled !== false) bad('A review-only native alignment receipt is required');
+    if (receipt.mediaKey !== mediaKey(score.source)) fail('SOURCE_MISMATCH', 'Alignment belongs to another video');
+    if (receipt.lyricsHash !== score.lyrics.contentHash) fail('LYRIC_REVISION_MISMATCH', 'Alignment belongs to another lyric source revision');
+    checkExpected(score, receipt.expectedRevision);
+    for (const key of ['adapter', 'model']) if (typeof receipt[key] !== 'string' || !receipt[key].trim() || receipt[key].length > 300) bad(`Invalid ${key}`);
+    if (!Array.isArray(receipt.proposals) || receipt.proposals.length > 5000) bad('At most 5000 proposals are allowed');
+    const words = new Set(score.phrases.flatMap(phrase => phrase.words.map(word => word.id)));
+    const seen = new Set();
+    const proposals = receipt.proposals.map(proposal => {
+      if (!proposal || !words.has(proposal.wordId) || seen.has(proposal.wordId)) bad('Each proposal must name a distinct word in this score');
+      seen.add(proposal.wordId);
+      if (proposal.accepted !== false || typeof proposal.evidenceId !== 'string' || !proposal.evidenceId || proposal.evidenceId.length > 500) bad('Proposal requires review-only evidence');
+      if (!Number.isSafeInteger(proposal.startMs) || !Number.isSafeInteger(proposal.endMs) || proposal.startMs < 0 || proposal.endMs < proposal.startMs) bad('Word intervals must be ordered integer milliseconds');
+      if (score.source.durationMs > 0 && proposal.endMs + score.offsetMs > score.source.durationMs + 1000) bad('Proposal exceeds the source video duration');
+      if (proposal.confidence !== undefined && (typeof proposal.confidence !== 'number' || !Number.isFinite(proposal.confidence) || proposal.confidence < 0 || proposal.confidence > 1)) bad('Invalid proposal confidence');
+      return { wordId: proposal.wordId, startMs: proposal.startMs, endMs: proposal.endMs, accepted: false, evidenceId: proposal.evidenceId, ...(proposal.confidence === undefined ? {} : { confidence: proposal.confidence }), reviewReason: 'Native supplied-lyrics alignment; audition before accepting.' };
+    });
+    return { version: receipt.version, mediaKey: receipt.mediaKey, lyricsHash: receipt.lyricsHash, expectedRevision: receipt.expectedRevision, adapter: receipt.adapter, model: receipt.model, proposals, automaticAdmissionEnabled: false };
+  }
+
+  return { VERSION, ScoreError, mediaKey, parseLrc, createScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, applyOperation, applyAlignment };
 });
