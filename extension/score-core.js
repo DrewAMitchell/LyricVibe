@@ -385,6 +385,7 @@
     if (!Array.isArray(proposals)) fail("INVALID_PROPOSALS", "proposals must be an array");
     const next = clone(score);
     const evidenceByWord = new Set();
+    const alignedPhrases = new Set();
     for (const proposal of proposals) {
       if (!proposal || typeof proposal !== "object" || typeof proposal.wordId !== "string" || typeof proposal.accepted !== "boolean" || typeof proposal.evidenceId !== "string" || !proposal.evidenceId) fail("INVALID_PROPOSAL", "proposal is malformed");
       if (proposal.confidence !== undefined && (typeof proposal.confidence !== "number" || !Number.isFinite(proposal.confidence) || proposal.confidence < 0 || proposal.confidence > 1)) fail("INVALID_PROPOSAL", "confidence must be between 0 and 1");
@@ -400,11 +401,20 @@
       evidenceByWord.add(seenKey);
       rescaleSyllables(word, word.startMs, word.endMs, proposal.startMs, proposal.endMs, syllable => syllable.provenance === "estimated" && !syllable.locked);
       word.startMs = proposal.startMs; word.endMs = proposal.endMs; word.provenance = "aligned";
+      alignedPhrases.add(phrase.id);
       if (phrase.endEstimated) {
         phrase.startMs = phrase.words.reduce((min, item) => Math.min(min, item.startMs), phrase.startMs);
         phrase.endMs = phrase.words.reduce((max, item) => Math.max(max, item.endMs), phrase.endMs);
         phrase.fadeOutMs = Math.min(phrase.fadeOutMs, phrase.endMs - phrase.startMs);
       }
+    }
+    // A complete accepted word path replaces the old estimated display window.
+    // Partial paths keep their existing bounds around still-estimated words.
+    for (const phrase of next.phrases) {
+      if (!alignedPhrases.has(phrase.id) || !phrase.endEstimated || !phrase.words.length || !phrase.words.every(word => word.provenance === "aligned")) continue;
+      phrase.startMs = Math.min(...phrase.words.map(word => word.startMs));
+      phrase.endMs = Math.max(...phrase.words.map(word => word.endMs));
+      phrase.fadeOutMs = Math.min(phrase.fadeOutMs, phrase.endMs - phrase.startMs);
     }
     next.revision++;
     return validateScore(next);

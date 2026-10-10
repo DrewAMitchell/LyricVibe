@@ -142,6 +142,19 @@ test('alignment proposals validate identity and timing, honor locks, and do not 
   errorCode(() => score.applyAlignment(s, [{ wordId: 'missing', startMs: 1, endMs: 2, accepted: true, evidenceId: 'e' }], 1), 'UNKNOWN_ID');
 });
 
+test('complete alignment replaces estimated phrase bounds so old captions do not linger into rests', () => {
+  const source = makeScore('[00:01.00]one two');
+  const phrase = source.phrases[0];
+  assert.equal(phrase.endEstimated, true);
+  const proposals = phrase.words.map((word, index) => ({ wordId: word.id, startMs: 3000 + index * 400, endMs: 3300 + index * 400, accepted: true, evidenceId: `whole-path-${index}` }));
+  const next = score.applyAlignment(source, proposals, source.revision);
+  assert.deepEqual([next.phrases[0].startMs, next.phrases[0].endMs], [3000, 3700]);
+  assert.equal(score.activeAt(next, 1500).phrases.length, 0);
+  assert.equal(score.activeAt(next, 3750).phrases.length, 0);
+  assert.ok(score.activeAt(next, 3650).phrases[0].opacity < 1);
+  assert.equal(source.phrases[0].startMs, 1000);
+});
+
 test('alignment may expand an estimated phrase, while explicit ends stay hard and locked timings stay put', () => {
   let estimated = makeScore('[00:01.00]one two\n[00:04.00]');
   const estimatedPhrase = estimated.phrases[0];
