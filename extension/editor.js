@@ -550,7 +550,7 @@
     $('zoom').oninput = () => { state.pxPerSecond = Number($('zoom').value); renderTimeline(); };
     $('ruler').onclick = event => seekTo((event.clientX - $('ruler').getBoundingClientRect().left) / state.pxPerSecond * 1000);
     $('inspector-toggle').onclick = () => {
-      const restoreFocus = $('inspector').contains(document.activeElement);
+      const restoreFocus = $('inspector').contains(document.activeElement) || document.activeElement === $('inspector-resize');
       const closed = !document.body.classList.contains('inspector-closed');
       document.body.classList.toggle('inspector-closed', closed);
       $('inspector-toggle').setAttribute('aria-expanded', String(!closed));
