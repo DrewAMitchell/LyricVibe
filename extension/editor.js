@@ -231,7 +231,9 @@
     if (!state.positionDraft && document.activeElement !== $('position')) $('position').value = seconds(state.mediaMs);
     $('playhead').style.left = `${state.mediaMs / 1000 * state.pxPerSecond}px`;
     $('play').textContent = state.paused ? (live || localMode ? '▶ Play' : '▶ Play silent preview') : 'Ⅱ Pause';
+    $('play').dataset.symbol = state.paused ? '▶' : 'Ⅱ';
     if (localMode) $('play').disabled = !mediaReady;
+    if (localMode) document.body.classList.toggle('recording-ready', mediaReady);
     $('word-start-here').disabled = $('word-end-here').disabled = !state.paused || !findWord() || findWord()?.word.locked || (localMode && !mediaReady);
     if (!state.score) return;
     if (localMode) $('clock-mode').textContent = !mediaReady ? 'Choose a recording' : $('proposal-preview').checked && previewScore ? 'Recording clock · unverified model preview' : 'Recording clock · saved score';
@@ -497,7 +499,11 @@
     $('proposal-accept').onclick = () => { try { keepProposal(state.wordId); nextProposal(); } catch (cause) { error(cause); } };
     $('proposal-next').onclick = nextProposal;
     $('local-apply').onclick = () => applyQueued().catch(error);
-    $('timeline-scroll').addEventListener('scroll', drawWaveform, { passive: true });
+    $('timeline-scroll').addEventListener('scroll', () => {
+      const y = $('timeline-scroll').scrollTop;
+      document.querySelectorAll('.lane-labels>div').forEach(label => { label.style.transform = `translateY(${-y}px)`; });
+      drawWaveform();
+    }, { passive: true });
     $('waveform').onclick = event => seekTo((event.clientX - $('waveform').getBoundingClientRect().left + $('timeline-scroll').scrollLeft) / state.pxPerSecond * 1000);
     $('local-media').addEventListener('ended', () => { state.paused = true; renderClock(); });
     $('local-media').addEventListener('error', () => { if (!mediaReady) return; mediaReady = false; state.paused = true; renderClock(); notice('Recording playback failed. Choose the original recording again.', 'error'); });
@@ -543,7 +549,59 @@
     $('loop').onclick = () => { const phrase = selectedPhrase(); if (phrase) transport(state.loop ? 'clearLoop' : 'setLoop', { startMs: Math.max(0, phrase.startMs + state.score.offsetMs), endMs: Math.max(1, phrase.endMs + state.score.offsetMs) }); };
     $('zoom').oninput = () => { state.pxPerSecond = Number($('zoom').value); renderTimeline(); };
     $('ruler').onclick = event => seekTo((event.clientX - $('ruler').getBoundingClientRect().left) / state.pxPerSecond * 1000);
-    $('inspector-toggle').onclick = () => { const closed = !document.body.classList.contains('inspector-closed'); document.body.classList.toggle('inspector-closed', closed); $('inspector-toggle').setAttribute('aria-expanded', String(!closed)); try { localStorage.setItem('lv-editor-inspector', closed ? 'closed' : 'open'); } catch {} };
+    $('inspector-toggle').onclick = () => {
+      const restoreFocus = $('inspector').contains(document.activeElement);
+      const closed = !document.body.classList.contains('inspector-closed');
+      document.body.classList.toggle('inspector-closed', closed);
+      $('inspector-toggle').setAttribute('aria-expanded', String(!closed));
+      if (restoreFocus) $(closed ? 'inspector-expand' : 'inspector-collapse').focus();
+      try { localStorage.setItem('lv-editor-inspector', closed ? 'closed' : 'open'); } catch {}
+    };
+    $('inspector-collapse').onclick = () => $('inspector-toggle').click();
+    $('inspector-expand').onclick = () => $('inspector-toggle').click();
+    let preferredInspectorWidth = $('inspector').getBoundingClientRect().width;
+    const resizeInspector = width => {
+      const maximum = Math.max(180, Math.min(600, document.querySelector('.workspace').clientWidth * (innerWidth <= 600 ? .58 : .55)));
+      const value = Math.round(Math.max(180, Math.min(maximum, width)));
+      $('inspector').style.width = `${value}px`;
+      $('inspector-resize').setAttribute('aria-valuenow', String(value));
+      $('inspector-resize').setAttribute('aria-valuemax', String(Math.round(maximum)));
+      return value;
+    };
+    try { const savedWidth = Number(localStorage.getItem('lv-editor-inspector-width')); if (savedWidth >= 180 && savedWidth <= 600) preferredInspectorWidth = savedWidth; } catch {}
+    resizeInspector(preferredInspectorWidth);
+    const saveInspectorWidth = () => {
+      preferredInspectorWidth = Math.round($('inspector').getBoundingClientRect().width);
+      try { localStorage.setItem('lv-editor-inspector-width', String(preferredInspectorWidth)); } catch {}
+    };
+    $('inspector-resize').onpointerdown = event => {
+      if (event.button !== 0) return;
+      event.preventDefault(); const startX = event.clientX, startWidth = $('inspector').getBoundingClientRect().width;
+      const handle = $('inspector-resize'); handle.focus(); handle.setPointerCapture(event.pointerId);
+      handle.onpointermove = move => resizeInspector(startWidth + startX - move.clientX);
+      const finish = () => { handle.onpointermove = null; handle.onpointerup = handle.onpointercancel = null; saveInspectorWidth(); };
+      handle.onpointerup = handle.onpointercancel = finish;
+    };
+    $('inspector-resize').onkeydown = event => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault(); const width = $('inspector').getBoundingClientRect().width;
+      resizeInspector(event.key === 'Home' ? 180 : event.key === 'End' ? 600 : width + (event.key === 'ArrowLeft' ? 1 : -1) * (event.shiftKey ? 50 : 10));
+      saveInspectorWidth();
+    };
+    $('recording-toggle').onclick = () => {
+      const open = !document.body.classList.contains('recording-setup-open');
+      document.body.classList.toggle('recording-setup-open', open);
+      $('recording-toggle').setAttribute('aria-expanded', String(open));
+    };
+    const compactCommands = matchMedia('(max-width:1050px)');
+    const updateCommandLayout = () => {
+      $('workspace-tools').open = $('transport-tools').open = !compactCommands.matches;
+      hideTooltip();
+    };
+    updateCommandLayout(); compactCommands.addEventListener('change', updateCommandLayout);
+    for (const id of ['workspace-tools', 'transport-tools']) $(id).addEventListener('click', event => {
+      if (compactCommands.matches && event.target.closest('button')) $(id).open = false;
+    });
     try { const setting = localStorage.getItem('lv-editor-inspector'); if (setting === 'closed' || (!setting && innerWidth < 800)) { document.body.classList.add('inspector-closed'); $('inspector-toggle').setAttribute('aria-expanded', 'false'); } } catch {}
     const analysisType = suffix => `LV_${$('analysis-provider').value === 'native' ? 'NATIVE_' : ''}ANALYSIS_${suffix}`;
     $('analysis-start').onclick = () => analysisAction(analysisType('START')); $('analysis-stop').onclick = () => analysisAction(analysisType('STOP')); $('analysis-refresh').onclick = () => analysisAction(analysisType('STATUS'));
@@ -586,9 +644,10 @@
       const editing = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName);
       if (event.key === 'Escape' && state.positionDraft && event.target === $('position')) { state.positionDraft = false; $('position').value = seconds(state.mediaMs); return; }
       if (event.key === 'Escape' && state.draft) { draft(false); populateInspector(); notice('Draft discarded. Saved word restored.'); return; }
+      if (event.key === 'Escape') { $('workspace-tools').open = $('transport-tools').open = !compactCommands.matches; }
       if (editing || $('files-dialog').open || $('review-dialog').open) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); $('undo').click(); }
-      else if (event.code === 'Space') { event.preventDefault(); $('play').click(); }
+      else if (event.code === 'Space' && !event.target.closest('button,summary,a')) { event.preventDefault(); $('play').click(); }
       else if (event.key.toLowerCase() === 'i') $('inspector-toggle').click();
     });
     document.addEventListener('pointerdown', beginDrag);
@@ -596,7 +655,8 @@
     document.addEventListener('focusin', event => { const target = event.target.closest('[data-tip]'); if (target) showTooltip(target); else hideTooltip(); });
     document.addEventListener('pointerout', event => { if (!event.relatedTarget?.closest?.('[data-tip]')) hideTooltip(); });
     document.addEventListener('pointerdown', hideTooltip);
-    window.addEventListener('resize', () => { hideTooltip(); drawWaveform(); });
+    window.addEventListener('resize', () => { resizeInspector(preferredInspectorWidth); hideTooltip(); drawWaveform(); });
+    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(drawWaveform).observe($('timeline-scroll'));
     window.addEventListener('beforeunload', event => { if (state.draft || state.busy || localDirty) { event.preventDefault(); event.returnValue = ''; } });
     window.addEventListener('pagehide', () => { if (localMode) detachMedia(); });
   }
@@ -686,6 +746,7 @@
     if (!core) { notice('SCORE_CORE_MISSING · The shared score engine could not load. Open the packaged extension with score-core.js present.', 'error'); return; }
     if (localMode) {
       document.body.classList.add('local-review'); $('local-setup').hidden = false; $('proposal-controls').hidden = false;
+      $('recording-toggle').hidden = false;
       $('waveform').hidden = false; $('proposal-track').hidden = false; document.querySelectorAll('.local-lane-label').forEach(node => { node.hidden = false; });
       $('connection').textContent = 'LOCAL REVIEW'; $('clock-mode').textContent = 'Choose a recording';
       $('song-title').textContent = 'Review native timing against your recording'; $('song-source').textContent = 'Local playback · no audio upload';
