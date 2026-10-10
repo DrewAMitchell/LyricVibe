@@ -24,9 +24,14 @@ class ReviewDocument:
     """Same revisioned actions for UI and agent replay, including lossless undo."""
     def __init__(self, package_path, session_path):
         self.package_path, self.session_path = Path(package_path), Path(session_path)
-        self.state = load_review(self.package_path, self.session_path)
-        self.package = json.loads(self.package_path.read_text(encoding='utf-8'))
-        self.session = json.loads(self.session_path.read_text(encoding='utf-8'))
+        def read_once(path):
+            with path.open('rb') as source: data = source.read(5 * 1024 * 1024 + 1)
+            if len(data) > 5 * 1024 * 1024:
+                raise GuideGroupingError('INPUT_TOO_LARGE', 'Review input exceeds 5 MiB.')
+            return data, json.loads(data.decode('utf-8'))
+        package_bytes, self.package = read_once(self.package_path)
+        session_bytes, self.session = read_once(self.session_path)
+        self.state = load_review(self.package, self.session)
         self.frames = self.session.get('features', {}).get('frames', [])
         if not isinstance(self.frames, list) or len(self.frames) > 1200:
             raise GuideGroupingError('INVALID_FEATURES', 'Saved spectrum exceeds the review bound.')
@@ -40,8 +45,8 @@ class ReviewDocument:
                 raise GuideGroupingError('INVALID_FEATURES', 'Saved spectrum has invalid numeric frames.')
             previous = frame['timeMs']
         self.binding = {
-            'packageSha256': hashlib.sha256(self.package_path.read_bytes()).hexdigest(),
-            'sessionSha256': hashlib.sha256(self.session_path.read_bytes()).hexdigest(),
+            'packageSha256': hashlib.sha256(package_bytes).hexdigest(),
+            'sessionSha256': hashlib.sha256(session_bytes).hexdigest(),
             'source': deepcopy(self.state['source']),
         }
         self.actions, self.history = [], []
@@ -66,6 +71,8 @@ class ReviewDocument:
                 or len(draft['actions']) > 5000):
             raise GuideGroupingError('DRAFT_MISMATCH', 'Draft does not match this exact take and package.')
         candidate = ReviewDocument(self.package_path, self.session_path)
+        if candidate.binding != self.binding:
+            raise GuideGroupingError('INPUT_CHANGED', 'Original take or package changed; reopen the matching inputs.')
         for action in draft['actions']:
             candidate.act(action['operation'], action['expectedRevision'])
         self.state, self.actions, self.history = candidate.state, candidate.actions, candidate.history
@@ -373,7 +380,8 @@ class GuideReview:
                 from .guide_viewer import load_bound_package
                 import sounddevice as sd
                 if self.play_stop.is_set(): return
-                load_bound_package(self.doc.package_path, self.media)
+                verified = load_bound_package(self.doc.package_path, self.media)
+                if verified != self.doc.package: raise ValueError('Original package changed.')
                 pcm = decode_audition(self.media, start, self.play_stop)
                 if self.play_stop.is_set(): return
                 self.messages.put('Playing original recording for up to 3 seconds; your guide audio was not saved.')

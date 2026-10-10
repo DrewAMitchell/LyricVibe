@@ -98,7 +98,7 @@ class GuideReviewTests(unittest.TestCase):
         with self.assertRaises(GuideGroupingError) as failure: self.doc.score_preview()
         self.assertEqual(failure.exception.code, 'OFFSET_REVIEW_REQUIRED')
         session = json.loads(self.session_path.read_text())
-        session['features'] = {'frames': [{'timeMs': 10, 'spectrum': [float('nan')] * 32}]}
+        session['features'] = {'frames': [{'timeMs': 10, 'spectrum': [2.0] * 32}]}
         self.session_path.write_text(json.dumps(session))
         with self.assertRaises(GuideGroupingError) as failure: ReviewDocument(self.package_path, self.session_path)
         self.assertEqual(failure.exception.code, 'INVALID_FEATURES')
@@ -118,6 +118,15 @@ class GuideReviewTests(unittest.TestCase):
         with patch('native.guide_review.shutil.which', return_value='fixture-ffmpeg'), patch('native.guide_review.subprocess.Popen', return_value=child):
             self.assertEqual(decode_audition('fixture.mp4', 0, stop), b'')
         self.assertTrue(child.killed and child.reaped)
+
+    def test_replay_rejects_input_changed_after_open_without_losing_draft(self):
+        self.act('ignore', tapOrdinal=1)
+        original = copy.deepcopy(self.doc.state)
+        draft = self.doc.draft()
+        self.session_path.write_text(self.session_path.read_text() + '\n')
+        with self.assertRaises(GuideGroupingError) as failure: self.doc.replay(draft)
+        self.assertEqual(failure.exception.code, 'INPUT_CHANGED')
+        self.assertEqual(self.doc.state, original)
 
 
 if __name__ == '__main__': unittest.main()
