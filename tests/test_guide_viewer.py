@@ -151,6 +151,22 @@ class GuideViewerLifecycleTests(unittest.TestCase):
         self.assertEqual(self.viewer.output.start_calls, 1)
         self.assertIn('Microphone off.', self.viewer.status_text.get())
 
+    def test_note_changes_group_under_one_syllable_entrance(self):
+        self.viewer.use_microphone.set(False)
+        self.viewer.use_taps.set(True)
+        self.viewer.start()
+        self.viewer.started_at = 100.0
+        with patch('native.guide_viewer.time.monotonic', return_value=100.5):
+            self.viewer.tap()
+        for stamp in (100.8, 101.1):
+            with patch('native.guide_viewer.time.monotonic', return_value=stamp):
+                self.viewer.tap(kind='manual-note-change')
+        self.assertEqual(len(self.viewer.taps), 3)
+        self.assertEqual([tap['withinTapOrdinal'] for tap in self.viewer.taps], [None, 1, 1])
+        self.assertEqual(sum(tap['kind'] == 'manual-syllable-onset' for tap in self.viewer.taps), 1)
+        self.assertTrue(all(tap['unitId'] is None for tap in self.viewer.taps))
+        self.assertIn('1 entrances · 2 note changes', self.viewer.result_text.get())
+
     def test_stop_cleans_worker_input_and_output_after_close_failure_then_retries(self):
         worker = FakeWorker()
         output = FakeOutput()

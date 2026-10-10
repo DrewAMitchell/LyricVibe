@@ -181,10 +181,11 @@ class GuideViewer:
         self.use_taps = tk.BooleanVar(value=False)
         self.microphone_check = ttk.Checkbutton(modes, text='Microphone', variable=self.use_microphone)
         self.microphone_check.pack(side='left')
-        self.tap_check = ttk.Checkbutton(modes, text='Syllable taps (Space)', variable=self.use_taps)
+        self.tap_check = ttk.Checkbutton(modes, text='Timing taps', variable=self.use_taps)
         self.tap_check.pack(side='left', padx=8)
-        self.tap_button = ttk.Button(modes, text='Tap', command=self.tap)
+        self.tap_button = ttk.Button(modes, text='Entrance', command=self.tap)
         self.tap_button.pack(side='right')
+        ttk.Button(modes, text='Note change', command=lambda: self.tap(kind='manual-note-change')).pack(side='right', padx=4)
         settings = ttk.Frame(pane)
         settings.pack(fill='x', pady=10)
         ttk.Label(settings, text='Guide delay (ms)').pack(side='left')
@@ -193,7 +194,7 @@ class GuideViewer:
         ttk.Label(settings, text='Uncalibrated input/output clocks').pack(side='left')
         self.canvas = tk.Canvas(pane, height=200, bg='#080c11', highlightthickness=0)
         self.canvas.pack(fill='both', expand=True)
-        self.legend = ttk.Label(pane, text='Gold: acoustic onsets · Blue: word matches · Green: manual taps', wraplength=800)
+        self.legend = ttk.Label(pane, text='Space: syllable entrance · Shift+Space: note change within a held syllable', wraplength=800)
         self.legend.pack(anchor='w', pady=(8, 3))
         self.status_text = tk.StringVar(value=error or 'Idle. Microphone opens only when you press Start.')
         self.status_label = ttk.Label(pane, textvariable=self.status_text, wraplength=800)
@@ -299,7 +300,7 @@ class GuideViewer:
             self.microphone_check.configure(state='disabled')
             self.tap_check.configure(state='disabled')
             self.prepare_button.configure(state='disabled')
-            self.status_text.set(f'{self.mode}. ' + ('Microphone active. ' if self.use_microphone.get() else 'Microphone off. ') + ('Tap Space at each syllable change.' if self.use_taps.get() else 'Sing in rhythm.'))
+            self.status_text.set(f'{self.mode}. ' + ('Microphone active. ' if self.use_microphone.get() else 'Microphone off. ') + ('Space: syllable entrance. Shift+Space: note change.' if self.use_taps.get() else 'Sing in rhythm.'))
             self.canvas.focus_set()
         except Exception as exc:
             self.stop()
@@ -354,23 +355,28 @@ class GuideViewer:
         if self.buffer.active and self.use_taps.get():
             if not self.space_down:
                 self.space_down = True
-                self.tap()
+                self.tap(kind='manual-note-change' if getattr(event, 'state', 0) & 1 else 'manual-syllable-onset')
             return 'break'
         return None
 
     def space_release(self, event):
         self.space_down = False
 
-    def tap(self):
+    def tap(self, *, kind='manual-syllable-onset'):
+        if kind not in ('manual-syllable-onset', 'manual-note-change'):
+            return
         if not self.buffer.active or not self.use_taps.get() or len(self.taps) >= 512:
             return
         guide_ms = round((time.monotonic() - self.started_at) * 1000)
         if guide_ms < 0 or guide_ms > CLIP_MS or (self.taps and guide_ms - self.taps[-1]['guideTimeMs'] < 50):
             return
+        parent = next((tap['ordinal'] for tap in reversed(self.taps)
+                       if tap['kind'] == 'manual-syllable-onset'), None) if kind == 'manual-note-change' else None
         self.taps.append({'ordinal': len(self.taps) + 1, 'guideTimeMs': guide_ms,
                           'approximateSourceMs': max(0, self.clip_start + guide_ms - self.buffer.delay_ms),
-                          'kind': 'manual-syllable-change', 'unitId': None, 'calibrated': False})
-        self.result_text.set(f'{len(self.taps)} manual syllable-change markers. Unassigned to lyric units; no score edits.')
+                          'kind': kind, 'withinTapOrdinal': parent, 'unitId': None, 'calibrated': False})
+        entrances = sum(tap['kind'] == 'manual-syllable-onset' for tap in self.taps)
+        self.result_text.set(f'{entrances} entrances · {len(self.taps) - entrances} note changes. Unassigned to lyrics; no score edits.')
 
     def tick(self):
         if self.closed:
@@ -463,8 +469,10 @@ class GuideViewer:
         for tap in self.taps:
             if start <= tap['guideTimeMs'] <= end:
                 px = x(tap['guideTimeMs'])
-                self.canvas.create_line(px, 0, px, height, fill='#8ce7b0', width=2)
-                self.canvas.create_text(px + 4, height - 42, text=str(tap['ordinal']), fill='#b6ffd0', anchor='nw')
+                note = tap['kind'] == 'manual-note-change'
+                color = '#d5a2fa' if note else '#8ce7b0'
+                self.canvas.create_line(px, height // 2 if note else 0, px, height, fill=color, width=2)
+                self.canvas.create_text(px + 4, height - 42, text=('~' if note else '') + str(tap['ordinal']), fill=color, anchor='nw')
         self.canvas.create_text(8, 8, text=f'{start / 1000:.2f}–{end / 1000:.2f} s guide', anchor='nw', fill='white')
 
     def export(self):
