@@ -459,7 +459,9 @@
     state.reviewRevision = state.score.revision;
     $('local-media-file').disabled = false; $('local-export').disabled = false;
     $('local-media-status').textContent = `Choose ${validated.audio.name} · ${state.review.length} model proposals · no timing changed`;
-    $('analysis-status').textContent = `${state.review.length} native proposals · supplied-lyrics CTC · review required`;
+    const phonetic = validated.receipt.adapter === 'montreal-forced-aligner-legacy';
+    $('analysis-status').textContent = `${state.review.length} native proposals · ${phonetic ? 'MFA phonetic' : 'supplied-lyrics alignment'} · review required`;
+    document.querySelector('.proposals-label').textContent = phonetic ? 'MFA' : 'Proposed';
     const first = state.review[0];
     if (first) { select(first.wordId, false); $('timeline-scroll').scrollLeft = Math.max(0, (first.startMs / 1000 - 2) * state.pxPerSecond); }
     drawWaveform();
