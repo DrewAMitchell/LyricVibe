@@ -150,7 +150,7 @@
       const timing = el('form', 'syllable-timing'); const fields = el('div', 'two-fields');
       const startLabel = el('label', '', 'Start · s'); const start = el('input'); start.type = 'number'; start.step = '0.001'; start.min = String(word.startMs / 1000); start.max = String(word.endMs / 1000); start.required = true; start.value = (segment.startMs / 1000).toFixed(3); start.setAttribute('aria-label', `${segment.text} start in source seconds`); startLabel.append(start);
       const endLabel = el('label', '', 'End · s'); const end = el('input'); end.type = 'number'; end.step = '0.001'; end.min = String(word.startMs / 1000); end.max = String(word.endMs / 1000); end.required = true; end.value = (segment.endMs / 1000).toFixed(3); end.setAttribute('aria-label', `${segment.text} end in source seconds`); endLabel.append(end); fields.append(startLabel, endLabel);
-      const apply = el('button', 'wide', 'Apply segment timing'); apply.type = 'submit'; apply.dataset.tip = 'Save precise manual syllable timing within its parent word and lock it against alignment.'; timing.append(fields, apply); timing.onsubmit = event => { event.preventDefault(); operation({ type: 'setSyllableTiming', syllableId: segment.id, startMs: Math.round(Number(start.value) * 1000), endMs: Math.round(Number(end.value) * 1000) }, 'Syllable timing updated and locked').then(() => document.querySelector(`[data-syllable-id="${CSS.escape(segment.id)}"] .syllable-timing button`)?.focus({ preventScroll: true })); };
+      const apply = el('button', 'wide', 'Save'); apply.type = 'submit'; apply.setAttribute('aria-label', `Save ${segment.text} syllable timing`); apply.dataset.tip = 'Save precise manual syllable timing within its parent word and lock it against alignment.'; timing.append(fields, apply); timing.onsubmit = event => { event.preventDefault(); operation({ type: 'setSyllableTiming', syllableId: segment.id, startMs: Math.round(Number(start.value) * 1000), endMs: Math.round(Number(end.value) * 1000) }, 'Syllable timing updated and locked').then(() => document.querySelector(`[data-syllable-id="${CSS.escape(segment.id)}"] .syllable-timing button`)?.focus({ preventScroll: true })); };
       const effects = el('form', 'syllable-effects'); const effectLabel = el('label', 'small', 'Effect'); const effect = el('select'); effect.setAttribute('aria-label', `${segment.text} syllable effect`);
       ['none', 'shake', 'tilt', 'pulse'].forEach(type => { const option = el('option', '', type[0].toUpperCase() + type.slice(1)); option.value = type; effect.append(option); }); effect.value = segment.effects[0]?.type || 'none'; effectLabel.append(effect);
       const strengthLabel = el('label', 'small', 'Strength'); const strength = el('input'); strength.type = 'number'; strength.min = '0'; strength.max = '1'; strength.step = '0.05'; strength.required = true; strength.value = segment.effects[0]?.strength ?? 0.3; strength.setAttribute('aria-label', `${segment.text} effect strength`); strengthLabel.append(strength);
@@ -158,7 +158,8 @@
       const revealLabel = el('label', 'syllable-reveal-label', 'Reveal'); const reveal = el('select', 'syllable-reveal'); reveal.setAttribute('aria-label', `${segment.text} syllable reveal`);
       [['instant', 'Instant'], ['linear', 'Sweep · linear'], ['ease-out', 'Sweep · ease out'], ['ease-in-out', 'Sweep · ease in/out']].forEach(([value, text]) => { const option = el('option', '', text); option.value = value; reveal.append(option); }); reveal.value = segment.reveal?.easing || 'instant';
       reveal.onchange = () => operation({ type: 'setSyllableReveal', syllableId: segment.id, reveal: reveal.value === 'instant' ? null : { type: 'sweep', easing: reveal.value } }, 'Syllable reveal updated').then(() => document.querySelector(`[data-syllable-id="${CSS.escape(segment.id)}"] .syllable-reveal`)?.focus({ preventScroll: true })); revealLabel.append(reveal);
-      row.append(heading, timing, effects, revealLabel); return row;
+      const appearance = el('details', 'syllable-appearance'); appearance.append(el('summary', '', 'Appearance'), effects, revealLabel);
+      row.append(heading, timing, appearance); return row;
     }));
   }
   function renderTimeline() {
@@ -211,7 +212,7 @@
   function renderClock() {
     if (!state.positionDraft && document.activeElement !== $('position')) $('position').value = seconds(state.mediaMs);
     $('playhead').style.left = `${state.mediaMs / 1000 * state.pxPerSecond}px`;
-    $('play').textContent = state.paused ? '▶ Play' : 'Ⅱ Pause';
+    $('play').textContent = state.paused ? (live ? '▶ Play' : '▶ Play silent preview') : 'Ⅱ Pause';
     if (!state.score) return;
     const active = core.activeAt(state.score, state.mediaMs).phrases;
     $('lyric-preview').replaceChildren(...active.map(phrase => {
@@ -399,17 +400,33 @@
   }
   function hideTooltip() { $('tooltip').hidden = true; tooltipTarget?.removeAttribute('aria-describedby'); tooltipTarget = null; }
   async function demoScore() {
-    const text = 'Follow the light|Stay beside me|Through the silence|We come alive|Come alive';
+    const text = 'my own|together|stay with me';
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
     const contentHash = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
     const rows = [
-      ['lead', 3000, 6500, ['Follow', 'the', 'light'], 'estimated', true],
-      ['lead', 8000, 11700, ['Stay', 'beside', 'me'], 'manual', false],
-      ['lead', 15000, 19000, ['Through', 'the', 'silence'], 'estimated', true],
-      ['lead', 22000, 25700, ['We', 'come', 'alive'], 'aligned', false],
-      ['backing', 23600, 27500, ['Come', 'alive'], 'estimated', true]
+      ['lead', 3000, 6500, ['my', 'own'], 'estimated', false],
+      ['lead', 8000, 11600, ['together'], 'estimated', false],
+      ['backing', 8500, 12200, ['stay', 'with', 'me'], 'estimated', true]
     ];
-    return { version: 'lyricvibe.score.v1', revision: 0, offsetMs: 0, source: { platform: 'youtube', videoId: 'DEMO_ONLY01', title: 'Synthetic timing study', artist: 'Development fixture', durationMs: 36000 }, lyrics: { provider: 'synthetic-fixture', entryId: null, contentHash }, lanes: [{ id: 'lead', role: 'lead', label: 'Lead' }, { id: 'backing', role: 'backing', label: 'Backing' }], phrases: rows.map(([laneId, startMs, endMs, words, provenance, endEstimated], i) => ({ id: `p${i}`, laneId, startMs, endMs, endEstimated, fadeOutMs: 180, words: words.map((text, j) => ({ id: `w${i}-${j}`, text, startMs: Math.round(startMs + j * (endMs - startMs) / words.length), endMs: Math.round(startMs + (j + 1) * (endMs - startMs) / words.length - 100), provenance, locked: provenance === 'manual', effects: [] })) })) };
+    const score = { version: 'lyricvibe.score.v1', revision: 0, offsetMs: 0, source: { platform: 'youtube', videoId: 'DEMO_ONLY01', title: 'Silent timing demo', artist: '', durationMs: 16000 }, lyrics: { provider: 'synthetic-fixture', entryId: null, contentHash }, lanes: [{ id: 'lead', role: 'lead', label: 'Lead' }, { id: 'backing', role: 'backing', label: 'Backing' }], phrases: rows.map(([laneId, startMs, endMs, words, provenance, endEstimated], i) => ({ id: `p${i}`, laneId, startMs, endMs, endEstimated, fadeOutMs: 180, words: words.map((text, j) => ({ id: `w${i}-${j}`, text, startMs: Math.round(startMs + j * (endMs - startMs) / words.length), endMs: Math.round(startMs + (j + 1) * (endMs - startMs) / words.length - 100), provenance, locked: false, effects: [] })) })) };
+    const own = score.phrases[0].words[1]; own.reveal = { type: 'sweep', easing: 'ease-out' };
+    const together = score.phrases[1].words[0];
+    together.syllables = [{ id: 'demo-to', text: 'to', startMs: 8000, endMs: 8900 }, { id: 'demo-ge', text: 'ge', startMs: 8900, endMs: 9700 }, { id: 'demo-ther', text: 'ther', startMs: 9700, endMs: 11500 }].map(segment => ({ ...segment, provenance: 'estimated', locked: false, effects: [], reveal: { type: 'sweep', easing: 'linear' } }));
+    core.validateScore(score); return score;
+  }
+  async function demoPreset(kind) {
+    if (state.draft) { notice('Apply the current draft or press Escape before changing demo scenes.'); return; }
+    state.paused = true; state.loop = null;
+    const word = state.score.phrases.flatMap(phrase => phrase.words).find(word => word.text === (kind === 'word' ? 'own' : 'together'));
+    if (!word) return;
+    select(word.id, false);
+    $('syllable-editor').open = kind !== 'word'; $('appearance-editor').open = kind === 'word';
+    document.body.classList.remove('inspector-closed'); $('inspector-toggle').setAttribute('aria-expanded', 'true');
+    await seekTo(kind === 'word' ? word.startMs + (word.endMs - word.startMs) * .35 + state.score.offsetMs : 9300 + state.score.offsetMs);
+    $('timeline-scroll').scrollLeft = Math.max(0, (word.startMs / 1000 - 1) * state.pxPerSecond);
+    $('inspector').scrollTop = 0;
+    $('demo-word').setAttribute('aria-pressed', String(kind === 'word')); $('demo-syllables').setAttribute('aria-pressed', String(kind !== 'word'));
+    notice(kind === 'word' ? '“own” reveals left to right with ease out. Play or seek to inspect the exposure.' : '“together” has three timed segments: to · ge · ther. Backing vocals run independently below.');
   }
   function demoFrame(now) {
     if (!live && state.score && !state.paused) {
@@ -436,9 +453,13 @@
       try { const result = await send('LV_SCORE_GET'); setScore(result.score); setReview(result.review || []); analysisStatus(result.analysis); notice('Select a word to adjust timing. Changes save to this exact video and lyric revision.'); }
       catch (cause) { $('connection').textContent = 'Source unavailable'; $('connection').classList.remove('live'); error(cause); }
     } else {
+      document.body.classList.add('demo'); $('demo-presets').hidden = false;
       $('connection').textContent = 'SYNTHETIC DEMO'; $('clock-mode').textContent = 'Synthetic clock · no audio';
       setScore(await demoScore()); analysisStatus({ state: 'unavailable', message: 'Demo has no source audio or model evidence' });
-      notice('SYNTHETIC DEMO · Invented lyrics and timings for editor testing. Changes are in memory only; export to keep them.');
+      $('demo-word').onclick = () => demoPreset('word'); $('demo-syllables').onclick = () => demoPreset('syllables');
+      $('play').dataset.tip = 'Advance this silent synthetic preview. No audio plays. Shortcut: Space';
+      await demoPreset('syllables');
+      if (matchMedia('(max-width:800px)').matches) { document.body.classList.add('inspector-closed'); $('inspector-toggle').setAttribute('aria-expanded', 'false'); }
       requestAnimationFrame(demoFrame);
     }
   }
