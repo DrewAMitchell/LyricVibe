@@ -510,6 +510,7 @@ def main():
     parser.add_argument('--media', type=Path, required=True)
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--self-test', action='store_true')
+    parser.add_argument('--foreground', action='store_true', help='Show this trial window in front on launch.')
     args = parser.parse_args()
     package = load_bound_package(args.package, args.media)
     if args.check:
@@ -518,6 +519,14 @@ def main():
     import tkinter as tk
     root = tk.Tk()
     viewer = GuideViewer(root, package, args.media, enumerate_devices=not args.self_test)
+    if args.foreground:
+        root.title('LyricVibe · Guide vocals · Current trial')
+        def foreground():
+            root.lift()
+            root.attributes('-topmost', True)
+            root.focus_force()
+            root.after(300, lambda: root.attributes('-topmost', False))
+        root.after(100, foreground)
     if args.self_test:
         viewer.features.push_pcm16(np.zeros(3200, dtype='<i2').tobytes(), 0)
         for width, height in [(920, 650), (600, 550)]:
