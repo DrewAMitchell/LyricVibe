@@ -10,6 +10,9 @@
     seekTarget(mediaMs, durationMs) {
       return Math.round(Math.max(0, Math.min(durationMs > 0 ? durationMs : Infinity, mediaMs)));
     },
+    sourcePlayback(message, sender, extensionId, tabId, mediaKey) {
+      return message?.type === 'LV_SCORE_PLAYBACK' && sender?.id === extensionId && sender.tab?.id === tabId && message.mediaKey === mediaKey && Number.isFinite(message.mediaMs) && message.mediaMs >= 0 && typeof message.paused === 'boolean';
+    },
     reviewProtection(word) {
       if (!word) return 'Unavailable word';
       if (word.locked) return 'Locked';
@@ -229,7 +232,9 @@
     $('playhead').style.left = `${state.mediaMs / 1000 * state.pxPerSecond}px`;
     $('play').textContent = state.paused ? (live || localMode ? '▶ Play' : '▶ Play silent preview') : 'Ⅱ Pause';
     if (localMode) $('play').disabled = !mediaReady;
+    $('word-start-here').disabled = $('word-end-here').disabled = !state.paused || !findWord() || findWord()?.word.locked || (localMode && !mediaReady);
     if (!state.score) return;
+    if (localMode) $('clock-mode').textContent = !mediaReady ? 'Choose a recording' : $('proposal-preview').checked && previewScore ? 'Recording clock · unverified model preview' : 'Recording clock · saved score';
     const active = core.activeAt(localMode && $('proposal-preview').checked && previewScore ? previewScore : state.score, state.mediaMs).phrases;
     $('lyric-preview').replaceChildren(...active.map(phrase => {
       const role = state.score.lanes.find(l => l.id === phrase.laneId)?.role;
@@ -287,16 +292,29 @@
     const progress = Number(analysis?.progress?.progress);
     $('analysis-status').textContent = `${status}${Number.isFinite(progress) ? ` ${Math.round(progress)}%` : ''}${details ? ` · ${details}` : ''}`;
     $('analysis-status').dataset.tip = JSON.stringify(analysis || { status: 'unavailable' }, null, 2).slice(0, 1800);
-    const active = ['running', 'starting', 'capturing', 'analyzing', 'loading-model', 'paused', 'waiting-clock'].includes(status);
-    $('analysis-start').disabled = !live || active; $('analysis-stop').disabled = !live || !active;
+    if (status === 'error' && analysis?.error) error(analysis.error);
+    const active = ['running', 'starting', 'connecting-native', 'capturing', 'analyzing', 'loading-model', 'paused', 'waiting-clock'].includes(status);
+    $('analysis-start').disabled = !live || active; $('analysis-stop').disabled = !live || !active; $('analysis-provider').disabled = !live || active;
   }
   async function analysisAction(type) {
     if (!live) return;
-    try { const result = await send(type); analysisStatus(result.analysis || result.status || result); notice(type === 'LV_ANALYSIS_START' ? 'Learning request acknowledged. Analysis status reports the actual provider and capability.' : type === 'LV_ANALYSIS_STOP' ? 'Learning stop acknowledged.' : 'Analysis status refreshed.'); }
-    catch (cause) { error(cause); }
+    try {
+      const result = await send(type, { expectedRevision: state.score.revision, lyricsHash: state.score.lyrics.contentHash });
+      const analysis = result.analysis || result.status || result;
+      analysisStatus(analysis);
+      if (analysis.state === 'error') {
+        const cause = analysis.error || { code: 'ANALYSIS_FAILED', message: 'Analysis could not start. Inspect its status before retrying.' };
+        error(cause);
+        return { ok: false, error: { code: cause.code || 'ANALYSIS_FAILED', message: cause.message }, analysis };
+      }
+      notice(type.endsWith('_START') ? 'Analysis requested. Timings remain unverified suggestions until reviewed.' : type.endsWith('_STOP') ? 'Analysis stopped.' : 'Analysis status refreshed.');
+      return result;
+    }
+    catch (cause) { error(cause); return { ok: false, error: { code: cause.code || 'ANALYSIS_FAILED', message: cause.message } }; }
   }
-  function setReview(review) {
+  function setReview(review, diagnostics = null) {
     state.review = review;
+    state.alignmentDiagnostics = diagnostics;
     reviewQueue = localMode && review.length ? globalThis.LvReviewQueue.create(state.score, review) : null;
     previewScore = null;
     if (localMode && review.length) {
@@ -322,8 +340,8 @@
     $('proposal-times').textContent = `${seconds(proposal.startMs)}–${seconds(proposal.endMs)} s · ${proposal.startMs - word.startMs >= 0 ? '+' : ''}${proposal.startMs - word.startMs} ms at start`;
     const protection = proposalProtection(proposal);
     const flags = globalThis.LvReviewQueue.diagnosticsForProposal(state.score, proposal).flags;
-    const hints = { SHORT_WORD: 'Very short word', LONG_WORD: 'Long held word', LARGE_SHIFT: 'Large timing shift', SAME_LANE_OVERLAP: 'Overlaps saved words' };
-    $('proposal-protection').textContent = protection || (flags.length ? `${flags.map(flag => hints[flag]).join(' · ')}. Review cues, not confidence.` : 'Model suggestion · audition before accepting');
+    const hints = { SHORT_WORD: 'Very short interval', LONG_WORD: 'Long interval: check sustain and silence', LARGE_SHIFT: 'Large timing shift', SAME_LANE_OVERLAP: 'Overlaps saved words' };
+    $('proposal-protection').textContent = protection || (flags.length ? `${flags.map(flag => hints[flag]).join(' · ')}. Unverified model timing.` : 'Supplied lyric word · unverified model timing · audition before accepting');
     $('proposal-accept').textContent = reviewQueue?.selectedWordIds.includes(state.wordId) ? 'Kept · next' : 'Keep & next';
     $('proposal-accept').disabled = Boolean(protection) || state.busy;
     $('proposal-audition').disabled = !hasAudio();
@@ -486,6 +504,12 @@
     $('text-form').onsubmit = event => { event.preventDefault(); operation({ type: 'setWordText', wordId: state.wordId, text: $('word-text').value }, 'Word text updated'); };
     $('word-text').addEventListener('input', () => { const word = findWord()?.word; $('word-text-syllable-warning').hidden = !word?.syllables?.length || $('word-text').value === word.text; });
     $('timing-form').onsubmit = event => { event.preventDefault(); operation({ type: 'setWordTiming', wordId: state.wordId, startMs: Math.round(Number($('word-start').value) * 1000), endMs: Math.round(Number($('word-end').value) * 1000) }, 'Word timing updated and locked'); };
+    for (const edge of ['start', 'end']) $('word-' + edge + '-here').onclick = () => {
+      if (!state.paused || !findWord() || findWord().word.locked || (localMode && !mediaReady)) return;
+      const sourceMs = hasAudio() ? $('local-media').currentTime * 1000 : state.mediaMs;
+      $('word-' + edge).value = seconds(Math.max(0, Math.round(sourceMs) - state.score.offsetMs)); draft(true);
+      notice(`Playhead copied to ${edge}. Apply timing saves this manual boundary and locks the word.`);
+    };
     $('word-lock').onchange = () => operation({ type: 'setWordLock', wordId: state.wordId, locked: $('word-lock').checked }, 'Word protection updated');
     $('effect-form').onsubmit = event => { event.preventDefault(); operation({ type: 'setWordEffect', wordId: state.wordId, effect: $('word-effect').value === 'none' ? null : { type: $('word-effect').value, strength: Number($('effect-strength').value) } }, 'Word effect updated'); };
     $('reveal-form').onsubmit = event => { event.preventDefault(); operation({ type: 'setWordReveal', wordId: state.wordId, reveal: $('word-reveal').value === 'instant' ? null : { type: 'sweep', easing: $('word-reveal').value } }, 'Word reveal updated'); };
@@ -515,7 +539,9 @@
     $('ruler').onclick = event => seekTo((event.clientX - $('ruler').getBoundingClientRect().left) / state.pxPerSecond * 1000);
     $('inspector-toggle').onclick = () => { const closed = !document.body.classList.contains('inspector-closed'); document.body.classList.toggle('inspector-closed', closed); $('inspector-toggle').setAttribute('aria-expanded', String(!closed)); try { localStorage.setItem('lv-editor-inspector', closed ? 'closed' : 'open'); } catch {} };
     try { const setting = localStorage.getItem('lv-editor-inspector'); if (setting === 'closed' || (!setting && innerWidth < 800)) { document.body.classList.add('inspector-closed'); $('inspector-toggle').setAttribute('aria-expanded', 'false'); } } catch {}
-    $('analysis-start').onclick = () => analysisAction('LV_ANALYSIS_START'); $('analysis-stop').onclick = () => analysisAction('LV_ANALYSIS_STOP'); $('analysis-refresh').onclick = () => analysisAction('LV_ANALYSIS_STATUS');
+    const analysisType = suffix => `LV_${$('analysis-provider').value === 'native' ? 'NATIVE_' : ''}ANALYSIS_${suffix}`;
+    $('analysis-start').onclick = () => analysisAction(analysisType('START')); $('analysis-stop').onclick = () => analysisAction(analysisType('STOP')); $('analysis-refresh').onclick = () => analysisAction(analysisType('STATUS'));
+    $('analysis-provider').onchange = () => { $('analysis-provider-note').textContent = $('analysis-provider').value === 'native' ? 'Native companion required. Temporary local audio; model timings require review.' : 'Browser model download: ~145 MiB GPU / ~39 MiB CPU. Timings require review.'; analysisAction(analysisType('STATUS')); };
     $('files-open').onclick = () => $('files-dialog').showModal();
     $('settings').onclick = () => { if (runtime?.openOptionsPage) runtime.openOptionsPage(); else notice('Settings are available in the installed extension. This is a synthetic file preview.'); };
     $('review-open').onclick = () => { renderReview(); $('review-dialog').showModal(); };
@@ -678,15 +704,19 @@
       } else notice('Open the native review package, then choose its recording. Timing and media identity are checked before review.');
     } else if (live) {
       $('connection').textContent = 'Connecting source'; $('clock-mode').textContent = 'Waiting for source clock';
-      runtime.onMessage.addListener(message => {
+      runtime.onMessage.addListener((message, sender) => {
         const expectedKey = state.score ? core.mediaKey(state.score.source) : requestedMediaKey;
         if (message.type === 'LV_ANALYSIS_OFFSCREEN_STATE' && message.analysis?.tabId === tabId && (!expectedKey || message.analysis.mediaKey === expectedKey)) analysisStatus(message.analysis);
+        if (message.type === 'LV_SCORE_PLAYBACK') {
+          if (!helpers.sourcePlayback(message, sender, runtime.id, tabId, expectedKey)) return;
+          state.mediaMs = message.mediaMs; state.paused = message.paused; state.clockSeen = true;
+          $('clock-mode').textContent = 'Live source clock'; renderClock(); return;
+        }
         if (message.tabId !== tabId || (expectedKey && message.mediaKey !== expectedKey)) return;
-        if (message.type === 'LV_SCORE_UPDATED') { try { setScore(message.score, state.draft || Boolean(state.drag)); if (message.review) setReview(message.review); if (state.draft) notice('Source score updated. Your draft retains its original revision. Review it, then press Escape to reload saved fields before retrying.'); } catch (cause) { error(cause); } }
-        if (message.type === 'LV_SCORE_PLAYBACK') { state.mediaMs = message.mediaMs; state.paused = message.paused; state.clockSeen = true; $('clock-mode').textContent = 'Live source clock'; renderClock(); }
+        if (message.type === 'LV_SCORE_UPDATED') { try { setScore(message.score, state.draft || Boolean(state.drag)); if (message.review) setReview(message.review, message.diagnostics); if (state.draft) notice('Source score updated. Your draft retains its original revision. Review it, then press Escape to reload saved fields before retrying.'); } catch (cause) { error(cause); } }
         if (message.type === 'LV_ANALYSIS_OFFSCREEN_STATE' && message.analysis) analysisStatus(message.analysis);
       });
-      try { const result = await send('LV_SCORE_GET'); setScore(result.score); setReview(result.review || []); analysisStatus(result.analysis); notice('Select a word to adjust timing. Changes save to this exact video and lyric revision.'); }
+      try { const result = await send('LV_SCORE_GET'); setScore(result.score); setReview(result.review || [], result.diagnostics); analysisStatus(result.analysis); notice('Select a word to adjust timing. Changes save to this exact video and lyric revision.'); }
       catch (cause) { $('connection').textContent = 'Source unavailable'; $('connection').classList.remove('live'); error(cause); }
     } else {
       document.body.classList.add('demo'); $('demo-presets').hidden = false;
@@ -702,7 +732,7 @@
   // UI automation and agents use the same score operations and transport as the controls.
   globalThis.LvEditor = Object.freeze({
     getState() {
-      return structuredClone({ version: 'lyricvibe.editor-state.v1', mode: live ? 'youtube' : localMode ? 'local-recording' : 'synthetic', score: state.score, review: state.review, queuedWordIds: reviewQueue?.selectedWordIds || [], playback: { mediaMs: hasAudio() ? $('local-media').currentTime * 1000 : state.mediaMs, paused: hasAudio() ? $('local-media').paused : state.paused, loop: state.loop }, draft: state.draft, busy: state.busy, audioReady: hasAudio() });
+      return structuredClone({ version: 'lyricvibe.editor-state.v1', mode: live ? 'youtube' : localMode ? 'local-recording' : 'synthetic', score: state.score, review: state.review, queuedWordIds: reviewQueue?.selectedWordIds || [], playback: { mediaMs: hasAudio() ? $('local-media').currentTime * 1000 : state.mediaMs, paused: hasAudio() ? $('local-media').paused : state.paused, loop: state.loop }, analysis: state.analysis, alignmentDiagnostics: state.alignmentDiagnostics || null, draft: state.draft, busy: state.busy, audioReady: hasAudio() });
     },
     async dispatch(request) {
       try {
@@ -712,6 +742,7 @@
         if (request.expectedRevision !== state.score.revision) throw Object.assign(new Error('Editor revision changed; read state before retrying.'), { code: 'REVISION_CONFLICT' });
         if (request.type === 'LV_SCORE_OPERATION') return await mutate(request.type, { operation: request.operation }, 'Agent score operation applied');
         if (request.type === 'LV_SCORE_UNDO') return await mutate(request.type, {}, 'Previous score restored');
+        if (['LV_NATIVE_ANALYSIS_START', 'LV_NATIVE_ANALYSIS_STOP', 'LV_NATIVE_ANALYSIS_STATUS'].includes(request.type) && live) { $('analysis-provider').value = 'native'; return await analysisAction(request.type); }
         if (request.type === 'LV_SCORE_REVIEW_SELECT' && localMode) { keepProposal(request.wordId, request.checked); return { ok: true, queuedWordIds: [...reviewQueue.selectedWordIds] }; }
         if (request.type === 'LV_SCORE_REVIEW_APPLY' && localMode) {
           if (request.wordIds !== undefined) { if (!Array.isArray(request.wordIds)) throw new Error('wordIds must be an array.'); let nextQueue = reviewQueue; for (const wordId of request.wordIds) nextQueue = globalThis.LvReviewQueue.toggle(nextQueue, wordId, true, state.score); reviewQueue = nextQueue; updateReviewQueue(); renderSelectedProposal(); renderProposalTrack(); }

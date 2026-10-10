@@ -114,19 +114,36 @@
       await chrome.tabs.create({ url: chrome.runtime.getURL(`editor.html?sourceTab=${tabId}&mediaKey=${encodeURIComponent(key)}`) });
       return { ok: true };
     }
+    if (message.type === 'LV_NATIVE_ANALYSIS_STOP' || message.type === 'LV_NATIVE_ANALYSIS_STATUS') {
+      const requested = message.mediaKey;
+      if (!editorSourceBound(sender, tabId, requested)) throw fail('EDITOR_REQUIRED', 'Native analysis controls require the editor opened for this source tab.');
+      return message.type === 'LV_NATIVE_ANALYSIS_STOP'
+        ? { ok: true, analysis: await root.LvAnalysis.stopAnalysis({ tabId, mediaKey: requested }) }
+        : { ok: true, analysis: await root.LvAnalysis.analysisStatus() };
+    }
     const { key } = await liveIdentity(tabId, message.mediaKey);
     if (['LV_SCORE_SEEK', 'LV_SCORE_TRANSPORT'].includes(message.type)) return chrome.tabs.sendMessage(tabId, { ...message, mediaKey: key });
+    if (message.type.startsWith('LV_NATIVE_ANALYSIS_')) {
+      if (!editorSourceBound(sender, tabId, key)) throw fail('EDITOR_REQUIRED', 'Native analysis controls require the editor opened for this source tab.');
+      if (message.type === 'LV_NATIVE_ANALYSIS_START') {
+        const record = await read(key);
+        if (!record) throw fail('SCORE_MISSING', 'No timed score is loaded.');
+        if (message.expectedRevision !== record.score.revision) throw fail('REVISION_CONFLICT', 'Reload the score before starting native analysis.');
+        if (message.lyricsHash !== record.score.lyrics.contentHash) throw fail('LYRIC_REVISION_MISMATCH', 'The selected lyrics changed before analysis could start.');
+        return { ok: true, analysis: await root.LvAnalysis.startAnalysis({ tabId, score: record.score, engine: 'native', expectedRevision: message.expectedRevision, lyricsHash: message.lyricsHash }) };
+      }
+    }
     if (message.type === 'LV_ANALYSIS_START') {
       const record = await read(key);
       if (!record) throw fail('SCORE_MISSING', 'No timed score is loaded.');
       return { ok: true, analysis: await root.LvAnalysis.startAnalysis({ tabId, score: record.score }) };
     }
-    if (message.type === 'LV_ANALYSIS_STOP') return { ok: true, analysis: await root.LvAnalysis.stopAnalysis() };
+    if (message.type === 'LV_ANALYSIS_STOP') return { ok: true, analysis: await root.LvAnalysis.stopAnalysis({ tabId, mediaKey: key }) };
     if (message.type === 'LV_ANALYSIS_STATUS') return { ok: true, analysis: await root.LvAnalysis.analysisStatus() };
     return serial(key, async () => {
       const record = await read(key);
       if (!record) throw fail('SCORE_MISSING', 'No timed score is loaded yet. Wait for lyrics or import a score.');
-      if (message.type === 'LV_SCORE_GET') return { ok: true, score: record.score, review: record.review || [], tabId, mediaKey: key, analysis: await root.LvAnalysis?.analysisStatus() };
+      if (message.type === 'LV_SCORE_GET') return { ok: true, score: record.score, review: record.review || [], diagnostics: record.diagnostics || null, tabId, mediaKey: key, analysis: await root.LvAnalysis?.analysisStatus() };
       if (message.expectedRevision !== record.score.revision) throw fail('REVISION_CONFLICT', 'The score changed. Reload it before editing.');
       let next;
       if (message.type === 'LV_NATIVE_ALIGNMENT_IMPORT') {
@@ -176,7 +193,7 @@
       // A changed score revision invalidates pending timing evidence, including
       // its offset mapping. New analysis windows can extend review only while
       // no score edit, acceptance, import or undo intervenes.
-      if (message.type !== 'LV_ALIGNMENT_PROPOSALS') record.review = [];
+      if (message.type !== 'LV_ALIGNMENT_PROPOSALS') { record.review = []; record.diagnostics = null; }
       if (message.type !== 'LV_SCORE_UNDO') record.history = [...(record.history || []), record.score].slice(-30);
       record.score = next;
       await liveIdentity(tabId, key);
@@ -185,7 +202,7 @@
       return { ok: true, score: next, review: record.review || [], tabId, mediaKey: key };
     });
   }
-  const types = new Set(['LV_ANALYSIS_CACHE_CLEAR_REQUEST', 'LV_EDITOR_OPEN', 'LV_SCORE_GET', 'LV_SCORE_OPERATION', 'LV_SCORE_IMPORT', 'LV_NATIVE_ALIGNMENT_IMPORT', 'LV_SCORE_UNDO', 'LV_SCORE_SEEK', 'LV_SCORE_TRANSPORT', 'LV_SCORE_REVIEW_APPLY', 'LV_ANALYSIS_START', 'LV_ANALYSIS_STOP', 'LV_ANALYSIS_STATUS', 'LV_ALIGNMENT_PROPOSALS']);
+  const types = new Set(['LV_ANALYSIS_CACHE_CLEAR_REQUEST', 'LV_EDITOR_OPEN', 'LV_SCORE_GET', 'LV_SCORE_OPERATION', 'LV_SCORE_IMPORT', 'LV_NATIVE_ALIGNMENT_IMPORT', 'LV_SCORE_UNDO', 'LV_SCORE_SEEK', 'LV_SCORE_TRANSPORT', 'LV_SCORE_REVIEW_APPLY', 'LV_ANALYSIS_START', 'LV_ANALYSIS_STOP', 'LV_ANALYSIS_STATUS', 'LV_NATIVE_ANALYSIS_START', 'LV_NATIVE_ANALYSIS_STOP', 'LV_NATIVE_ANALYSIS_STATUS', 'LV_ALIGNMENT_PROPOSALS']);
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!types.has(message?.type)) return;
     // Only this extension can submit score mutations; content scripts supply their own tab ID.

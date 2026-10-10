@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import hashlib
+import math
 import time
 from pathlib import Path
 from typing import Any
@@ -112,20 +113,11 @@ def _is_exact_zero_energy(waveform: Any, torch: Any) -> bool:
     return torch.count_nonzero(waveform).item() == 0
 
 
-def _frame_words(
-    aligned_tokens: Any,
-    token_ids: Any,
-    word_spans: list[tuple[int, int, str]],
-    blank_id: int,
-    duration_ms: float,
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Convert native CTC frame assignments into word intervals."""
+def _target_frame_groups(aligned_tokens: Any, token_ids: Any, blank_id: int = 0) -> tuple[list[list[int]] | None, str | None]:
+    """Map CTC frames to target-token ordinals, rejecting malformed paths."""
     frame_tokens = aligned_tokens[0].tolist()
     targets = token_ids[0].tolist()
     target_frames: list[list[int]] = []
-    warnings: list[str] = []
-    frame_ms = duration_ms / max(1, len(frame_tokens))
-
     target_index = -1
     active_token: int | None = None
     for frame, token in enumerate(frame_tokens):
@@ -135,13 +127,30 @@ def _frame_words(
         if active_token != token:
             target_index += 1
             if target_index >= len(targets) or targets[target_index] != token:
-                return [], ["The CTC output did not reproduce the supplied token path; no word intervals emitted."]
+                return None, "The CTC output did not reproduce the supplied token path; no word intervals emitted."
             target_frames.append([])
             active_token = token
         target_frames[target_index].append(frame)
 
     if len(target_frames) != len(targets):
-        return [], ["The CTC output omitted supplied transcript tokens; no complete word intervals emitted."]
+        return None, "The CTC output omitted supplied transcript tokens; no complete word intervals emitted."
+    return target_frames, None
+
+
+def _frame_words(
+    aligned_tokens: Any,
+    token_ids: Any,
+    word_spans: list[tuple[int, int, str]],
+    blank_id: int,
+    duration_ms: float,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Convert native CTC frame assignments into word intervals."""
+    frame_tokens = aligned_tokens[0].tolist()
+    target_frames, error = _target_frame_groups(aligned_tokens, token_ids, blank_id)
+    if error or target_frames is None:
+        return [], [error or "The CTC output path is unavailable; no word intervals emitted."]
+    warnings: list[str] = []
+    frame_ms = duration_ms / max(1, len(frame_tokens))
 
     output: list[dict[str, Any]] = []
     for word_index, (start_token, end_token, word) in enumerate(word_spans):
@@ -165,6 +174,93 @@ def _frame_words(
             "wordIndex": word_index,
         })
     return output, warnings
+
+
+def _collapse_greedy_path(token_ids: list[int], labels: tuple[str, ...], blank_id: int = 0) -> list[str]:
+    """Greedy CTC decode to normalized word tokens; callers must not expose it."""
+    emitted: list[str] = []
+    active_token: int | None = None
+    for token in token_ids:
+        if token == blank_id:
+            active_token = blank_id
+            continue
+        if token != active_token and 0 <= token < len(labels):
+            emitted.append(labels[token])
+        active_token = token
+
+    words: list[str] = []
+    current: list[str] = []
+    for label in emitted:
+        if label == "|":
+            if current:
+                words.append("".join(current).upper().replace("’", "'"))
+                current = []
+        else:
+            current.append(label)
+    if current:
+        words.append("".join(current).upper().replace("’", "'"))
+    return words
+
+
+def _word_edit_distance(supplied: list[str], greedy: list[str]) -> int:
+    """Compute bounded-row Levenshtein distance without retaining transcript text."""
+    previous = list(range(len(greedy) + 1))
+    for row_index, supplied_word in enumerate(supplied, start=1):
+        current = [row_index]
+        for column_index, greedy_word in enumerate(greedy, start=1):
+            current.append(min(
+                current[column_index - 1] + 1,
+                previous[column_index] + 1,
+                previous[column_index - 1] + (supplied_word != greedy_word),
+            ))
+        previous = current
+    return previous[-1]
+
+
+def _greedy_consistency(
+    greedy_token_ids: list[int],
+    aligned_token_ids: list[int],
+    aligned_frame_scores: list[float],
+    target_frames: list[list[int]] | None,
+    word_spans: list[tuple[int, int, str]],
+    labels: tuple[str, ...],
+    blank_id: int = 0,
+) -> dict[str, Any]:
+    """Return numeric same-model consistency only; never return greedy words."""
+    supplied_words = [word.replace("’", "'").upper() for _start, _end, word in word_spans]
+    greedy_words = _collapse_greedy_path(greedy_token_ids, labels, blank_id)
+    longest = max(len(supplied_words), len(greedy_words))
+    matched_fraction = 0.0 if longest == 0 else 1 - _word_edit_distance(supplied_words, greedy_words) / longest
+    per_word: list[dict[str, Any]] = []
+    # `target_frames` contains one list per character, while each word span
+    # addresses a contiguous subrange of that list.
+    if target_frames is not None:
+        for word_index, (token_start, token_end, _word) in enumerate(word_spans):
+            frames = [frame for token_group in target_frames[token_start:token_end] for frame in token_group]
+            if not frames or any(frame >= len(greedy_token_ids) or frame >= len(aligned_frame_scores) for frame in frames):
+                per_word.append({
+                    "wordIndex": word_index,
+                    "forcedFrameCount": 0,
+                    "greedyTop1FrameFraction": None,
+                    "meanForcedLogProb": None,
+                })
+                continue
+            forced_frames = sum(greedy_token_ids[frame] == aligned_token_ids[frame] for frame in frames)
+            scores = [float(aligned_frame_scores[frame]) for frame in frames]
+            per_word.append({
+                "wordIndex": word_index,
+                "forcedFrameCount": len(frames),
+                "greedyTop1FrameFraction": forced_frames / len(frames),
+                "meanForcedLogProb": sum(scores) / len(scores) if all(math.isfinite(score) and score <= 0 for score in scores) else None,
+            })
+    return {
+        "method": "same-model-greedy-vs-forced-ctc",
+        "calibrated": False,
+        "wordCount": len(supplied_words),
+        "greedyWordCount": len(greedy_words),
+        "matchedWordFraction": max(0.0, min(1.0, matched_fraction)),
+        "words": per_word,
+    }
 
 
 def _align_waveform(waveform: Any, sample_rate: int, text: str, language: str, started: float,
@@ -236,7 +332,7 @@ def _align_waveform(waveform: Any, sample_rate: int, text: str, language: str, s
     input_lengths = torch.tensor([frame_count], dtype=torch.int32)
     target_lengths = torch.tensor([len(targets)], dtype=torch.int32)
     align_started = time.perf_counter()
-    aligned_tokens, _scores = torchaudio.functional.forced_align(
+    aligned_tokens, aligned_scores = torchaudio.functional.forced_align(
         log_probs,
         token_ids,
         input_lengths=input_lengths,
@@ -245,6 +341,16 @@ def _align_waveform(waveform: Any, sample_rate: int, text: str, language: str, s
     )
     forced_alignment_ms = round((time.perf_counter() - align_started) * 1000)
     words, warnings = _frame_words(aligned_tokens, token_ids, word_spans, 0, duration_ms)
+    target_frames, _path_error = _target_frame_groups(aligned_tokens, token_ids, 0)
+    greedy_consistency = _greedy_consistency(
+        log_probs[0].argmax(dim=-1).tolist(),
+        aligned_tokens[0].tolist(),
+        aligned_scores[0].tolist(),
+        target_frames,
+        word_spans,
+        labels,
+        0,
+    )
     warnings.extend(
         [
             "The model aligned the supplied lyrics directly; no ASR transcript or interpolated word times were used.",
@@ -258,6 +364,7 @@ def _align_waveform(waveform: Any, sample_rate: int, text: str, language: str, s
         "adapter": "torchaudio-ctc-forced-alignment",
         "model": MODEL_NAME,
         "modelRevision": _checkpoint_revision(torch),
+        "diagnostics": {"greedyConsistency": greedy_consistency},
         "warnings": warnings,
         "elapsedMs": round((time.perf_counter() - started) * 1000),
         "modelLoadMs": model_load_ms,

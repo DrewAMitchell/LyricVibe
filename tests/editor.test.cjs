@@ -1,4 +1,16 @@
 const test = require('node:test');
+test('source playback uses Chrome sender tab identity and rejects unrelated or malformed clocks', () => {
+  const editor = require('../extension/editor.js');
+  const message = { type: 'LV_SCORE_PLAYBACK', mediaKey: 'youtube:source', mediaMs: 12345, paused: false };
+  const sender = { id: 'extension', tab: { id: 7 } };
+  const accepts = (m, s) => editor.sourcePlayback(m, s, 'extension', 7, 'youtube:source');
+  assert.equal(accepts(message, sender), true);
+  assert.equal(accepts({ ...message, tabId: 7 }, { ...sender, tab: { id: 8 } }), false);
+  assert.equal(accepts(message, { id: 'extension' }), false);
+  assert.equal(accepts(message, { ...sender, id: 'other' }), false);
+  assert.equal(accepts({ ...message, mediaKey: 'youtube:other' }, sender), false);
+  assert.equal(accepts({ ...message, mediaMs: NaN }, sender), false);
+});
 const assert = require('node:assert/strict');
 const core = require('../extension/score-core.js');
 const { sourceTab, boundary, assertImport, seekTarget, syllablesForSplit, reviewProtection } = require('../extension/editor.js');

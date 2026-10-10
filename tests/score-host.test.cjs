@@ -19,6 +19,7 @@ function makeHarness() {
   const tabs = new Map([[1, { url: `https://www.youtube.com/watch?v=${ID_A}`, duration: 10, mediaReady: true, isAd: false }], [2, { url: `https://music.youtube.com/watch?v=${ID_B}`, duration: 20, mediaReady: true, isAd: false }]]);
   const tabMessages = [];
   let listener;
+  const analysisCalls = [];
   let analysisStatus = { state: 'capturing', tabId: 1, mediaKey: `youtube:${ID_A}`, sessionId: 'session-1' };
   const chrome = {
     runtime: {
@@ -41,7 +42,7 @@ function makeHarness() {
     },
   };
   const context = vm.createContext({ chrome, crypto: webcrypto, TextEncoder, URL, AbortSignal, setTimeout, clearTimeout, console,
-    LvAnalysis: { async analysisStatus() { return analysisStatus; } },
+    LvAnalysis: { async analysisStatus() { return analysisStatus; }, async startAnalysis(args) { analysisCalls.push(args); return { state: 'capturing', engine: args.engine }; }, async stopAnalysis(scope) { analysisCalls.push({ stopScope: scope }); return { state: 'stopped' }; } },
   });
   vm.runInContext(scoreSource, context, { filename: 'score-core.js' });
   vm.runInContext(hostSource, context, { filename: 'score-host.js' });
@@ -51,7 +52,7 @@ function makeHarness() {
       message = { tabId: 1, mediaKey: `youtube:${ID_A}`, sessionId: 'session-1', ...message };
       if (sender.url === undefined && sender.tab) sender = { ...sender, url: chrome.runtime.getURL('analysis/offscreen.html') };
     }
-    if (['LV_SCORE_REVIEW_APPLY', 'LV_NATIVE_ALIGNMENT_IMPORT'].includes(message.type) && sender.url === undefined) {
+    if (['LV_SCORE_REVIEW_APPLY', 'LV_NATIVE_ALIGNMENT_IMPORT', 'LV_NATIVE_ANALYSIS_START', 'LV_NATIVE_ANALYSIS_STOP', 'LV_NATIVE_ANALYSIS_STATUS'].includes(message.type) && sender.url === undefined) {
       const tabId = message.tabId ?? sender.tab?.id ?? 1;
       const mediaKey = message.mediaKey || `youtube:${ID_A}`;
       message = { tabId, ...message };
@@ -72,7 +73,7 @@ function makeHarness() {
       ...overrides,
     });
   }
-  return { context, values, tabs, tabMessages, dispatch, ensure, setAnalysisStatus(value) { analysisStatus = value; } };
+  return { context, values, tabs, tabMessages, analysisCalls, dispatch, ensure, setAnalysisStatus(value) { analysisStatus = value; } };
 }
 
 function recordFor(h, id = ID_A) { return h.values[`lvScore:youtube:${id}`]; }
@@ -82,6 +83,29 @@ function nativeReceipt(score) {
   const word = firstWord(score);
   return { version: 'lyricvibe.alignment.v1', mediaKey: scoreCore.mediaKey(score.source), lyricsHash: score.lyrics.contentHash, expectedRevision: score.revision, adapter: 'test-forced-alignment', model: 'explicit-fixture', automaticAdmissionEnabled: false, proposals: [{ wordId: word.id, startMs: word.startMs + 100, endMs: word.endMs + 100, accepted: false, evidenceId: 'native-fixture' }] };
 }
+
+test('native analysis controls require the source-bound editor and exact score revision/lyrics', async () => {
+  const h = makeHarness(), score = await h.ensure();
+  const base = { type: 'LV_NATIVE_ANALYSIS_START', tabId: 1, mediaKey: `youtube:${ID_A}`, expectedRevision: score.revision, lyricsHash: score.lyrics.contentHash };
+  const wrongEditor = await h.dispatch(base, { id: 'test-extension', url: 'chrome-extension://test/editor.html?sourceTab=2' });
+  assert.equal(wrongEditor.error.code, 'EDITOR_REQUIRED');
+  const stale = await h.dispatch({ ...base, expectedRevision: score.revision + 1 });
+  assert.equal(stale.error.code, 'REVISION_CONFLICT');
+  const wrongLyrics = await h.dispatch({ ...base, lyricsHash: 'f'.repeat(64) });
+  assert.equal(wrongLyrics.error.code, 'LYRIC_REVISION_MISMATCH');
+  assert.equal(h.analysisCalls.length, 0);
+  const started = await h.dispatch(base);
+  assert.equal(started.analysis.engine, 'native');
+  assert.equal(h.analysisCalls[0].tabId, 1);
+  assert.equal(h.analysisCalls[0].score.revision, score.revision);
+  assert.equal(h.analysisCalls[0].engine, 'native');
+  assert.equal(h.analysisCalls[0].expectedRevision, score.revision);
+  assert.equal(h.analysisCalls[0].lyricsHash, score.lyrics.contentHash);
+  h.tabs.get(1).isAd = true;
+  const stopped = await h.dispatch({ ...base, type: 'LV_NATIVE_ANALYSIS_STOP' });
+  assert.equal(stopped.analysis.state, 'stopped');
+  assert.deepEqual({ ...h.analysisCalls.at(-1).stopScope }, { tabId: 1, mediaKey: `youtube:${ID_A}` });
+});
 
 test('native receipt import queues source-bound review without changing timing; accept and undo work', async () => {
   const h = makeHarness(), score = await h.ensure(), receipt = nativeReceipt(score);
@@ -302,6 +326,12 @@ test('review keeps pending proposals from earlier windows and replaces each word
   assert.equal(latestFirst.evidenceId, 'window-2-a');
   assert.equal(latestFirst.confidence, 0.8);
   assert.equal(secondWindow.score.revision, 2);
+  const inspected = await h.dispatch({ type: 'LV_SCORE_GET', mediaKey: `youtube:${ID_A}` });
+  assert.equal(inspected.diagnostics.window, 2);
+  const edited = await h.dispatch({ type: 'LV_SCORE_OPERATION', mediaKey: `youtube:${ID_A}`, expectedRevision: 2, operation: { type: 'setOffset', offsetMs: 50 } });
+  assert.equal(edited.ok, true);
+  const refreshed = await h.dispatch({ type: 'LV_SCORE_GET', mediaKey: `youtube:${ID_A}` });
+  assert.equal(refreshed.diagnostics, null);
 });
 
 test('host review application preserves a syllable-locked word despite a late proposal', async () => {
