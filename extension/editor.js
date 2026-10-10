@@ -532,6 +532,12 @@
     $('position').oninput = () => { state.positionDraft = true; };
     $('position').onkeydown = event => { if (event.key === 'Enter') seekTo(Number($('position').value) * 1000); };
     $('seek-back').onclick = () => seekTo(state.mediaMs - 5000); $('seek-forward').onclick = () => seekTo(state.mediaMs + 5000);
+    for (const [id, direction] of [['seek-fine-back', -1], ['seek-fine-forward', 1]]) $(id).onclick = async event => {
+      if (!(await transport('pause')).ok) return;
+      if (!(await transport('clearLoop')).ok) return;
+      const currentMs = hasAudio() ? $('local-media').currentTime * 1000 : state.mediaMs;
+      await seekTo(currentMs + direction * (event.altKey ? 10 : event.shiftKey ? 250 : 50));
+    };
     $('play').onclick = () => transport(state.paused ? 'play' : 'pause');
     $('phrase-seek').onclick = () => { const phrase = selectedPhrase(); if (phrase) seekTo(phrase.startMs + state.score.offsetMs); };
     $('loop').onclick = () => { const phrase = selectedPhrase(); if (phrase) transport(state.loop ? 'clearLoop' : 'setLoop', { startMs: Math.max(0, phrase.startMs + state.score.offsetMs), endMs: Math.max(1, phrase.endMs + state.score.offsetMs) }); };
