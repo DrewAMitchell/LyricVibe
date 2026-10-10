@@ -1,0 +1,14 @@
+{
+  "name": "lyricvibe-development",
+  "version": "0.5.0",
+  "private": true,
+  "description": "Video-specific editable lyrics and browser audio alignment development fork",
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/build.cjs",
+    "build:open": "node scripts/build.cjs --open",
+    "test": "node --test tests/*.test.cjs"
+  },
+  "dependencies": { "@huggingface/transformers": "4.3.1" },
+  "devDependencies": { "esbuild": "0.25.12", "playwright": "1.56.1" }
+}

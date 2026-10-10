@@ -1,3 +1,4 @@
+importScripts('score-core.js', 'analysis/controller.js', 'score-host.js');
 const LRCLIB_BASE = 'https://lrclib.net/api';
 const sessions = new Map();
 
@@ -363,6 +364,8 @@ async function startSession(tab) {
 }
 
 function getHintsTrackKey(h) {
+  const mediaKey = LvScore.mediaKey(h);
+  if (mediaKey) return mediaKey;
   const track = (h.track || h.pageTitle || '').trim();
   const artist = (h.artist || '').trim();
   return track ? `${track}|||${artist}` : '';
@@ -461,6 +464,23 @@ async function _detectAndSyncLocked(tabId, prevKey) {
 /** Inner detection logic — separated so the outer function can race it against a timeout. */
 async function _detectAndSyncInner(tabId, prevKey, detectStart) {
   const hints = await getPageHints(tabId);
+  if (hints.isAd || hints.mediaReady === false) {
+    sendToTab(tabId, { type: 'LV_STATUS', text: hints.isAd ? 'Waiting for the advertisement to finish…' : 'Waiting for the main video clock…' });
+    clearTimeout(autoRetryTimers.get(tabId));
+    autoRetryTimers.set(tabId, setTimeout(() => detectAndSync(tabId), 1500));
+    return;
+  }
+  if (LvScore.mediaKey(hints)) {
+    try {
+      const score = await LvScoreHost.packageFor(tabId, hints);
+      if (score) {
+        sendToTab(tabId, { type: 'LV_SCORE_UPDATED', score, mediaKey: LvScore.mediaKey(score.source), tabId });
+        return;
+      }
+    } catch (error) {
+      sendToTab(tabId, { type: 'LV_STATUS_WARNING', text: `Package unavailable: ${error.message}. Trying lyric lookup.` });
+    }
+  }
   const isSpotify = (hints.host || '').includes('spotify.com');
   const isYouTubeMusic = (hints.host || '').includes('music.youtube.com');
 
@@ -476,7 +496,7 @@ async function _detectAndSyncInner(tabId, prevKey, detectStart) {
         if (cached.track && hints.currentTime != null) {
           cached.track.playOffsetMs = Math.round((hints.currentTime || 0) * 1000);
         }
-        await handleRecognitionResult(tabId, cached);
+        await handleRecognitionResult(tabId, { ...cached, hints });
         return;
       }
     }
@@ -637,7 +657,7 @@ async function _tryOfflineRescue(tabId) {
         fuzzy.track.playOffsetMs = Math.round((hints.currentTime || 0) * 1000);
       }
       sendToTab(tabId, { type: 'LV_STATUS_WARNING', text: 'Server is down — playing from offline cache' });
-      await handleRecognitionResult(tabId, fuzzy);
+      await handleRecognitionResult(tabId, { ...fuzzy, hints });
       return true;
     }
   } catch (_) {}
@@ -738,7 +758,7 @@ async function recognize(body) {
     if (cached.track && detected.playOffsetMs != null) {
       cached.track.playOffsetMs = detected.playOffsetMs;
     }
-    return cached;
+    return { ...cached, hints };
   }
 
   // Known miss (recent, API was healthy) — don't hammer the API again
@@ -1357,7 +1377,7 @@ async function injectOverlay(tabId) {
   } catch {}
 
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['score-core.js', 'youtube-media.js', 'content.js'] });
     return true;
   } catch {
     return false;
@@ -1377,6 +1397,14 @@ async function getPageHints(tabId) {
    RECOGNITION RESULT HANDLER
    ══════════════════════════════════════ */
 async function handleRecognitionResult(tabId, payload) {
+  const currentHints = await getPageHints(tabId);
+  if (currentHints.isAd || currentHints.mediaReady === false) {
+    clearTimeout(autoRetryTimers.get(tabId));
+    autoRetryTimers.set(tabId, setTimeout(() => detectAndSync(tabId), 1500));
+    return;
+  }
+  const requestedKey = LvScore.mediaKey(payload?.hints || {});
+  if (requestedKey && requestedKey !== LvScore.mediaKey(currentHints)) return;
   if (!payload || !payload.ok) {
     sendToTab(tabId, {
       type: 'LV_ERROR',
@@ -1400,6 +1428,18 @@ async function handleRecognitionResult(tabId, payload) {
   clearTimeout(autoRetryTimers.get(tabId));
   autoRetryTimers.delete(tabId);
 
+  if (LvScore.mediaKey(currentHints) && payload.lyrics.synced) {
+    try {
+      const score = await LvScoreHost.ensure(tabId, { ...payload, hints: currentHints });
+      if (score) {
+        sendToTab(tabId, { type: 'LV_SCORE_UPDATED', score, mediaKey: LvScore.mediaKey(score.source), tabId });
+        return;
+      }
+    } catch (error) {
+      sendToTab(tabId, { type: 'LV_ERROR', text: `Score could not load: ${error.message}` });
+      return;
+    }
+  }
   sendToTab(tabId, { type: 'LV_TRACK', payload });
 }
 

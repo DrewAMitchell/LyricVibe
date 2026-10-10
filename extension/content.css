@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,700;1,300&family=Syne:wght@700;800&family=Unbounded:wght@900&family=Orbitron:wght@700;900&family=Playfair+Display:wght@700;900&display=swap');
+/* Development build uses installed fonts; playback has no font CDN dependency. */
 
 /* ── THEME VARIABLES ── */
 #lvx-root {
@@ -450,6 +450,10 @@
 }
 
 /* ── Sync nudge buttons ── */
+.lvx-offset-control { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; white-space: nowrap; pointer-events: auto; color: #bbb; }
+.lvx-offset-input { box-sizing: border-box; width: 88px; min-width: 0; border: 1px solid #ffffff38; border-radius: 5px; background: #111; color: #fff; padding: 4px 6px; font: 12px ui-monospace, monospace; appearance: textfield; }
+.lvx-offset-input:focus { outline: 1px solid #21e6c1; }
+.lvx-offset-input::-webkit-inner-spin-button, .lvx-offset-input::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .lvx-sync-btn {
   border: 1px solid rgba(255,255,255,0.15);
   border-radius: 5px;
@@ -2091,3 +2095,20 @@
     animation-duration: 1ms !important;
   }
 }
+/* Score playback uses one media clock for independent vocal lanes. */
+#lvx-root .lvx-score-stage { display:flex; flex-direction:column; justify-content:center; align-items:center; gap:1.5rem; padding:8vh 8vw; }
+#lvx-root .lvx-score-phrase { max-width:100%; text-align:center; font-family:'Segoe UI Variable','Segoe UI',system-ui,sans-serif; font-size:calc(clamp(24px,5vw,80px) * var(--lvx-score-scale,1)); font-weight:750; letter-spacing:-.02em; line-height:1.25; text-wrap:balance; text-shadow:0 2px 12px #000; transition:none; }
+#lvx-root .lvx-score-backing { font-size:calc(clamp(18px,2.5vw,38px) * var(--lvx-score-scale,1)); font-weight:500; color:#c9ddf0; }
+#lvx-root .lvx-score-word { display:inline-block; white-space:pre; opacity:.72; transform:none; }
+#lvx-root .lvx-score-current { opacity:1; color:#fff; }
+#lvx-root .lvx-score-syllable { display:inline-block; color:#c9d4dc; }
+#lvx-root .lvx-score-syllable.lvx-score-current { color:#baf479; }
+#lvx-root .lvx-score-current.lvx-effect-shake { animation:lvx-score-shake .16s linear infinite; }
+#lvx-root .lvx-score-current.lvx-effect-tilt { animation:lvx-score-tilt .6s ease-in-out infinite alternate; }
+#lvx-root .lvx-score-current.lvx-effect-pulse { animation:lvx-score-pulse .5s ease-in-out infinite alternate; }
+@keyframes lvx-score-shake { 25% { transform:translateX(calc(var(--lvx-strength,1)*2px)); } 75% { transform:translateX(calc(var(--lvx-strength,1)*-2px)); } }
+@keyframes lvx-score-tilt { from { transform:rotate(calc(var(--lvx-strength,1)*-2deg)); } to { transform:rotate(calc(var(--lvx-strength,1)*2deg)); } }
+@keyframes lvx-score-pulse { to { transform:scale(calc(1 + var(--lvx-strength,1)*.025)); } }
+@media (prefers-reduced-motion:reduce) { #lvx-root .lvx-score-word, #lvx-root .lvx-score-syllable { animation:none !important; } }
+#lvx-root.lvx-ad-paused { opacity:0 !important; pointer-events:none !important; }
+#lvx-root .lvx-score-paused .lvx-score-word, #lvx-root .lvx-score-paused .lvx-score-syllable { animation-play-state:paused !important; }

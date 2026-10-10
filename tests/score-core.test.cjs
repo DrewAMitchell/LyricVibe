@@ -32,16 +32,24 @@ test('parseLrc retains empty cues and expands multiple timestamps', () => {
   assert.deepEqual(score.parseLrc('[ar:Artist]\nnot a cue'), []);
 });
 
-test('score construction uses blank cues as explicit ends and preserves parenthetical suggestions', () => {
-  const s = makeScore('[00:01.00]Hello (echo it)\n[00:03.00]\n[00:05.00]Again');
+test('score construction uses nearby blank cues as exact ends and preserves parenthetical suggestions', () => {
+  const s = makeScore('[00:01.00]Hello (echo it)\n[00:02.80]\n[00:05.00]Again');
   const lead = s.phrases.find(p => p.laneId === 'lead');
   const backing = s.phrases.find(p => p.laneId === 'backing');
-  assert.equal(lead.endMs, 3000);
+  assert.equal(lead.endMs, 2800);
   assert.equal(lead.endEstimated, false);
   assert.equal(lead.words.map(w => w.text).join(' '), 'Hello');
   assert.equal(backing.words.map(w => w.text).join(' '), 'echo it');
   assert.match(s.lanes.find(l => l.id === 'backing').label, /inferred/i);
   assert.ok(s.phrases.find(p => p.startMs === 5000).endEstimated);
+});
+
+test('estimated phrases end conservatively across long instrumental gaps', () => {
+  const s = makeScore('[00:00.00]one two three\n[00:30.00]');
+  const phrase = s.phrases[0];
+  assert.equal(phrase.endMs, 1950);
+  assert.equal(phrase.endEstimated, true);
+  assert.equal(score.activeAt(s, 10000).phrases.length, 0);
 });
 
 test('punctuation pauses are bounded and word estimates do not accumulate rounding drift', () => {
@@ -56,6 +64,26 @@ test('punctuation pauses are bounded and word estimates do not accumulate roundi
   }
   const short = makeScore('[00:00.00]a, bb! ccc dddd eeeee ffffff');
   assert.deepEqual(phrase.words.map(w => [w.startMs, w.endMs]), short.phrases[0].words.map(w => [w.startMs, w.endMs]));
+});
+
+test('comma and terminal punctuation create explicit gaps only between words', () => {
+  const comma = makeScore('[00:00.00]hello, world\n[00:02.00]').phrases[0];
+  assert.equal(comma.words[1].startMs - comma.words[0].endMs, 120);
+  const terminal = makeScore('[00:00.00]hello! world\n[00:02.00]').phrases[0];
+  assert.equal(terminal.words[1].startMs - terminal.words[0].endMs, 180);
+  const trailing = makeScore('[00:00.00]hello!\n[00:02.00]').phrases[0];
+  assert.deepEqual([trailing.words[0].startMs, trailing.words[0].endMs], [trailing.startMs, trailing.endMs]);
+});
+
+test('short phrases proportionally cap punctuation gaps at 35 percent and preserve monotonic timings', () => {
+  const phrase = makeScore('[00:00.00]a, b, c, d, e, f, g, h, i, j\n[00:00.20]').phrases[0];
+  const pauseTotal = phrase.words.slice(0, -1).reduce((sum, word, i) => sum + phrase.words[i + 1].startMs - word.endMs, 0);
+  assert.ok(pauseTotal <= (phrase.endMs - phrase.startMs) * 0.35);
+  assert.ok(pauseTotal > 0);
+  for (let i = 0; i < phrase.words.length; i++) {
+    assert.ok(phrase.words[i].startMs <= phrase.words[i].endMs);
+    if (i) assert.ok(phrase.words[i].startMs >= phrase.words[i - 1].endMs);
+  }
 });
 
 test('lanes overlap independently and activeAt uses a pure media clock plus offset', () => {
@@ -92,7 +120,7 @@ test('phrase timing moves and rescales contained words as one deliberate manual 
   s = score.applyOperation(s, { type: 'setWordTiming', wordId: lockedId, startMs: 1200, endMs: 1500 }, 0);
   const moved = score.applyOperation(s, { type: 'setPhraseTiming', phraseId: p.id, startMs: 2000, endMs: 5000 }, 1);
   const movedPhrase = moved.phrases[0];
-  assert.deepEqual([movedPhrase.words[0].startMs, movedPhrase.words[0].endMs], [2200, 2500]);
+  assert.deepEqual([movedPhrase.words[0].startMs, movedPhrase.words[0].endMs], [2308, 2769]);
   assert.equal(movedPhrase.words[0].locked, true);
   assert.ok(movedPhrase.words.slice(1).every(w => w.startMs >= 2000 && w.endMs <= 5000));
 });
@@ -103,14 +131,204 @@ test('alignment proposals validate identity and timing, honor locks, and do not 
   s = score.applyOperation(s, { type: 'setWordLock', wordId: first.id, locked: true }, 0);
   const result = score.applyAlignment(s, [
     { wordId: first.id, startMs: 1100, endMs: 1400, accepted: true, evidenceId: 'audio-a' },
-    { wordId: second.id, startMs: 2500, endMs: 2900, accepted: true, evidenceId: 'audio-a', confidence: 0.8 },
-    { wordId: second.id, startMs: 2600, endMs: 3000, accepted: true, evidenceId: 'audio-a', confidence: 0.95 },
-    { wordId: second.id, startMs: 3000, endMs: 3100, accepted: false, evidenceId: 'audio-b' },
+    { wordId: second.id, startMs: 4000, endMs: 4300, accepted: true, evidenceId: 'audio-a', confidence: 0.8 },
+    { wordId: second.id, startMs: 4100, endMs: 4400, accepted: true, evidenceId: 'audio-a', confidence: 0.95 },
+    { wordId: second.id, startMs: 4400, endMs: 4500, accepted: false, evidenceId: 'audio-b' },
   ], 1);
   assert.deepEqual([result.phrases[0].words[0].startMs, result.phrases[0].words[0].endMs], [first.startMs, first.endMs]);
-  assert.deepEqual([result.phrases[0].words[1].startMs, result.phrases[0].words[1].endMs], [2500, 2900]);
+  assert.deepEqual([result.phrases[0].words[1].startMs, result.phrases[0].words[1].endMs], [4000, 4300]);
+  assert.equal(result.phrases[0].endMs, 4300);
   assert.equal(result.phrases[0].words[1].provenance, 'aligned');
   errorCode(() => score.applyAlignment(s, [{ wordId: 'missing', startMs: 1, endMs: 2, accepted: true, evidenceId: 'e' }], 1), 'UNKNOWN_ID');
+});
+
+test('alignment may expand an estimated phrase, while explicit ends stay hard and locked timings stay put', () => {
+  let estimated = makeScore('[00:01.00]one two\n[00:04.00]');
+  const estimatedPhrase = estimated.phrases[0];
+  const lockedId = estimatedPhrase.words[0].id;
+  estimated = score.applyOperation(estimated, { type: 'setWordTiming', wordId: lockedId, startMs: 1100, endMs: 1300 }, 0);
+  const aligned = score.applyAlignment(estimated, [
+    { wordId: lockedId, startMs: 5000, endMs: 5300, accepted: true, evidenceId: 'locked' },
+    { wordId: estimatedPhrase.words[1].id, startMs: 6000, endMs: 6300, accepted: true, evidenceId: 'late-vocal' },
+  ], 1);
+  assert.deepEqual([aligned.phrases[0].words[0].startMs, aligned.phrases[0].words[0].endMs], [1100, 1300]);
+  assert.deepEqual([aligned.phrases[0].startMs, aligned.phrases[0].endMs], [1000, 6300]);
+
+  const explicit = makeScore('[00:01.00]one two\n[00:02.20]');
+  assert.equal(explicit.phrases[0].endEstimated, false);
+  errorCode(() => score.applyAlignment(explicit, [
+    { wordId: explicit.phrases[0].words[0].id, startMs: 3000, endMs: 3300, accepted: true, evidenceId: 'outside' },
+  ], 0), 'INVALID_TIME');
+  const locked = score.applyOperation(explicit, { type: 'setWordTiming', wordId: explicit.phrases[0].words[0].id, startMs: 1100, endMs: 1300 }, 0);
+  const unchanged = score.applyAlignment(locked, [
+    { wordId: explicit.phrases[0].words[0].id, startMs: 5000, endMs: 5300, accepted: true, evidenceId: 'locked-outside' },
+  ], 1);
+  assert.deepEqual([unchanged.phrases[0].words[0].startMs, unchanged.phrases[0].words[0].endMs], [1100, 1300]);
+});
+
+test('a mixed alignment batch with one invalid accepted proposal rejects atomically', () => {
+  const s = makeScore('[00:01.00]one two\n[00:04.00]');
+  const phrase = s.phrases[0];
+  const before = structuredClone(s);
+  errorCode(() => score.applyAlignment(s, [
+    { wordId: phrase.words[0].id, startMs: 4000, endMs: 4300, accepted: true, evidenceId: 'valid-first' },
+    { wordId: phrase.words[1].id, startMs: 4400, endMs: 4200, accepted: true, evidenceId: 'invalid-reversed' },
+  ], 0), 'INVALID_TIME');
+  assert.deepEqual(s, before);
+});
+
+test('syllable segmentation preserves punctuation, uses global IDs, and exposes active syllable IDs', () => {
+  const base = makeScore('[00:01.00]sing! now\n[00:04.00]');
+  const word = base.phrases[0].words[0];
+  const splitAt = word.startMs + Math.floor((word.endMs - word.startMs) / 2);
+  const split = score.applyOperation(base, { type: 'setWordSyllables', wordId: word.id, syllables: [
+    { id: 'syllable-1', text: 'sing', startMs: word.startMs, endMs: splitAt },
+    { id: 'syllable-2', text: '!', startMs: splitAt, endMs: word.endMs },
+  ] }, 0);
+  const target = split.phrases[0].words[0];
+  assert.equal(target.syllables.map(syllable => syllable.text).join(''), target.text);
+  assert.deepEqual(target.syllables.map(syllable => [syllable.provenance, syllable.locked]), [['manual', true], ['manual', true]]);
+  assert.ok(score.activeAt(split, splitAt).phrases[0].activeSyllables.includes('syllable-2'));
+  const directTiming = score.applyOperation(split, { type: 'setSyllableTiming', syllableId: 'syllable-2', startMs: splitAt + 10, endMs: word.endMs }, 1);
+  assert.equal(directTiming.phrases[0].words[0].syllables[1].locked, true);
+  assert.equal(directTiming.phrases[0].words[0].syllables[1].startMs, splitAt + 10);
+  const estimatedSplit = score.applyOperation(base, { type: 'setWordSyllables', wordId: word.id, syllables: [
+    { id: 'estimated-first', text: 'sing', startMs: word.startMs, endMs: splitAt, provenance: 'estimated', locked: false },
+    { id: 'estimated-punctuation', text: '!', startMs: splitAt, endMs: word.endMs, provenance: 'estimated', locked: false },
+  ] }, 0);
+  assert.deepEqual(estimatedSplit.phrases[0].words[0].syllables.map(item => [item.provenance, item.locked]), [['estimated', false], ['estimated', false]]);
+  errorCode(() => score.applyOperation(split, { type: 'setWordSyllables', wordId: word.id, syllables: [
+    { id: 'replacement', text: 'sing!', startMs: word.startMs, endMs: word.endMs },
+  ] }, 1), 'LOCKED');
+  let unlocked = score.applyOperation(split, { type: 'setSyllableLock', syllableId: 'syllable-1', locked: false }, 1);
+  unlocked = score.applyOperation(unlocked, { type: 'setSyllableLock', syllableId: 'syllable-2', locked: false }, 2);
+  unlocked = score.applyOperation(unlocked, { type: 'setWordLock', wordId: word.id, locked: true }, 3);
+  const replaced = score.applyOperation(unlocked, { type: 'setWordSyllables', wordId: word.id, syllables: [
+    { id: 'replacement-a', text: 'si', startMs: word.startMs, endMs: splitAt },
+    { id: 'replacement-b', text: 'ng!', startMs: splitAt, endMs: word.endMs },
+  ] }, 4);
+  assert.equal(replaced.phrases[0].words[0].locked, true);
+  assert.equal(replaced.phrases[0].words[0].syllables.map(item => item.text).join(''), 'sing!');
+  let clearable = score.applyOperation(replaced, { type: 'setSyllableLock', syllableId: 'replacement-a', locked: false }, 5);
+  clearable = score.applyOperation(clearable, { type: 'setSyllableLock', syllableId: 'replacement-b', locked: false }, 6);
+  const cleared = score.applyOperation(clearable, { type: 'setWordSyllables', wordId: word.id, syllables: [] }, 7);
+  assert.deepEqual(cleared.phrases[0].words[0].syllables, []);
+  assert.equal(score.validateScore(cleared), cleared);
+});
+
+test('syllable timing, lock, effect, word resize, and text edits preserve valid boundaries', () => {
+  const base = makeScore('[00:01.00]sing! now\n[00:04.00]');
+  const word = base.phrases[0].words[0];
+  const splitAt = word.startMs + Math.floor((word.endMs - word.startMs) / 2);
+  let s = score.applyOperation(base, { type: 'setWordSyllables', wordId: word.id, syllables: [
+    { id: 'syllable-a', text: 'sing', startMs: word.startMs, endMs: splitAt },
+    { id: 'syllable-b', text: '!', startMs: splitAt, endMs: word.endMs },
+  ] }, 0);
+  s = score.applyOperation(s, { type: 'setSyllableLock', syllableId: 'syllable-b', locked: false }, 1);
+  s = score.applyOperation(s, { type: 'setSyllableTiming', syllableId: 'syllable-b', startMs: splitAt + 10, endMs: word.endMs - 10 }, 2);
+  assert.equal(s.phrases[0].words[0].syllables[1].locked, true);
+  assert.equal(s.phrases[0].words[0].syllables[1].provenance, 'manual');
+  s = score.applyOperation(s, { type: 'setSyllableEffect', syllableId: 'syllable-b', effect: { type: 'pulse', strength: 0.5 } }, 3);
+  assert.deepEqual(s.phrases[0].words[0].syllables[1].effects, [{ type: 'pulse', strength: 0.5 }]);
+  const resized = score.applyOperation(s, { type: 'setWordTiming', wordId: word.id, startMs: word.startMs + 100, endMs: word.endMs - 100 }, 4);
+  const resizedWord = resized.phrases[0].words[0];
+  assert.ok(resizedWord.syllables.every(item => item.startMs >= resizedWord.startMs && item.endMs <= resizedWord.endMs));
+  const phraseResized = score.applyOperation(resized, { type: 'setPhraseTiming', phraseId: resized.phrases[0].id, startMs: 2000, endMs: 4000 }, 5);
+  const phraseWord = phraseResized.phrases[0].words[0];
+  assert.ok(phraseWord.syllables.every(item => item.startMs >= phraseWord.startMs && item.endMs <= phraseWord.endMs));
+  const unchangedText = score.applyOperation(phraseResized, { type: 'setWordText', wordId: word.id, text: phraseWord.text }, 6);
+  assert.equal(unchangedText.phrases[0].words[0].syllables.length, 2);
+  const changedText = score.applyOperation(unchangedText, { type: 'setWordText', wordId: word.id, text: 'vocal!' }, 7);
+  assert.equal(changedText.phrases[0].words[0].syllables, undefined);
+});
+
+test('automatic word alignment skips syllable locks and rescales estimated unlocked children', () => {
+  const base = makeScore('[00:01.00]sing!\n[00:04.00]');
+  const word = base.phrases[0].words[0];
+  const midpoint = word.startMs + Math.floor((word.endMs - word.startMs) / 2);
+  const estimated = structuredClone(base);
+  estimated.phrases[0].words[0].syllables = [
+    { id: 'estimated-1', text: 'sing', startMs: word.startMs, endMs: midpoint, provenance: 'estimated', locked: false, effects: [] },
+    { id: 'estimated-2', text: '!', startMs: midpoint, endMs: word.endMs, provenance: 'estimated', locked: false, effects: [] },
+  ];
+  score.validateScore(estimated);
+  const aligned = score.applyAlignment(estimated, [
+    { wordId: word.id, startMs: 5000, endMs: 6000, accepted: true, evidenceId: 'audio-estimated' },
+  ], 0);
+  const alignedWord = aligned.phrases[0].words[0];
+  assert.deepEqual(alignedWord.syllables.map(item => [item.startMs, item.endMs]), [[5000, 5500], [5500, 6000]]);
+  assert.ok(alignedWord.syllables.every(item => item.provenance === 'estimated' && !item.locked));
+  assert.equal(aligned.phrases[0].endMs, 6000);
+
+  const locked = score.applyOperation(base, { type: 'setWordSyllables', wordId: word.id, syllables: [
+    { id: 'locked-syllable', text: word.text, startMs: word.startMs, endMs: word.endMs },
+  ] }, 0);
+  const skipped = score.applyAlignment(locked, [
+    { wordId: word.id, startMs: 5000, endMs: 6000, accepted: true, evidenceId: 'audio-locked' },
+  ], 1);
+  assert.deepEqual([skipped.phrases[0].words[0].startMs, skipped.phrases[0].words[0].endMs], [word.startMs, word.endMs]);
+});
+
+test('syllable validation rejects duplicate IDs, non-concatenating text, and child timing outside word', () => {
+  const base = makeScore('[00:01.00]sing! now\n[00:04.00]');
+  const word = base.phrases[0].words[0];
+  const child = { id: 'bad-child', text: word.text, startMs: word.startMs, endMs: word.endMs, provenance: 'estimated', locked: false, effects: [] };
+  for (const [id, text, startMs, endMs] of [
+    [word.id, word.text, word.startMs, word.endMs],
+    ['text-child', 'different', word.startMs, word.endMs],
+    ['late-child', word.text, word.startMs, word.endMs + 1],
+  ]) {
+    const bad = structuredClone(base);
+    bad.phrases[0].words[0].syllables = [{ ...child, id, text, startMs, endMs }];
+    errorCode(() => score.validateScore(bad), 'INVALID_SCORE');
+  }
+});
+
+test('word and syllable reveal settings are revisioned independently of timing, locks, and effects', () => {
+  const base = makeScore('[00:01.00]sing!\n[00:04.00]');
+  const word = base.phrases[0].words[0];
+  let s = score.applyOperation(base, { type: 'setWordTiming', wordId: word.id, startMs: word.startMs + 10, endMs: word.endMs - 10 }, 0);
+  s = score.applyOperation(s, { type: 'setWordEffect', wordId: word.id, effect: { type: 'pulse', strength: 0.4 } }, 1);
+  const timing = [s.phrases[0].words[0].startMs, s.phrases[0].words[0].endMs];
+  s = score.applyOperation(s, { type: 'setWordReveal', wordId: word.id, reveal: { type: 'sweep', easing: 'ease-in-out' } }, 2);
+  assert.deepEqual([s.phrases[0].words[0].startMs, s.phrases[0].words[0].endMs], timing);
+  assert.equal(s.phrases[0].words[0].locked, true);
+  assert.deepEqual(s.phrases[0].words[0].effects, [{ type: 'pulse', strength: 0.4 }]);
+  s = score.applyOperation(s, { type: 'setWordReveal', wordId: word.id, reveal: null }, 3);
+  assert.equal(s.phrases[0].words[0].reveal, null);
+  assert.deepEqual(s.phrases[0].words[0].effects, [{ type: 'pulse', strength: 0.4 }]);
+
+  const child = { id: 'reveal-syllable', text: word.text, startMs: timing[0], endMs: timing[1] };
+  s = score.applyOperation(s, { type: 'setWordSyllables', wordId: word.id, syllables: [child] }, 4);
+  s = score.applyOperation(s, { type: 'setSyllableEffect', syllableId: child.id, effect: { type: 'tilt', strength: 0.25 } }, 5);
+  const childTiming = [s.phrases[0].words[0].syllables[0].startMs, s.phrases[0].words[0].syllables[0].endMs];
+  s = score.applyOperation(s, { type: 'setSyllableReveal', syllableId: child.id, reveal: { type: 'sweep', easing: 'ease-out' } }, 6);
+  const updated = s.phrases[0].words[0].syllables[0];
+  assert.deepEqual([updated.startMs, updated.endMs], childTiming);
+  assert.equal(updated.locked, true);
+  assert.deepEqual(updated.effects, [{ type: 'tilt', strength: 0.25 }]);
+  const badWordReveal = structuredClone(s); badWordReveal.phrases[0].words[0].reveal = { type: 'sweep', easing: 'bounce' };
+  errorCode(() => score.validateScore(badWordReveal), 'INVALID_SCORE');
+  const badSyllableReveal = structuredClone(s); badSyllableReveal.phrases[0].words[0].syllables[0].reveal = { type: 'fade', easing: 'linear' };
+  errorCode(() => score.validateScore(badSyllableReveal), 'INVALID_SCORE');
+  errorCode(() => score.applyOperation(s, { type: 'setSyllableReveal', syllableId: child.id, reveal: { type: 'sweep', easing: 'bounce' } }, 7), 'INVALID_REVEAL');
+  errorCode(() => score.applyOperation(s, { type: 'setWordReveal', wordId: word.id, reveal: { type: 'fade', easing: 'linear' } }, 7), 'INVALID_REVEAL');
+});
+
+test('revealProgress is deterministic across pause, seek, offset, and easing modes', () => {
+  const linear = { startMs: 100, endMs: 200, reveal: { type: 'sweep', easing: 'linear' } };
+  assert.equal(score.revealProgress(linear, 150), 0.5);
+  assert.equal(score.revealProgress(linear, 150), score.revealProgress(linear, 150)); // Paused at the same media clock.
+  assert.equal(score.revealProgress(linear, 125), 0.25); // Seeking backward recomputes from media time.
+  assert.equal(score.revealProgress(linear, 200, 50), 0.5); // Offset is applied once: 200 - 50 = 150.
+  assert.equal(score.revealProgress({ ...linear, reveal: null }, 99), 0);
+  assert.equal(score.revealProgress({ ...linear, reveal: null }, 100), 1);
+  assert.equal(score.revealProgress({ startMs: 100, endMs: 100, reveal: { type: 'sweep', easing: 'linear' } }, 99), 0);
+  assert.equal(score.revealProgress({ startMs: 100, endMs: 100, reveal: { type: 'sweep', easing: 'linear' } }, 100), 1);
+  assert.equal(score.revealProgress({ ...linear, reveal: { type: 'sweep', easing: 'ease-out' } }, 150), 0.875);
+  assert.equal(score.revealProgress({ ...linear, reveal: { type: 'sweep', easing: 'ease-in-out' } }, 125), 0.15625);
+  errorCode(() => score.revealProgress(linear, Infinity), 'INVALID_TIME');
+  errorCode(() => score.revealProgress({ ...linear, endMs: NaN }, 150), 'INVALID_TIME');
 });
 
 test('import validation rejects malformed IDs, times, lanes, effects, and hashes', () => {

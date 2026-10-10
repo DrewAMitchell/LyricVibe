@@ -49,6 +49,10 @@
      STATE
      ══════════════════════════════════════ */
   const state = {
+    score: null,
+    auditionLoop: null,
+    scoreSignature: '',
+    lastClockSent: 0,
     active: false,
     lines: [],
     currentIndex: -1,
@@ -137,6 +141,45 @@
   syncLater.title = 'Lyrics later (])';
   syncLater.addEventListener('click', () => nudgeSync(SYNC_NUDGE_MS));
 
+  const offsetControl = document.createElement('label');
+  offsetControl.className = 'lvx-offset-control';
+  offsetControl.textContent = 'OFFSET ';
+  const offsetInput = document.createElement('input');
+  offsetInput.className = 'lvx-offset-input';
+  offsetInput.type = 'number'; offsetInput.step = '1'; offsetInput.value = '0';
+  offsetInput.setAttribute('aria-label', 'Lyric offset in milliseconds');
+  offsetInput.title = 'Type exact milliseconds. Scroll: 100 ms · Shift: 1000 ms · Alt: 1 ms. Positive moves lyrics later.';
+  offsetControl.append(offsetInput, document.createTextNode(' ms'));
+  let offsetWheelTimer = 0;
+  let offsetDraftKey = '';
+  const currentOffsetKey = () => state.score ? LvScore.mediaKey(state.score.source) : state.trackKey;
+  function commitOffsetInput() {
+    clearTimeout(offsetWheelTimer); offsetWheelTimer = 0;
+    if (offsetDraftKey !== currentOffsetKey()) {
+      offsetInput.value = String(state.syncOffsetMs);
+      setHud('The video changed. Adjust the current video’s offset again.', true, true);
+      return;
+    }
+    const value = Number(offsetInput.value);
+    if (!offsetInput.value.trim() || !Number.isSafeInteger(value)) { offsetInput.reportValidity(); return; }
+    setSyncOffset(value);
+  }
+  offsetInput.addEventListener('focus', () => { offsetDraftKey = currentOffsetKey(); });
+  offsetInput.addEventListener('blur', commitOffsetInput);
+  offsetInput.addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); offsetInput.blur(); }
+    else if (event.key === 'Escape') { offsetInput.value = String(state.syncOffsetMs); offsetInput.blur(); }
+  });
+  offsetInput.addEventListener('wheel', event => {
+    event.preventDefault(); event.stopPropagation();
+    if (!event.deltaY) return;
+    if (document.activeElement !== offsetInput) offsetDraftKey = currentOffsetKey();
+    const step = event.altKey ? 1 : event.shiftKey ? 1000 : 100;
+    offsetInput.value = String((Number(offsetInput.value) || 0) + (event.deltaY < 0 ? step : -step));
+    clearTimeout(offsetWheelTimer);
+    offsetWheelTimer = setTimeout(commitOffsetInput, 180);
+  }, { passive: false });
+
   const quickSyncButton = document.createElement('button');
   quickSyncButton.className = 'lvx-quick-sync-btn';
   quickSyncButton.textContent = '⟳ SYNC';
@@ -149,7 +192,17 @@
   helpButton.title = 'Keyboard shortcuts (? or H)';
   helpButton.addEventListener('click', () => toggleShortcutsPanel());
 
-  hud.append(hudLabel, hudText, syncEarlier, syncLater, quickSyncButton, themeButton, helpButton, stopButton);
+  const editButton = document.createElement('button');
+  editButton.className = 'lvx-theme-btn';
+  editButton.textContent = 'EDIT TIMING';
+  editButton.setAttribute('aria-label', 'Open lyric timing editor');
+  editButton.addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: 'LV_EDITOR_OPEN', mediaKey: globalThis.LvScore?.mediaKey({ url: location.href }) }).then(result => {
+      if (!result?.ok) setHud(result?.error?.message || 'Editor could not open', true, true);
+    }).catch(error => setHud(error.message, true, true));
+  });
+
+  hud.append(hudLabel, hudText, offsetControl, syncEarlier, syncLater, quickSyncButton, editButton, themeButton, helpButton, stopButton);
 
   /* Next-line preview (bottom center) */
   const preview = document.createElement('div');
@@ -206,7 +259,13 @@
   shortcutsPanel.querySelector('.lvx-shortcuts-close').addEventListener('click', () => toggleShortcutsPanel(false));
 
   root.append(stage, preview, progress, hud, shortcutsPanel);
-  document.documentElement.appendChild(root);
+  function mountRoot() {
+    const surface = document.fullscreenElement;
+    if (surface && !['VIDEO', 'AUDIO'].includes(surface.tagName)) surface.appendChild(root);
+    else document.documentElement.appendChild(root);
+  }
+  mountRoot();
+  document.addEventListener('fullscreenchange', () => { if (root.isConnected) mountRoot(); });
 
   window.__lyricVibeOverlay = {
     // Health check: returns false once this script's extension context dies
@@ -251,6 +310,60 @@
   if (typeof chrome === 'undefined' || !chrome.runtime?.onMessage) return; // extension context invalidated
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || !message.type) return;
+
+    if (message.type === 'LV_ANALYSIS_CLOCK') {
+      const media = getMedia();
+      const youtube = youtubeMediaState();
+      const blocked = isAdvertisement() || youtube?.clockUsable === false;
+      sendResponse({ mediaKey: LvScore.mediaKey({ url: location.href }), currentTimeMs: Math.round((media?.currentTime || 0) * 1000), paused: blocked || (media?.paused ?? true), playbackRate: media?.playbackRate || 1, seeking: blocked || media?.seeking || false, isAd: isAdvertisement(), reason: youtube?.reason || null });
+      return;
+    }
+    if (message.type === 'LV_SCORE_UPDATED') {
+      if (message.mediaKey !== LvScore.mediaKey({ url: location.href })) return;
+      try {
+        LvScore.validateScore(message.score);
+        state.score = message.score;
+        state.scoreSignature = '';
+        state.active = true;
+        state.errorShown = false;
+        state.trackTitle = [message.score.source.artist, message.score.source.title].filter(Boolean).join(' — ');
+        state.trackDurationMs = message.score.source.durationMs;
+        state.trackKey = message.mediaKey;
+        state.syncOffsetMs = message.score.offsetMs;
+        stage.style.setProperty('--lvx-score-scale', state.fontScale);
+        preview.textContent = '';
+        show();
+        root.classList.add('lvx-active');
+        setHud(`${state.trackTitle} · video-specific score · edit timing to review estimates`);
+        startLoop();
+        sendResponse({ ok: true });
+      } catch (error) { sendResponse({ ok: false, error: { code: error.code, message: error.message } }); }
+      return;
+    }
+    if (message.type === 'LV_SCORE_SEEK' || message.type === 'LV_SCORE_TRANSPORT') {
+      const media = getMedia();
+      if (!media || isAdvertisement() || youtubeMediaState()?.clockUsable === false || message.mediaKey !== LvScore.mediaKey({ url: location.href })) {
+        sendResponse({ ok: false, error: { code: 'SOURCE_CHANGED', message: 'Source video changed or media is unavailable.' } });
+        return;
+      }
+      if (message.type === 'LV_SCORE_SEEK') media.currentTime = Math.max(0, Math.min(media.duration || Infinity, Number(message.mediaMs) / 1000));
+      else if (message.action === 'pause') media.pause();
+      else if (message.action === 'play') {
+        media.play().then(() => sendResponse({ ok: true }), error => sendResponse({ ok: false, error: { code: 'PLAY_DENIED', message: error.message } }));
+        return true;
+      } else if (message.action === 'clearLoop') state.auditionLoop = null;
+      else if (message.action === 'setLoop') {
+        const loop = message.loop;
+        if (!loop || !Number.isFinite(loop.startMs) || !Number.isFinite(loop.endMs) || loop.startMs < 0 || loop.endMs <= loop.startMs) {
+          sendResponse({ ok: false, error: { code: 'LOOP_INVALID', message: 'Choose a positive loop range.' } });
+          return;
+        }
+        state.auditionLoop = loop;
+        media.currentTime = loop.startMs / 1000;
+      }
+      sendResponse({ ok: true });
+      return;
+    }
 
     if (message.type === 'LV_GET_HINTS') {
       sendResponse(getPageHints());
@@ -360,6 +473,7 @@
      ══════════════════════════════════════ */
   function getPageHints() {
     const media = getMedia();
+    const youtube = youtubeMediaState();
     const url = location.href;
     const title = document.title || '';
     const host = location.hostname;
@@ -368,7 +482,9 @@
       host,
       pageTitle: title,
       currentTime: media && Number.isFinite(media.currentTime) ? media.currentTime : null,
-      duration: media && Number.isFinite(media.duration) ? media.duration : null
+      duration: youtube?.contentDurationMs ? youtube.contentDurationMs / 1000 : !isAdvertisement() && media && Number.isFinite(media.duration) ? media.duration : null,
+      isAd: isAdvertisement(),
+      mediaReady: youtube ? youtube.clockUsable : true
     };
 
     if (host.includes('music.youtube.com')) {
@@ -701,10 +817,23 @@
   }
 
   function getMedia() {
+    const player = document.querySelector('#movie_player video, ytmusic-player video');
+    if (player && Number.isFinite(player.currentTime)) return player;
     const candidates = [...document.querySelectorAll('video, audio')];
     return candidates.find((item) => Number.isFinite(item.currentTime) && item.duration) ||
       candidates.find((item) => Number.isFinite(item.currentTime)) ||
       null;
+  }
+
+  function isAdvertisement() {
+    const player = document.getElementById('movie_player');
+    return Boolean(player?.classList.contains('ad-showing') || player?.classList.contains('ad-interrupting'));
+  }
+
+  function youtubeMediaState() {
+    if (!['www.youtube.com', 'youtube.com', 'm.youtube.com'].includes(location.hostname) || !globalThis.LvYoutubeMedia) return null;
+    const media = getMedia();
+    return LvYoutubeMedia.inspect({ url: location.href, canonicalUrl: document.querySelector('link[rel="canonical"]')?.href, isoDuration: document.querySelector('meta[itemprop="duration"]')?.content, playerClassName: document.querySelector('#movie_player')?.className, mediaDurationSec: media?.duration, mediaCurrentTimeSec: media?.currentTime, mediaPaused: media?.paused, mediaSeeking: media?.seeking });
   }
 
   /* ══════════════════════════════════════
@@ -782,6 +911,8 @@
     // The stability timer below handles slow/partial updates natively!
     const currentTrackKey = () => {
       const h = getPageHints();
+      const exactKey = globalThis.LvScore?.mediaKey(h);
+      if (exactKey) return exactKey;
       const track = (h.track || h.pageTitle || '').trim();
       const artist = (h.artist || '').trim();
       return track ? `${track}|||${artist}` : '';
@@ -883,6 +1014,8 @@
      TRACK START
      ══════════════════════════════════════ */
   function startTrack(payload) {
+    state.score = null;
+    state.auditionLoop = null;
     clearRevealTimers();
     cancelLoop();
     stage.textContent = '';
@@ -915,19 +1048,7 @@
     preview.textContent = '';
     progressFill.style.width = '0%';
 
-    // YOUTUBE MUSIC VIDEO SYNC COMPENSATOR
-    // Auto-compensate for cinematic music video intros on YouTube
-    if (location.hostname.includes('youtube.com') && payload.match && payload.match.duration && payload.hints && payload.hints.duration) {
-      const actualMs = payload.hints.duration * 1000;
-      const expectedMs = payload.match.duration * 1000;
-      const diffMs = actualMs - expectedMs;
-      
-      // If the YouTube video is 4 to 60 seconds LONGER than the official track duration,
-      // it's highly likely a music video intro. Shift the lyrics forward by that exact amount.
-      if (diffMs > 4000 && diffMs < 60000 && synced.length) {
-        state.syncOffsetMs += diffMs;
-      }
-    }
+    // Duration differences are not measured intro offsets.
 
     // SPOTIFY SYNC COMPENSATION
     // Start with a moderate offset. The auto-calibration system (below) will
@@ -1260,6 +1381,34 @@
       if (!state.active) return;
 
       const mediaMs = getMediaTimeMs();
+      if (state.score) {
+        const key = LvScore.mediaKey({ url: location.href });
+        if (key !== LvScore.mediaKey(state.score.source)) {
+          stage.textContent = '';
+          state.auditionLoop = null;
+          state.rafId = requestAnimationFrame(tick);
+          return;
+        }
+        const media = getMedia();
+        const ad = isAdvertisement() || youtubeMediaState()?.clockUsable === false;
+        stage.classList.toggle('lvx-score-paused', media?.paused ?? true);
+        root.classList.toggle('lvx-ad-paused', ad);
+        if (ad) {
+          stage.textContent = '';
+          state.scoreSignature = '';
+          state.rafId = requestAnimationFrame(tick);
+          return;
+        }
+        if (state.auditionLoop && media && !media.paused && mediaMs >= state.auditionLoop.endMs) media.currentTime = state.auditionLoop.startMs / 1000;
+        renderScore(mediaMs);
+        if (performance.now() - state.lastClockSent > 100) {
+          state.lastClockSent = performance.now();
+          chrome.runtime.sendMessage({ type: 'LV_SCORE_PLAYBACK', mediaKey: key, mediaMs, paused: media?.paused ?? true, durationMs: Math.round((media?.duration || 0) * 1000) }).catch(() => {});
+        }
+        if (state.trackDurationMs > 0) progressFill.style.width = `${clamp(mediaMs / state.trackDurationMs * 100, 0, 100)}%`;
+        state.rafId = requestAnimationFrame(tick);
+        return;
+      }
       updateDriftTracking(mediaMs);
       const lyricClockMs = mediaMs - state.syncOffsetMs;
       const nextIndex = findActiveIndex(lyricClockMs);
@@ -1320,6 +1469,72 @@
   function cancelLoop() {
     if (state.rafId) cancelAnimationFrame(state.rafId);
     state.rafId = 0;
+  }
+
+  function renderScore(mediaMs) {
+    const active = LvScore.activeAt(state.score, mediaMs);
+    const signature = `${state.score.revision}:${state.theme}:` + active.phrases.map(p => p.id).join('|');
+    if (signature !== state.scoreSignature || !stage.classList.contains('lvx-score-stage')) {
+      stage.textContent = '';
+      stage.classList.add('lvx-score-stage');
+      for (const phrase of active.phrases) {
+        const line = document.createElement('div');
+        const lane = state.score.lanes.find(l => l.id === phrase.laneId);
+        line.className = `lvx-score-phrase lvx-score-${lane?.role || 'lead'}`;
+        line.dataset.phrase = phrase.id;
+        for (const word of phrase.words) {
+          const span = document.createElement('span');
+          span.className = 'lvx-score-word';
+          span.dataset.word = word.id;
+          if (word.syllables?.length) {
+            for (const syllable of word.syllables) {
+              const part = document.createElement('span');
+              part.className = 'lvx-score-syllable';
+              part.dataset.syllable = syllable.id;
+              part.textContent = syllable.text;
+              for (const effect of syllable.effects) {
+                part.classList.add(`lvx-effect-${effect.type}`);
+                part.style.setProperty('--lvx-strength', effect.strength);
+              }
+              span.appendChild(part);
+            }
+            span.appendChild(document.createTextNode(' '));
+          } else span.textContent = `${word.text} `;
+          for (const effect of word.effects) {
+            span.classList.add(`lvx-effect-${effect.type}`);
+            span.style.setProperty('--lvx-strength', effect.strength);
+          }
+          line.appendChild(span);
+        }
+        stage.appendChild(line);
+      }
+      state.scoreSignature = signature;
+    }
+    for (const phrase of active.phrases) {
+      const line = [...stage.children].find(el => el.dataset.phrase === phrase.id);
+      if (!line) continue;
+      line.style.opacity = phrase.opacity;
+      for (let index = 0; index < phrase.words.length; index++) {
+        const word = phrase.words[index];
+        const span = line.children[index];
+        span.style.visibility = mediaMs - state.score.offsetMs >= word.startMs ? 'visible' : 'hidden';
+        span.classList.toggle('lvx-score-current', phrase.activeWords.includes(word.id));
+        applyReveal(span, word, mediaMs - state.score.offsetMs);
+        for (const syllable of word.syllables || []) {
+          const part = [...span.children].find(el => el.dataset.syllable === syllable.id);
+          if (!part) continue;
+          part.style.visibility = mediaMs - state.score.offsetMs >= syllable.startMs ? 'visible' : 'hidden';
+          part.classList.toggle('lvx-score-current', (phrase.activeSyllables || []).includes(syllable.id));
+          applyReveal(part, syllable, mediaMs - state.score.offsetMs);
+        }
+      }
+    }
+  }
+
+  function applyReveal(node, item, clockMs) {
+    if (item.reveal?.type !== 'sweep') { node.style.clipPath = ''; return; }
+    const progress = LvScore.revealProgress(item, clockMs);
+    node.style.clipPath = `inset(0 ${(100 * (1 - progress)).toFixed(3)}% 0 0)`;
   }
 
   /* ══════════════════════════════════════
@@ -1702,6 +1917,7 @@
 
   function setFontScale(scale) {
     state.fontScale = clamp(Math.round(scale * 10) / 10, 0.6, 1.6);
+    stage.style.setProperty('--lvx-score-scale', state.fontScale);
     try { chrome.storage.local.set({ lvxFontScale: state.fontScale }); } catch (_) {}
     setHud(`Text size ${Math.round(state.fontScale * 100)}%  (+ / - to adjust)`);
     // Re-render the current line at the new size
@@ -1732,7 +1948,18 @@
   }
 
   function nudgeSync(deltaMs) {
-    state.syncOffsetMs += deltaMs;
+    setSyncOffset(state.syncOffsetMs + deltaMs);
+  }
+
+  function setSyncOffset(offsetMs) {
+    if (!Number.isSafeInteger(offsetMs) || offsetMs === state.syncOffsetMs) return;
+    if (state.score) {
+      chrome.runtime.sendMessage({ type: 'LV_SCORE_OPERATION', mediaKey: LvScore.mediaKey(state.score.source), expectedRevision: state.score.revision, operation: { type: 'setOffset', offsetMs } }).then(result => {
+        if (!result?.ok) setHud(result?.error?.message || 'Timing edit failed', true, true);
+      }).catch(() => {});
+      return;
+    }
+    state.syncOffsetMs = offsetMs;
     state.baseOffsetMs = state.syncOffsetMs; // anchor to manual nudge
     state.timingErrors = [];                 // clear calibration history
     state.autoCalibrated = true;             // stop auto-calibration fighting the user
@@ -1755,6 +1982,10 @@
    * live calibration path to fine-tune later lyric transitions.
    */
   function quickSyncLyrics() {
+    if (state.score) {
+      editButton.click();
+      return;
+    }
     if (!state.active || !state.lines.length) {
       setHud('Auto Sync needs active lyrics first', true, false);
       return;
@@ -2253,7 +2484,7 @@
   function show() {
     if (!root.isConnected) {
       root.append(stage, preview, progress, hud, shortcutsPanel);
-      document.documentElement.appendChild(root);
+      mountRoot();
     }
   }
 
@@ -2268,6 +2499,7 @@
       hudLabel.textContent = isError ? 'LYRICVIBE ERROR' : 'LYRICVIBE';
     }
     hudText.textContent = text;
+    if (document.activeElement !== offsetInput && !offsetWheelTimer) offsetInput.value = String(state.syncOffsetMs);
     clearTimeout(state.hudTimer);
     if (!sticky) {
       state.hudTimer = setTimeout(() => hud.classList.add('lvx-dim'), 3400);

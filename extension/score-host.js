@@ -25,9 +25,32 @@
   async function liveIdentity(tabId, requested) {
     if (!Number.isInteger(tabId)) throw fail('SOURCE_REQUIRED', 'Open the editor from a playing YouTube tab.');
     const hints = await chrome.tabs.sendMessage(tabId, { type: 'LV_GET_HINTS' });
+    if (hints.isAd) throw fail('ADVERTISEMENT_ACTIVE', 'Wait for the advertisement to finish.');
+    if (hints.mediaReady === false) throw fail('SOURCE_UNREADY', 'Wait for the main video to finish loading.');
     const key = LvScore.mediaKey(hints);
     if (!key || (requested && key !== requested)) throw fail('SOURCE_CHANGED', 'The source video changed. Reopen its score.');
     return { key, hints };
+  }
+  function exactExtensionPage(sender, file) {
+    if (sender.id !== chrome.runtime.id || typeof sender.url !== 'string') return false;
+    try {
+      const actual = new URL(sender.url), expected = new URL(chrome.runtime.getURL(file));
+      return actual.origin === expected.origin && actual.pathname === expected.pathname;
+    } catch { return false; }
+  }
+  function editorSourceBound(sender, tabId, key) {
+    if (!exactExtensionPage(sender, 'editor.html')) return false;
+    const url = new URL(sender.url);
+    return url.searchParams.get('sourceTab') === String(tabId) && url.searchParams.get('mediaKey') === key;
+  }
+  async function refreshDuration(key, record, hints) {
+    const durationMs = Math.round((hints.duration || 0) * 1000);
+    if (durationMs > 0 && Math.abs(durationMs - record.score.source.durationMs) > 1000) {
+      record.history = [...(record.history || []), record.score].slice(-30);
+      record.score = { ...record.score, revision: record.score.revision + 1, source: { ...record.score.source, durationMs } };
+      await chrome.storage.local.set({ [keyFor(key)]: record });
+    }
+    return record.score;
   }
   async function ensure(tabId, payload) {
     const requested = LvScore.mediaKey(payload.hints || {});
@@ -43,8 +66,8 @@
           record.lyricRevisionAvailable = hash;
           await chrome.storage.local.set({ [keyFor(key)]: record });
         }
-        await liveIdentity(tabId, key);
-        return record.score;
+        const { hints: currentHints } = await liveIdentity(tabId, key);
+        return refreshDuration(key, record, currentHints);
       }
       const score = LvScore.createScore({ platform: 'youtube', videoId: key.slice(8), title: payload.track.title || '', artist: payload.track.artist || '', durationMs: Math.round((hints.duration || 0) * 1000) }, raw,
         { provider: payload.lyrics.provider || 'LRCLIB', entryId: payload.match?.id == null ? null : String(payload.match.id), contentHash: hash });
@@ -58,7 +81,10 @@
     const key = LvScore.mediaKey(hints);
     if (!key) return null;
     const existing = await read(key);
-    if (existing) { await liveIdentity(tabId, key); return existing.score; }
+    if (existing) return serial(key, async () => {
+      const { hints: currentHints } = await liveIdentity(tabId, key);
+      return refreshDuration(key, await read(key), currentHints);
+    });
     const { lvPackageBase } = await chrome.storage.local.get('lvPackageBase');
     if (!lvPackageBase) return null;
     const base = new URL(lvPackageBase);
@@ -113,8 +139,13 @@
         if (!record.history?.length) throw fail('UNDO_EMPTY', 'Nothing to undo.');
         next = { ...record.history.pop(), revision: record.score.revision + 1 };
       } else if (message.type === 'LV_ALIGNMENT_PROPOSALS') {
-        // A calibrated adapter may admit strong proposals. Raw ASR probabilities cannot.
-        const proposals = (message.proposals || []).slice(0, 5000).map(p => ({ ...p, accepted: Boolean(p.accepted && message.diagnostics?.validatedForSinging === true && p.confidence >= 0.98) }));
+        const analysis = await root.LvAnalysis.analysisStatus();
+        if (!exactExtensionPage(sender, 'analysis/offscreen.html') || !message.sessionId || message.sessionId !== analysis?.sessionId || message.tabId !== tabId || analysis?.tabId !== tabId || message.mediaKey !== key || analysis?.mediaKey !== key || ['stopped', 'error'].includes(analysis?.state)) {
+          throw fail('ANALYSIS_SOURCE_MISMATCH', 'Alignment proposals must come from the active offscreen analysis session for this source.');
+        }
+        // No singing-calibrated adapter is installed. Diagnostics cannot grant admission.
+        // A future calibrated adapter needs a host-owned policy, not a sender-supplied flag.
+        const proposals = (message.proposals || []).slice(0, 5000).map(p => ({ ...p, accepted: false }));
         const reviewByWord = new Map((record.review || []).map(p => [p.wordId, p]));
         for (const proposal of proposals) {
           if (proposal.accepted) reviewByWord.delete(proposal.wordId);
@@ -124,6 +155,7 @@
         record.diagnostics = message.diagnostics;
         next = LvScore.applyAlignment(record.score, proposals, record.score.revision);
       } else if (message.type === 'LV_SCORE_REVIEW_APPLY') {
+        if (!editorSourceBound(sender, tabId, key)) throw fail('EDITOR_REQUIRED', 'Review proposals can only be applied from the editor opened for this source tab.');
         const selected = new Set(message.wordIds || []);
         const proposals = (record.review || []).filter(p => selected.has(p.wordId)).map(p => ({ ...p, accepted: true }));
         next = LvScore.applyAlignment(record.score, proposals, record.score.revision);

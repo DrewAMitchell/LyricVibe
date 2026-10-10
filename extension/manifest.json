@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "LyricVibe \u2014 Kinetic Lyrics Overlay",
-  "version": "0.4.3",
+  "name": "LyricVibe Development — Video Scores",
+  "version": "0.5.0",
   "description": "Overlay synced kinetic lyrics on any music tab \u2014 YouTube Music, Spotify, SoundCloud, and more.",
   "minimum_chrome_version": "116",
   "permissions": [
     "activeTab",
     "scripting",
-    "storage"
+    "storage", "tabCapture", "offscreen"
   ],
   "host_permissions": [
     "https://lrclib.net/*",
@@ -15,8 +15,14 @@
     "https://open.spotify.com/*",
     "https://music.youtube.com/*",
     "https://www.youtube.com/*",
-    "https://soundcloud.com/*"
+    "https://soundcloud.com/*",
+    "https://huggingface.co/*",
+    "https://*.huggingface.co/*",
+    "https://*.hf.co/*"
   ],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "options_page": "options.html",
+  "content_security_policy": { "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*" },
   "action": {
     "default_title": "Toggle LyricVibe (Ctrl+Shift+L)",
     "default_icon": {
