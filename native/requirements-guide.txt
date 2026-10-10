@@ -1,0 +1,2 @@
+# Optional, isolated native microphone capture support for the guide-vocal proof.
+sounddevice==0.5.6
