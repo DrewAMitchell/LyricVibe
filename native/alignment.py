@@ -17,6 +17,7 @@ MODEL_NAME = "torchaudio.pipelines.WAV2VEC2_ASR_BASE_960H"
 MODEL_CHECKPOINT = "wav2vec2_fairseq_base_ls960_asr_ls960.pth"
 MODEL_SHA256 = "488fd4f16de84438ffc945334278c1b9fb9b7159a806c1080b16111a958c945d"
 MAX_AUDIO_SECONDS = 60
+MAX_PCM_ALIGNMENT_SECONDS = 12
 _WORD_RE = re.compile(r"[A-Za-z]+(?:['’][A-Za-z]+)?")
 
 
@@ -30,6 +31,38 @@ def _load_audio(path: str, torchaudio: Any, torch: Any) -> tuple[Any, int]:
         waveform = torchaudio.functional.resample(waveform, sample_rate, 16_000)
         sample_rate = 16_000
     return waveform.to(dtype=torch.float32), sample_rate
+
+
+def _normalize_waveform(waveform: Any, sample_rate: int, torchaudio: Any, torch: Any) -> tuple[Any, int]:
+    """Normalize an in-memory channel-first waveform to the model's mono 16 kHz input."""
+    if waveform.ndim != 2 or waveform.shape[0] == 0 or waveform.shape[1] == 0:
+        raise ValueError("audio contains no samples")
+    if sample_rate <= 0:
+        raise ValueError("sample rate must be a positive integer")
+    if waveform.shape[0] > 1:
+        waveform = waveform.mean(dim=0, keepdim=True)
+    if sample_rate != 16_000:
+        waveform = torchaudio.functional.resample(waveform, sample_rate, 16_000)
+        sample_rate = 16_000
+    return waveform.to(dtype=torch.float32), sample_rate
+
+
+def _load_pcm_samples(pcm: bytes, sample_rate_hz: int, torch: Any, torchaudio: Any) -> tuple[Any, int]:
+    """Decode mono signed 16-bit little-endian PCM directly into memory."""
+    if not isinstance(pcm, bytes) or not pcm:
+        raise ValueError("PCM input must be non-empty bytes")
+    if len(pcm) % 2:
+        raise ValueError("16-bit PCM input must contain a whole number of samples")
+    if not isinstance(sample_rate_hz, int) or isinstance(sample_rate_hz, bool) or sample_rate_hz <= 0:
+        raise ValueError("sample rate must be a positive integer")
+    duration_seconds = len(pcm) / (2 * sample_rate_hz)
+    if duration_seconds > MAX_PCM_ALIGNMENT_SECONDS:
+        raise ValueError(f"PCM input exceeds the {MAX_PCM_ALIGNMENT_SECONDS}-second native alignment limit")
+    # Copy once into owned writable memory so torch never retains the caller's
+    # buffer and no temporary audio path is needed.
+    waveform = torch.frombuffer(bytearray(pcm), dtype=torch.int16)
+    waveform = waveform.to(dtype=torch.float32).div_(32768.0).unsqueeze(0)
+    return _normalize_waveform(waveform, sample_rate_hz, torchaudio, torch)
 
 
 def _make_target(text: str, labels: tuple[str, ...], torch: Any) -> tuple[Any, list[tuple[int, int, str]]]:
@@ -134,35 +167,19 @@ def _frame_words(
     return output, warnings
 
 
-def align(audio_path: str, text: str, language: str = "en") -> dict[str, Any]:
-    """Align supplied English lyrics to local audio with TorchAudio CTC.
+def _align_waveform(waveform: Any, sample_rate: int, text: str, language: str, started: float,
+                    max_audio_seconds: int = MAX_AUDIO_SECONDS) -> dict[str, Any]:
+    """Run the shared supplied-text CTC path on a normalized in-memory waveform."""
+    import torch
+    import torchaudio
 
-    Returned times are derived from actual model-assigned CTC acoustic frames.
-    They are not generated from lyric order, ASR timestamps, duration scaling,
-    or interpolation. CTC forced alignment will still attempt to place text
-    that is absent from audio, so outputs must be reviewed.
-    """
     if language.lower() not in {"en", "eng", "english"}:
         raise ValueError(f"unsupported language {language!r}; this adapter supports English only")
-    audio_file = Path(audio_path)
-    if not audio_file.is_file():
-        raise FileNotFoundError(f"audio file does not exist: {audio_file}")
     if not isinstance(text, str) or not text.strip():
         raise ValueError("supplied lyrics must be a non-empty string")
-
-    try:
-        import torch
-        import torchaudio
-    except ImportError as exc:
-        raise RuntimeError(
-            "native CTC alignment requires the isolated runtime dependencies torch and torchaudio"
-        ) from exc
-
-    started = time.perf_counter()
-    waveform, sample_rate = _load_audio(str(audio_file), torchaudio, torch)
     duration_ms = waveform.shape[1] * 1000.0 / sample_rate
-    if duration_ms > MAX_AUDIO_SECONDS * 1000:
-        raise ValueError(f"audio exceeds the {MAX_AUDIO_SECONDS}-second native alignment limit")
+    if duration_ms > max_audio_seconds * 1000:
+        raise ValueError(f"audio exceeds the {max_audio_seconds}-second native alignment limit")
     if _is_exact_zero_energy(waveform, torch):
         return {
             "words": [],
@@ -249,3 +266,49 @@ def align(audio_path: str, text: str, language: str = "en") -> dict[str, Any]:
         "audioDurationMs": round(duration_ms),
         "sampleRateHz": sample_rate,
     }
+
+
+def align_samples(pcm: bytes, text: str, sample_rate_hz: int = 16_000, language: str = "en") -> dict[str, Any]:
+    """Align supplied English lyrics to in-memory mono s16le PCM.
+
+    This entry point is bounded to 12 seconds and never materializes an audio
+    file. The returned metadata and word anchors match :func:`align`.
+    """
+    try:
+        import torch
+        import torchaudio
+    except ImportError as exc:
+        raise RuntimeError(
+            "native CTC alignment requires the isolated runtime dependencies torch and torchaudio"
+        ) from exc
+    started = time.perf_counter()
+    waveform, sample_rate = _load_pcm_samples(pcm, sample_rate_hz, torch, torchaudio)
+    return _align_waveform(waveform, sample_rate, text, language, started, MAX_PCM_ALIGNMENT_SECONDS)
+
+
+def align(audio_path: str, text: str, language: str = "en") -> dict[str, Any]:
+    """Align supplied English lyrics to local audio with TorchAudio CTC.
+
+    Returned times are derived from actual model-assigned CTC acoustic frames.
+    They are not generated from lyric order, ASR timestamps, duration scaling,
+    or interpolation. CTC forced alignment will still attempt to place text
+    that is absent from audio, so outputs must be reviewed.
+    """
+    if language.lower() not in {"en", "eng", "english"}:
+        raise ValueError(f"unsupported language {language!r}; this adapter supports English only")
+    audio_file = Path(audio_path)
+    if not audio_file.is_file():
+        raise FileNotFoundError(f"audio file does not exist: {audio_file}")
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("supplied lyrics must be a non-empty string")
+    try:
+        import torch
+        import torchaudio
+    except ImportError as exc:
+        raise RuntimeError(
+            "native CTC alignment requires the isolated runtime dependencies torch and torchaudio"
+        ) from exc
+
+    started = time.perf_counter()
+    waveform, sample_rate = _load_audio(str(audio_file), torchaudio, torch)
+    return _align_waveform(waveform, sample_rate, text, language, started)
