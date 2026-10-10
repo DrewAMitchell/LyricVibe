@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from native.guide_grouping import GuideGroupingError, preview
-from native.guide_review import ReviewDocument, ROOT, write_new, decode_audition
+from native.guide_review import ReviewDocument, ROOT, write_new, decode_audition, add_tap_clicks
 
 
 @unittest.skipUnless(shutil.which('node'), 'Shared score validation requires Node.js')
@@ -127,6 +127,17 @@ class GuideReviewTests(unittest.TestCase):
         with self.assertRaises(GuideGroupingError) as failure: self.doc.replay(draft)
         self.assertEqual(failure.exception.code, 'INPUT_CHANGED')
         self.assertEqual(self.doc.state, original)
+
+    def test_audible_taps_preserve_length_only_mix_at_source_times_and_clip_safely(self):
+        from array import array
+        pcm = bytes(16000 * 2)
+        mixed = array('h'); mixed.frombytes(add_tap_clicks(pcm, 1000, [500, 1250, 2500]))
+        self.assertEqual(len(mixed), 16000)
+        self.assertTrue(all(v == 0 for v in mixed[:4000]))
+        self.assertTrue(any(v != 0 for v in mixed[4000:4480]))
+        self.assertTrue(all(v == 0 for v in mixed[4480:]))
+        saturated = array('h', [32767] * 16000).tobytes()
+        self.assertEqual(len(add_tap_clicks(saturated, 1000, [1000])), len(saturated))
 
 
 if __name__ == '__main__': unittest.main()
