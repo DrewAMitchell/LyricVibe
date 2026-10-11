@@ -4,6 +4,8 @@ const { spawn } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const out = path.join(root, 'dist', 'lyricvibe');
 (async () => {
+  // One compiled entry also serves the existing offline review launcher.
+  await require('esbuild').build({ entryPoints: [path.join(root, 'extension/workspace/main.tsx')], bundle: true, format: 'iife', platform: 'browser', target: 'chrome116', jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"' }, outfile: path.join(root, 'extension/workspace/main.bundle.js') });
   fs.mkdirSync(out, { recursive: true });
   fs.cpSync(path.join(root, 'extension'), out, { recursive: true });
   await require('esbuild').build({ entryPoints: [path.join(root, 'extension/analysis/model-worker.js')], bundle: true, format: 'esm', platform: 'browser', target: 'es2022', outfile: path.join(out, 'analysis/model-worker.bundle.js') });
