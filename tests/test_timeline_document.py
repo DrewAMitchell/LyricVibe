@@ -53,21 +53,21 @@ class TimelineDocumentTests(unittest.TestCase):
         self.assertEqual(self.doc.package["score"]["phrases"][0]["words"][0]["startMs"], self.word["startMs"])
         self.assertEqual(self.package_path.read_bytes(), package_before)
 
-    def test_manual_lock_requires_explicit_unlock_before_timing_edit(self):
+    def test_manual_timing_can_be_refined_without_removing_automatic_protection(self):
         self.doc.act({"type": "setWordLock", "wordId": self.word["id"], "locked": True}, 0)
         locked_score = self.doc.score
-        with self.assertRaises(TimelineError) as blocked:
-            self.doc.act({"type": "setWordTiming", "wordId": self.word["id"],
-                          "startMs": self.word["startMs"] + 1, "endMs": self.word["endMs"]}, 1)
-        self.assertEqual(blocked.exception.code, "LOCKED")
-        self.assertEqual(self.doc.revision, 1)
-        self.doc.act({"type": "setWordLock", "wordId": self.word["id"], "locked": False}, 1)
         changed = self.doc.act({"type": "setWordTiming", "wordId": self.word["id"],
-                                "startMs": self.word["startMs"] + 1, "endMs": self.word["endMs"]}, 2)
+                                "startMs": self.word["startMs"] + 1, "endMs": self.word["endMs"]}, 1)
+        changed = self.doc.act({"type": "setWordTiming", "wordId": self.word["id"],
+                                "startMs": self.word["startMs"] + 2, "endMs": self.word["endMs"] - 1}, 2)
         self.assertEqual(self.doc.revision, 3)
         self.assertEqual(changed["revision"], locked_score["revision"] + 2)
+        self.assertTrue(changed['phrases'][0]['words'][0]['locked'])
+        restored = self.doc.undo(3)
+        self.assertEqual(restored['phrases'][0]['words'][0]['startMs'], self.word['startMs'] + 1)
+        self.assertTrue(restored['phrases'][0]['words'][0]['locked'])
 
-    def test_locked_child_timing_bypass_is_blocked_until_explicit_child_unlock(self):
+    def test_locked_child_timing_remains_manually_editable_inside_protected_word(self):
         word_id = self.word["id"]
         start, end = self.word["startMs"], self.word["endMs"]
         self.doc.act({"type": "setWordSyllables", "wordId": word_id, "syllables": [
@@ -76,14 +76,12 @@ class TimelineDocumentTests(unittest.TestCase):
         ]}, 0)
         syllable = self.doc.score["phrases"][0]["words"][0]["syllables"][0]
         self.assertTrue(syllable["locked"])
-        with self.assertRaises(TimelineError) as blocked:
-            self.doc.act({"type": "setSyllableTiming", "syllableId": syllable["id"],
-                          "startMs": start + 5, "endMs": start + 250}, 1)
-        self.assertEqual(blocked.exception.code, "LOCKED")
-        self.doc.act({"type": "setSyllableLock", "syllableId": syllable["id"], "locked": False}, 1)
+        self.doc.act({'type': 'setWordLock', 'wordId': word_id, 'locked': True}, 1)
         result = self.doc.act({"type": "setSyllableTiming", "syllableId": syllable["id"],
                                "startMs": start + 5, "endMs": start + 250}, 2)
         self.assertEqual(result["phrases"][0]["words"][0]["syllables"][0]["startMs"], start + 5)
+        self.assertTrue(result['phrases'][0]['words'][0]['locked'])
+        self.assertTrue(result['phrases'][0]['words'][0]['syllables'][0]['locked'])
 
     def test_typed_split_uses_core_and_bad_split_is_atomic(self):
         start, end = self.word["startMs"], self.word["endMs"]

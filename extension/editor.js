@@ -141,8 +141,8 @@
     $('word-text-syllable-warning').hidden = true;
     $('word-start').value = seconds(word.startMs); $('word-end').value = seconds(word.endMs);
     $('word-lock').checked = word.locked;
-    $('word-evidence').replaceChildren(el('span', word.provenance, word.provenance[0].toUpperCase() + word.provenance.slice(1)), el('span', 'muted', word.locked ? '· Locked' : '· Unlocked'));
-    $('word-evidence').dataset.tip = word.provenance === 'estimated' ? 'Timing is estimated from lyric cues. No acoustic alignment evidence.' : word.provenance === 'manual' ? 'Timing was manually edited. Locked words resist automatic alignment.' : 'An accepted alignment proposal set this timing. Inspect analysis diagnostics for provider and evidence.';
+    $('word-evidence').replaceChildren(el('span', word.provenance, word.provenance[0].toUpperCase() + word.provenance.slice(1)), el('span', 'muted', word.locked ? '· Protected from alignment' : '· Alignment enabled'));
+    $('word-evidence').dataset.tip = word.provenance === 'estimated' ? 'Timing is estimated from lyric cues. No acoustic alignment evidence.' : word.provenance === 'manual' ? 'Timing was manually edited. Manual timing stays editable; protected words resist automatic alignment.' : 'An accepted alignment proposal set this timing. Inspect analysis diagnostics for provider and evidence.';
     $('word-effect').value = word.effects[0]?.type || 'none'; $('effect-strength').value = word.effects[0]?.strength ?? 0.3;
     $('word-reveal').value = word.reveal?.easing || 'instant';
     $('strength-value').value = Number($('effect-strength').value).toFixed(2);
@@ -167,7 +167,7 @@
       const timing = el('form', 'syllable-timing'); const fields = el('div', 'two-fields');
       const startLabel = el('label', '', 'Start · s'); const start = el('input'); start.type = 'number'; start.step = '0.001'; start.min = String(word.startMs / 1000); start.max = String(word.endMs / 1000); start.required = true; start.value = (segment.startMs / 1000).toFixed(3); start.setAttribute('aria-label', `${segment.text} start in source seconds`); startLabel.append(start);
       const endLabel = el('label', '', 'End · s'); const end = el('input'); end.type = 'number'; end.step = '0.001'; end.min = String(word.startMs / 1000); end.max = String(word.endMs / 1000); end.required = true; end.value = (segment.endMs / 1000).toFixed(3); end.setAttribute('aria-label', `${segment.text} end in source seconds`); endLabel.append(end); fields.append(startLabel, endLabel);
-      const apply = el('button', 'wide', 'Save'); apply.type = 'submit'; apply.setAttribute('aria-label', `Save ${segment.text} syllable timing`); apply.dataset.tip = 'Save precise manual syllable timing within its parent word and lock it against alignment.'; timing.append(fields, apply); timing.onsubmit = event => { event.preventDefault(); operation({ type: 'setSyllableTiming', syllableId: segment.id, startMs: Math.round(Number(start.value) * 1000), endMs: Math.round(Number(end.value) * 1000) }, 'Syllable timing updated and locked').then(() => document.querySelector(`[data-syllable-id="${CSS.escape(segment.id)}"] .syllable-timing button`)?.focus({ preventScroll: true })); };
+      const apply = el('button', 'wide', 'Save'); apply.type = 'submit'; apply.setAttribute('aria-label', `Save ${segment.text} syllable timing`); apply.dataset.tip = 'Save precise manual syllable timing within its parent word and protect it from automatic alignment. You can edit it again.'; timing.append(fields, apply); timing.onsubmit = event => { event.preventDefault(); operation({ type: 'setSyllableTiming', syllableId: segment.id, startMs: Math.round(Number(start.value) * 1000), endMs: Math.round(Number(end.value) * 1000) }, 'Syllable timing updated; protected from alignment').then(() => document.querySelector(`[data-syllable-id="${CSS.escape(segment.id)}"] .syllable-timing button`)?.focus({ preventScroll: true })); };
       const effects = el('form', 'syllable-effects'); const effectLabel = el('label', 'small', 'Effect'); const effect = el('select'); effect.setAttribute('aria-label', `${segment.text} syllable effect`);
       ['none', 'shake', 'tilt', 'pulse'].forEach(type => { const option = el('option', '', type[0].toUpperCase() + type.slice(1)); option.value = type; effect.append(option); }); effect.value = segment.effects[0]?.type || 'none'; effectLabel.append(effect);
       const strengthLabel = el('label', 'small', 'Strength'); const strength = el('input'); strength.type = 'number'; strength.min = '0'; strength.max = '1'; strength.step = '0.05'; strength.required = true; strength.value = segment.effects[0]?.strength ?? 0.3; strength.setAttribute('aria-label', `${segment.text} effect strength`); strengthLabel.append(strength);
@@ -198,8 +198,8 @@
         phrase.words.forEach(word => {
           const button = el('button', `word-block ${word.provenance}${word.id === state.wordId ? ' selected' : ''}`);
           button.type = 'button'; button.dataset.wordId = word.id; button.setAttribute('aria-pressed', String(word.id === state.wordId));
-          button.setAttribute('aria-label', `${word.text}, ${seconds(word.startMs)} to ${seconds(word.endMs)} seconds, ${word.provenance}${word.locked ? ', locked' : ''}`);
-          button.dataset.tip = `${word.text} · ${seconds(word.startMs)}–${seconds(word.endMs)}s\n${word.provenance}${word.locked ? ' · Locked' : ''}. Select to edit; drag an edge for manual timing.`;
+          button.setAttribute('aria-label', `${word.text}, ${seconds(word.startMs)} to ${seconds(word.endMs)} seconds, ${word.provenance}${word.locked ? ', protected from alignment' : ''}`);
+          button.dataset.tip = `${word.text} · ${seconds(word.startMs)}–${seconds(word.endMs)}s\n${word.provenance}${word.locked ? ' · Protected from alignment' : ''}. Select to edit; drag an edge for manual timing.`;
           button.style.left = `${(word.startMs - phrase.startMs) / 1000 * state.pxPerSecond}px`;
           button.style.width = `${Math.max(3, (word.endMs - word.startMs) / 1000 * state.pxPerSecond)}px`;
           button.append(el('span', 'word-label', `${word.text}${word.locked ? ' ⌑' : ''}`));
@@ -234,7 +234,7 @@
     $('play').dataset.symbol = state.paused ? '▶' : 'Ⅱ';
     if (localMode) $('play').disabled = !mediaReady;
     if (localMode) document.body.classList.toggle('recording-ready', mediaReady);
-    $('word-start-here').disabled = $('word-end-here').disabled = !state.paused || !findWord() || findWord()?.word.locked || (localMode && !mediaReady);
+    $('word-start-here').disabled = $('word-end-here').disabled = !state.paused || !findWord() || (localMode && !mediaReady);
     if (!state.score) return;
     if (localMode) $('clock-mode').textContent = !mediaReady ? 'Choose a recording' : $('proposal-preview').checked && previewScore ? 'Recording clock · unverified model preview' : 'Recording clock · saved score';
     const active = core.activeAt(localMode && $('proposal-preview').checked && previewScore ? previewScore : state.score, state.mediaMs).phrases;
@@ -511,12 +511,15 @@
     $('local-media').addEventListener('error', () => { if (!mediaReady) return; mediaReady = false; state.paused = true; renderClock(); notice('Recording playback failed. Choose the original recording again.', 'error'); });
     $('text-form').onsubmit = event => { event.preventDefault(); operation({ type: 'setWordText', wordId: state.wordId, text: $('word-text').value }, 'Word text updated'); };
     $('word-text').addEventListener('input', () => { const word = findWord()?.word; $('word-text-syllable-warning').hidden = !word?.syllables?.length || $('word-text').value === word.text; });
-    $('timing-form').onsubmit = event => { event.preventDefault(); operation({ type: 'setWordTiming', wordId: state.wordId, startMs: Math.round(Number($('word-start').value) * 1000), endMs: Math.round(Number($('word-end').value) * 1000) }, 'Word timing updated and locked'); };
+    $('timing-form').querySelector('.field-heading .muted').textContent = 'Manual timing · editable';
+    $('word-start-here').dataset.tip = 'Pause and seek to the sung onset, then copy the playhead into Start. Apply timing saves a manual boundary and protects it from automatic alignment; you can edit it again.';
+    $('word-end-here').dataset.tip = 'Pause and seek to the sung release, then copy the playhead into End. Apply timing saves a manual boundary and protects it from automatic alignment; you can edit it again.';
+    $('timing-form').onsubmit = event => { event.preventDefault(); operation({ type: 'setWordTiming', wordId: state.wordId, startMs: Math.round(Number($('word-start').value) * 1000), endMs: Math.round(Number($('word-end').value) * 1000) }, 'Word timing updated; protected from alignment'); };
     for (const edge of ['start', 'end']) $('word-' + edge + '-here').onclick = () => {
-      if (!state.paused || !findWord() || findWord().word.locked || (localMode && !mediaReady)) return;
+      if (!state.paused || !findWord() || (localMode && !mediaReady)) return;
       const sourceMs = hasAudio() ? $('local-media').currentTime * 1000 : state.mediaMs;
       $('word-' + edge).value = seconds(Math.max(0, Math.round(sourceMs) - state.score.offsetMs)); draft(true);
-      notice(`Playhead copied to ${edge}. Apply timing saves this manual boundary and locks the word.`);
+      notice(`Playhead copied to ${edge}. Apply timing saves this manual boundary and protects it from automatic alignment.`);
     };
     $('word-lock').onchange = () => operation({ type: 'setWordLock', wordId: state.wordId, locked: $('word-lock').checked }, 'Word protection updated');
     $('effect-form').onsubmit = event => { event.preventDefault(); operation({ type: 'setWordEffect', wordId: state.wordId, effect: $('word-effect').value === 'none' ? null : { type: $('word-effect').value, strength: Number($('effect-strength').value) } }, 'Word effect updated'); };
@@ -669,7 +672,6 @@
     const button = handle.closest('.word-block');
     if (state.draft) { notice('Apply or discard your current draft before dragging a boundary.'); return; }
     const item = state.score.phrases.flatMap(p => p.words.map(w => ({ word: w, phrase: p }))).find(item => item.word.id === button.dataset.wordId);
-    if (item.word.locked) { notice('This word is locked. Turn off “Protect from alignment” in the inspector before changing its word timing.'); return; }
     select(item.word.id);
     const word = { ...item.word }; const edge = handle.dataset.edge; const x = event.clientX;
     state.drag = { wordId: word.id, revision: state.score.revision };
@@ -681,7 +683,7 @@
       $('word-start').value = seconds(proposed.startMs); $('word-end').value = seconds(proposed.endMs); draft(true);
       const target = document.querySelector(`.word-block[data-word-id="${CSS.escape(word.id)}"]`);
       if (target) { target.style.left = `${(proposed.startMs - item.phrase.startMs) / 1000 * state.pxPerSecond}px`; target.style.width = `${Math.max(3, (proposed.endMs - proposed.startMs) / 1000 * state.pxPerSecond)}px`; }
-      notice(`Manual timing preview · ${word.text}: ${seconds(proposed.startMs)}–${seconds(proposed.endMs)}s · Release to save and lock`);
+      notice(`Manual timing preview · ${word.text}: ${seconds(proposed.startMs)}–${seconds(proposed.endMs)}s · Release to save; automatic alignment will skip it`);
     };
     const finish = async finishEvent => {
       document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', finish); document.removeEventListener('pointercancel', cancel);
@@ -691,7 +693,7 @@
       finishEvent.preventDefault();
       if (!proposed) return;
       if (revision !== state.score.revision) { error(Object.assign(new Error('The score changed during your drag. Review the preserved timing fields and apply again.'), { code: 'REVISION_CONFLICT' })); renderTimeline(); return; }
-      await operation(proposed, 'Dragged word timing saved and locked');
+      await operation(proposed, 'Dragged word timing saved; protected from alignment');
     };
     const cancel = () => { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', finish); document.removeEventListener('pointercancel', cancel); document.body.classList.remove('dragging'); state.drag = null; draft(false); populateInspector(); renderTimeline(); };
     document.addEventListener('pointermove', move); document.addEventListener('pointerup', finish); document.addEventListener('pointercancel', cancel);

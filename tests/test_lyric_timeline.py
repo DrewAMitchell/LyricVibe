@@ -72,6 +72,40 @@ class LyricTimelineTests(unittest.TestCase):
         app.nudge_playhead(SimpleNamespace(widget=app.roll, state=0x20000), 50)
         self.assertEqual(app.position_ms, position+10)
 
+    def test_green_word_can_be_dragged_again_resized_and_adjusted_precisely(self):
+        app = self.app
+        def block():
+            return next(h for h in app.hitboxes if h[4] == app.selected and h[5] == 'block')
+        def move(dx):
+            hit = block()
+            x, y = (hit[0]+hit[2])/2, (hit[1]+hit[3])/2
+            app.press(SimpleNamespace(x=x, y=y))
+            self.assertIsNotNone(app.drag, 'A manually protected green block must remain draggable')
+            app.motion(SimpleNamespace(x=x+dx, y=y))
+            app.release_drag()
+        move(20)
+        first = app.target()[0].copy()
+        self.assertTrue(first['locked'])
+        move(20)
+        second = app.target()[0].copy()
+        self.assertGreater(second['startMs'], first['startMs'])
+        self.assertTrue(second['locked'])
+        hit = block(); x, y = hit[2]-2, (hit[1]+hit[3])/2
+        app.press(SimpleNamespace(x=x, y=y))
+        self.assertEqual(app.drag['mode'], 'end')
+        app.motion(SimpleNamespace(x=x-12, y=y)); app.release_drag()
+        resized = app.target()[0].copy()
+        self.assertLess(resized['endMs'], second['endMs'])
+        self.assertTrue(resized['locked'])
+        self.assertFalse(app.apply_button.instate(['disabled']))
+        app.wheel_timing(SimpleNamespace(widget=app.start_entry, delta=120, state=0))
+        self.assertEqual(int(app.start_value.get()), resized['startMs']+100)
+        app.apply_fields()
+        self.assertEqual(app.target()[0]['startMs'], resized['startMs']+100)
+        self.assertTrue(app.target()[0]['locked'])
+        app.undo()
+        self.assertEqual(app.target()[0]['startMs'], resized['startMs'])
+
     def test_narrow_layout_ruler_labels_do_not_collide(self):
         app = self.app
         self.root.geometry('600x650'); self.root.update()

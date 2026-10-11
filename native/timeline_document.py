@@ -113,31 +113,18 @@ def _find_word(score: dict[str, Any], word_id: Any):
     return next(((phrase, word) for phrase, word in _words(score) if word.get("id") == word_id), None)
 
 
-def _find_syllable(score: dict[str, Any], syllable_id: Any):
-    for _phrase, word in _words(score):
-        for syllable in word.get("syllables", []):
-            if syllable.get("id") == syllable_id:
-                return word, syllable
-    return None
-
-
 def _check_edit_locks(score: dict[str, Any], operation: dict[str, Any]) -> None:
     kind = operation.get("type")
-    if kind in {"setWordLock", "setSyllableLock"}:
-        return  # Explicit lock operations are the sole unlock path.
-    if kind in {"setWordTiming", "setWordText", "setWordSyllables"}:
+    if kind in {"setWordLock", "setSyllableLock", "setWordTiming", "setSyllableTiming"}:
+        # Direct timing is an intentional manual edit, not alignment admission.
+        # It preserves protection while allowing iterative move/resize gestures.
+        return
+    if kind in {"setWordText", "setWordSyllables"}:
         found = _find_word(score, operation.get("wordId"))
         if found is None:
             return  # Shared core reports its stable UNKNOWN_ID error.
         _phrase, word = found
         if word.get("locked") or any(item.get("locked") for item in word.get("syllables", [])):
-            raise TimelineError("LOCKED")
-    elif kind == "setSyllableTiming":
-        found = _find_syllable(score, operation.get("syllableId"))
-        if found is None:
-            return
-        word, syllable = found
-        if word.get("locked") or syllable.get("locked"):
             raise TimelineError("LOCKED")
     elif kind == "setPhraseTiming":
         phrase = next((item for item in score.get("phrases", []) if item.get("id") == operation.get("phraseId")), None)

@@ -98,7 +98,7 @@ test('lanes overlap independently and activeAt uses a pure media clock plus offs
   assert.equal(s.offsetMs, 0);
 });
 
-test('validated operations are revisioned, immutable, and manual timing becomes locked', () => {
+test('validated operations are revisioned, immutable, and locked manual timing remains manually editable', () => {
   const s = makeScore();
   const { word, phrase } = allWords(s)[0];
   const next = score.applyOperation(s, { type: 'setWordTiming', wordId: word.id, startMs: phrase.startMs + 100, endMs: phrase.startMs + 400 }, 0);
@@ -108,7 +108,16 @@ test('validated operations are revisioned, immutable, and manual timing becomes 
   assert.equal(edited.provenance, 'manual');
   assert.equal(edited.locked, true);
   errorCode(() => score.applyOperation(next, { type: 'setWordTiming', wordId: word.id, startMs: phrase.startMs, endMs: phrase.startMs + 100 }, 0), 'REVISION_CONFLICT');
-  errorCode(() => score.applyOperation(next, { type: 'setWordTiming', wordId: word.id, startMs: phrase.startMs, endMs: phrase.startMs + 100 }, 1), 'LOCKED');
+  const adjusted = score.applyOperation(next, { type: 'setWordTiming', wordId: word.id, startMs: phrase.startMs + 50, endMs: phrase.startMs + 350 }, 1);
+  const adjustedWord = allWords(adjusted).find(pair => pair.word.id === word.id).word;
+  assert.deepEqual([adjustedWord.startMs, adjustedWord.endMs], [phrase.startMs + 50, phrase.startMs + 350]);
+  assert.equal(adjustedWord.provenance, 'manual');
+  assert.equal(adjustedWord.locked, true);
+  const aligned = score.applyAlignment(adjusted, [
+    { wordId: word.id, startMs: phrase.startMs + 800, endMs: phrase.startMs + 1100, accepted: true, evidenceId: 'manual-word-protected' },
+  ], 2);
+  const alignedWord = allWords(aligned).find(pair => pair.word.id === word.id).word;
+  assert.deepEqual([alignedWord.startMs, alignedWord.endMs], [adjustedWord.startMs, adjustedWord.endMs]);
   errorCode(() => score.applyOperation(s, { type: 'setWordEffect', wordId: word.id, effect: { type: 'pulse', strength: 2 } }, 0), 'INVALID_EFFECT');
   errorCode(() => score.applyOperation(s, { type: 'setWordText', wordId: 'missing', text: 'x' }, 0), 'UNKNOWN_ID');
 });
@@ -203,8 +212,14 @@ test('syllable segmentation preserves punctuation, uses global IDs, and exposes 
   assert.deepEqual(target.syllables.map(syllable => [syllable.provenance, syllable.locked]), [['manual', true], ['manual', true]]);
   assert.ok(score.activeAt(split, splitAt).phrases[0].activeSyllables.includes('syllable-2'));
   const directTiming = score.applyOperation(split, { type: 'setSyllableTiming', syllableId: 'syllable-2', startMs: splitAt + 10, endMs: word.endMs }, 1);
-  assert.equal(directTiming.phrases[0].words[0].syllables[1].locked, true);
-  assert.equal(directTiming.phrases[0].words[0].syllables[1].startMs, splitAt + 10);
+  const retimedSyllable = score.applyOperation(directTiming, { type: 'setSyllableTiming', syllableId: 'syllable-2', startMs: splitAt + 20, endMs: word.endMs - 10 }, 2);
+  assert.equal(retimedSyllable.phrases[0].words[0].syllables[1].locked, true);
+  assert.equal(retimedSyllable.phrases[0].words[0].syllables[1].provenance, 'manual');
+  assert.deepEqual([retimedSyllable.phrases[0].words[0].syllables[1].startMs, retimedSyllable.phrases[0].words[0].syllables[1].endMs], [splitAt + 20, word.endMs - 10]);
+  const aligned = score.applyAlignment(retimedSyllable, [
+    { wordId: word.id, startMs: word.startMs + 200, endMs: word.endMs - 100, accepted: true, evidenceId: 'manual-syllable-protected' },
+  ], 3);
+  assert.deepEqual([aligned.phrases[0].words[0].syllables[1].startMs, aligned.phrases[0].words[0].syllables[1].endMs], [splitAt + 20, word.endMs - 10]);
   const estimatedSplit = score.applyOperation(base, { type: 'setWordSyllables', wordId: word.id, syllables: [
     { id: 'estimated-first', text: 'sing', startMs: word.startMs, endMs: splitAt, provenance: 'estimated', locked: false },
     { id: 'estimated-punctuation', text: '!', startMs: splitAt, endMs: word.endMs, provenance: 'estimated', locked: false },

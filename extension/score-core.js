@@ -289,7 +289,6 @@
     const op = operation;
     if (op.type === "setWordTiming") {
       const { phrase, word } = locateWord(next, op.wordId);
-      if (word.locked) fail("LOCKED", "word timing is locked");
       finiteNonnegative(op.startMs, "startMs"); finiteNonnegative(op.endMs, "endMs");
       if (op.endMs < op.startMs || op.startMs < phrase.startMs || op.endMs > phrase.endMs) fail("INVALID_TIME", "word timing must fit within its phrase");
       rescaleSyllables(word, word.startMs, word.endMs, op.startMs, op.endMs);

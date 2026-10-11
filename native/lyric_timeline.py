@@ -210,9 +210,8 @@ class LyricTimeline:
         if item:
             self.selection_text.set(('Syllable “' if selected[0] == 'syllable' else 'Word “')+item['text']+'”')
             self.start_value.set(str(round(item['startMs']))); self.end_value.set(str(round(item['endMs'])))
-            locked = item['locked'] or (selected[0] == 'syllable' and word['locked'])
-            self.lock_button.configure(text='Unlock to Edit' if locked else 'Protect Timing')
-            self.apply_button.state(['disabled'] if locked else ['!disabled'])
+            self.lock_button.configure(text='Allow Auto Timing' if item['locked'] else 'Protect Timing')
+            self.apply_button.state(['!disabled'])
             self.split_button.state(['disabled'] if selected[0] != 'word' or word['locked'] or any(s['locked'] for s in word.get('syllables', [])) else ['!disabled'])
         self.draw()
 
@@ -326,8 +325,6 @@ class LyricTimeline:
             self.stop(); self.position_ms = max(0, self.ms(event.x)); self.draw_playhead(); self.draw_preview(); return
         self.select(hit[4]); item, word = self.target()
         if hit[5] == 'label': return
-        if item['locked'] or (self.selected[0] == 'syllable' and word['locked']):
-            self.status.set('This timing is protected. Choose Unlock to Edit before moving it.'); return
         self.stop()
         mode = 'start' if abs(event.x-hit[0]) <= 7 else 'end' if abs(event.x-hit[2]) <= 7 else 'move'
         self.drag = {'target': self.selected, 'mode': mode, 'x': event.x, 'old': (item['startMs'], item['endMs']),
@@ -391,7 +388,7 @@ class LyricTimeline:
 
     def wheel_timing(self, event):
         item, word = self.target()
-        if not item or item['locked'] or (self.selected[0] == 'syllable' and word['locked']): return 'break'
+        if not item: return 'break'
         value = self.start_value if event.widget is self.start_entry else self.end_value
         step = 1000 if event.state & 1 else 1 if event.state & (8 | 0x20000) else 100
         try:
@@ -403,12 +400,10 @@ class LyricTimeline:
     def toggle_lock(self):
         item, word = self.target()
         if not item: return
-        if self.selected[0] == 'syllable' and word['locked']:
-            self.status.set('The parent word is protected. Select its main block and unlock the word first.'); return
         kind, identity = self.selected
         if self.act({'type': 'setWordLock' if kind == 'word' else 'setSyllableLock',
                      'wordId' if kind == 'word' else 'syllableId': identity, 'locked': not item['locked']}):
-            self.status.set('Timing unlocked for editing.' if item['locked'] else 'Timing protected from automatic changes.')
+            self.status.set('Automatic timing protection removed for this item. Manual editing is always available.' if item['locked'] else 'Timing protected from automatic changes. You can still drag or resize it.')
 
     def split_syllables(self):
         from tkinter import simpledialog
@@ -472,7 +467,7 @@ class LyricTimeline:
             if self.audio.busy: self.root.after(25, begin); return
             if self.audio.play(start, duration_seconds=duration):
                 self.follow_audio = True
-                self.status.set('Playing the original recording. Preview is bounded to 12 seconds; Stop retains your place.')
+                self.status.set('Preparing the original recording… Stop cancels playback.')
         begin()
 
     def stop(self):
@@ -492,9 +487,12 @@ class LyricTimeline:
 
     def poll(self):
         if self.audio:
+            previous_state = self.play_state
             state = self.audio.poll(); self.play_state = state['state']
             if self.follow_audio and state.get('positionMs') is not None: self.position_ms = state['positionMs']
             if state.get('error'): self.status.set(state['error'])
+            elif self.play_state == 'playing' and previous_state != 'playing':
+                self.status.set('Playing the original recording. Space pauses; Escape stops and retains your place.')
             if self.play_state == 'playing' and self.position_ms >= self.view_end: self.audio.stop()
         self.play_button.configure(text='◌  Preparing…' if self.play_state == 'preparing' else 'Ⅱ  Pause' if self.play_state == 'playing' else '▶  Play Preview')
         self.stop_button.state(['!disabled'] if self.play_state in ('playing', 'preparing') else ['disabled'])
@@ -533,6 +531,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--package', type=Path, required=True)
     parser.add_argument('--media', type=Path)
+    parser.add_argument('--score', type=Path, help='Open a saved score copy for this exact package before showing the editor.')
     parser.add_argument('--foreground', action='store_true')
     parser.add_argument('--self-test', action='store_true')
     args = parser.parse_args()
@@ -541,6 +540,8 @@ def main():
         install_headless_children()
     import tkinter as tk
     document = TimelineDocument(args.package)
+    if args.score is not None:
+        document.import_score(args.score, document.revision)
     root = tk.Tk(); app = LyricTimeline(root, document, args.media)
     if args.self_test:
         try:
