@@ -7,6 +7,7 @@ import wave
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,6 +16,13 @@ from native import companion
 
 
 class NativeCompanionTests(unittest.TestCase):
+    def test_shared_validator_suppresses_a_console_child_on_windows(self):
+        with patch.object(companion.subprocess, 'run', wraps=subprocess.run) as run:
+            result = companion._validate_score(self.base_score)
+        self.assertEqual(result['mediaKey'], 'youtube:FIXTURE0001')
+        self.assertEqual(run.call_args.kwargs['creationflags'], getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        self.assertTrue(run.call_args.kwargs['capture_output'])
+
     @classmethod
     def setUpClass(cls):
         script = """

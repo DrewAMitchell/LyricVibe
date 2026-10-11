@@ -52,6 +52,7 @@ def _validate_score(score: Any) -> dict[str, Any]:
         result = subprocess.run(
             ["node", "-e", script], input=json.dumps(score, ensure_ascii=False),
             text=True, capture_output=True, cwd=ROOT, timeout=15, check=False,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
         )
     except (OSError, subprocess.TimeoutExpired):
         raise CompanionError("SCORE_VALIDATOR_UNAVAILABLE", "Node.js score validation could not run.") from None
