@@ -281,8 +281,9 @@ export function createEditorController(options: EditorControllerOptions): Editor
 
   function assertCurrentEnvelope(request: EditorDispatchRequest): void {
     if (!state.score) throw makeError("EDITOR_BUSY", "Open a score first.");
-    if (state.busy || state.draft) throw makeError("EDITOR_BUSY", "Apply or discard the current draft and wait for pending work first.");
     if (!isRecord(request)) throw makeError("INVALID_OPERATION", "Editor request must be an object.");
+    const audition = request.type === "LV_SCORE_TRANSPORT" || request.type === "LV_SCORE_SEEK";
+    if (state.busy || (state.draft && !audition)) throw makeError("EDITOR_BUSY", "Apply or discard the current draft and wait for pending work first.");
     if (request.mediaKey !== core.mediaKey(state.score.source)) throw makeError("SOURCE_MISMATCH", "Editor source does not match request.");
     if (request.lyricsHash !== state.score.lyrics.contentHash) throw makeError("LYRIC_REVISION_MISMATCH", "Editor lyric hash does not match request.");
     if (request.expectedRevision !== state.score.revision) throw makeError("REVISION_CONFLICT", "Editor revision changed; read state before retrying.");

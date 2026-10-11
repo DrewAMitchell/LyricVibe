@@ -668,3 +668,37 @@ test('a confirmed video change disconnects the old clock while preserving score 
   assert.match(controller.getState().notice.message, /original video clock/);
   controller.dispose();
 });
+
+test('audition controls preserve a timing draft while score changes remain blocked', async () => {
+  const score = makeScore(), mediaKey = core.mediaKey(score.source);
+  const runtime = captureRuntime({ respond: async message => message.type === 'LV_SCORE_GET'
+    ? { ok: true, score, review: [] } : { ok: true } });
+  const controller = createEditorController(controllerOptions({ runtime, mode: 'youtube', tabId: 17 }));
+  await controller.initialize();
+  runtime.emit({ type: 'LV_SCORE_PLAYBACK', mediaKey, mediaMs: 1500, paused: false }, { id: runtime.id, tab: { id: 17 } });
+  controller.setDraft(true);
+  const before = controller.getState();
+  try {
+    const pause = await controller.dispatch({ type: 'LV_SCORE_TRANSPORT', ...envelope(score), action: 'pause' });
+    assert.equal(pause.ok, true);
+    assert.equal(controller.getState().playback.paused, true);
+    const seek = await controller.dispatch({ type: 'LV_SCORE_SEEK', ...envelope(score), mediaMs: 1600 });
+    assert.equal(seek.ok, true);
+    assert.equal(controller.getState().playback.mediaMs, 1600);
+    const play = await controller.dispatch({ type: 'LV_SCORE_TRANSPORT', ...envelope(score), action: 'play' });
+    assert.equal(play.ok, true);
+    const after = controller.getState();
+    assert.equal(after.draft, true);
+    assert.deepEqual(after.score, before.score);
+    assert.deepEqual(after.selection, before.selection);
+    const edit = await controller.dispatch({ type: 'LV_SCORE_OPERATION', ...envelope(score), operation: { type: 'setOffset', offsetMs: 250 } });
+    assert.equal(edit.ok, false);
+    assert.equal(edit.error.code, 'EDITOR_BUSY');
+    const undo = await controller.dispatch({ type: 'LV_SCORE_UNDO', ...envelope(score) });
+    assert.equal(undo.ok, false);
+    assert.equal(undo.error.code, 'EDITOR_BUSY');
+    const wrongSource = await controller.dispatch({ type: 'LV_SCORE_TRANSPORT', ...envelope(score), mediaKey: 'youtube:FIXTURE0003', action: 'pause' });
+    assert.equal(wrongSource.ok, false);
+    assert.equal(wrongSource.error.code, 'SOURCE_MISMATCH');
+  } finally { controller.dispose(); }
+});
