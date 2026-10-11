@@ -151,6 +151,7 @@ export function createEditorController(options: EditorControllerOptions): Editor
   let scoreEpoch = 0;
   let initialized = false;
   let disposed = false;
+  let clockSourceChanged = false;
   let runtimeListener: RuntimeMessageListener | null = null;
   let cancelMetadataWait: (() => void) | null = null;
   const audioListeners: Array<[string, EventListener]> = [];
@@ -457,7 +458,22 @@ export function createEditorController(options: EditorControllerOptions): Editor
       return;
     }
     if (message.type === "LV_SCORE_PLAYBACK") {
+      if (expectedKey && typeof message.mediaKey === "string" && message.mediaKey !== expectedKey &&
+          core.mediaKey({ videoId: message.mediaKey.slice(8) }) === message.mediaKey &&
+          sourcePlaybackMatches(message, sender, message.mediaKey)) {
+        clockSourceChanged = true;
+        state.clockSeen = false;
+        state.playback.paused = true;
+        state.playback.loop = null;
+        state.notice = { message: "The source tab changed videos. Your score and draft are preserved; reopen the editor from the current video.", kind: "error" };
+        notify();
+        return;
+      }
       if (!expectedKey || !sourcePlaybackMatches(message, sender, expectedKey)) return;
+      if (clockSourceChanged) {
+        clockSourceChanged = false;
+        state.notice = { message: "The original video clock is connected again. Review any draft before applying it.", kind: "" };
+      }
       state.playback.mediaMs = message.mediaMs as number;
       state.playback.paused = message.paused as boolean;
       state.clockSeen = true;

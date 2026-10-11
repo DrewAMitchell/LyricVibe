@@ -641,3 +641,30 @@ test('live playback requires extension sender, exact tab, and bound media key; d
   controller.dispose();
   assert.equal(runtime.listenerCount(), 0);
 });
+
+test('a confirmed video change disconnects the old clock while preserving score and draft', async () => {
+  const score = makeScore(), mediaKey = core.mediaKey(score.source);
+  const runtime = captureRuntime({ respond: async () => ({ ok: true, score, review: [] }) });
+  const controller = createEditorController(controllerOptions({ runtime, mode: 'youtube', tabId: 17 }));
+  await controller.initialize();
+  runtime.emit({ type: 'LV_SCORE_PLAYBACK', mediaKey, mediaMs: 1500, paused: false }, { id: runtime.id, tab: { id: 17 } });
+  controller.setDraft(true);
+  const before = controller.getState();
+  const changed = { type: 'LV_SCORE_PLAYBACK', mediaKey: 'youtube:FIXTURE0003', mediaMs: 2000, paused: false };
+  runtime.emit(changed, { id: runtime.id, tab: { id: 18 } });
+  assert.equal(controller.getState().clockSeen, true);
+  runtime.emit(changed, { id: runtime.id, tab: { id: 17 } });
+  const after = controller.getState();
+  assert.equal(after.clockSeen, false);
+  assert.equal(after.playback.paused, true);
+  assert.equal(after.playback.mediaMs, before.playback.mediaMs);
+  assert.equal(after.draft, true);
+  assert.deepEqual(after.score, before.score);
+  assert.deepEqual(after.selection, before.selection);
+  assert.match(after.notice.message, /changed videos/);
+  runtime.emit({ type: 'LV_SCORE_PLAYBACK', mediaKey, mediaMs: 1800, paused: true }, { id: runtime.id, tab: { id: 17 } });
+  assert.equal(controller.getState().clockSeen, true);
+  assert.equal(controller.getState().draft, true);
+  assert.match(controller.getState().notice.message, /original video clock/);
+  controller.dispose();
+});
