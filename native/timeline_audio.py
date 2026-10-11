@@ -12,11 +12,6 @@ RATE = 16_000
 MAX_CLIP_SECONDS = 12
 
 
-def _load_bound_package(package_path: Path, media_path: Path) -> dict[str, Any]:
-    from .guide_viewer import load_bound_package
-    return load_bound_package(package_path, media_path)
-
-
 def _decode_audition(media_path: Path, start_ms: float, stop: threading.Event,
                      duration_seconds: int) -> bytes:
     from .guide_review import decode_audition
@@ -38,11 +33,15 @@ class TimelineAudio:
                  output_stream_factory: Callable | None = None,
                  callback_stop: type[BaseException] | None = None,
                  callback_abort: type[BaseException] | None = None,
-                 monotonic: Callable[[], float] = time.monotonic):
+                 monotonic: Callable[[], float] = time.perf_counter):
         self.package_path = Path(package_path).expanduser().resolve()
         self.media_path = Path(media_path).expanduser().resolve()
         self._expected_package = deepcopy(expected_package) if expected_package is not None else None
-        self._package_loader = package_loader or _load_bound_package
+        if package_loader is None:
+            from .review_source import ReviewSourceBinding
+            binding = ReviewSourceBinding(self.package_path, self.media_path)
+            package_loader = lambda _package, _media: binding()
+        self._package_loader = package_loader
         self._decoder = decoder or _decode_audition
         self._output_stream_factory = output_stream_factory
         self._callback_stop = callback_stop
@@ -62,6 +61,13 @@ class TimelineAudio:
         self._clock_anchor_frame: int | None = None
         self._clock_anchor_monotonic: float | None = None
         self._queued_frame = 0
+        self._trace_epoch = 0
+        self._request_monotonic = 0.0
+        self._startup_events: list[dict[str, Any]] = []
+        self._first_dac_ms: float | None = None
+        self._output_latency_ms: float | None = None
+        self._underflows = 0
+        self._startup_error_code: str | None = None
 
     @property
     def busy(self) -> bool:
@@ -79,6 +85,13 @@ class TimelineAudio:
                 return False
             self._epoch += 1
             epoch = self._epoch
+            self._trace_epoch = epoch
+            self._request_monotonic = self._monotonic()
+            self._startup_events = [{'name': 'play-request', 'afterRequestMs': 0.0}]
+            self._first_dac_ms = None
+            self._output_latency_ms = None
+            self._underflows = 0
+            self._startup_error_code = None
             stop_event = threading.Event()
             self._stop_event = stop_event
             self._state = 'preparing'
@@ -120,6 +133,23 @@ class TimelineAudio:
             return {'state': self._state, 'positionMs': self._position_ms,
                     'error': self._error, 'errorCode': self._error_code}
 
+    def startup_trace(self) -> dict[str, Any]:
+        """Last request's bounded numeric trace; no lyrics, paths or PCM."""
+        with self._lock:
+            return {'version': 'lyricvibe.output-start.v1', 'requestId': self._trace_epoch,
+                    'events': deepcopy(self._startup_events), 'firstDacAfterRequestMs': self._first_dac_ms,
+                    'outputLatencyMs': self._output_latency_ms, 'outputUnderflows': self._underflows,
+                    'failureCode': self._startup_error_code}
+
+    def _trace_locked(self, epoch: int, name: str) -> None:
+        if epoch == self._trace_epoch and len(self._startup_events) < 24:
+            self._startup_events.append({'name': name,
+                'afterRequestMs': round((self._monotonic()-self._request_monotonic)*1000, 2)})
+
+    def _trace(self, epoch: int, name: str) -> None:
+        with self._lock:
+            self._trace_locked(epoch, name)
+
     def close(self) -> bool:
         with self._lock:
             self._closed = True
@@ -149,6 +179,8 @@ class TimelineAudio:
             self._state = 'failed'
             self._error = message
             self._error_code = code
+            self._startup_error_code = code
+            self._trace_locked(epoch, 'failed')
 
     def _run(self, epoch: int, stop_event: threading.Event, start_ms: float,
              duration_seconds: int) -> None:
@@ -157,7 +189,9 @@ class TimelineAudio:
         stage = 'binding'
         callback_error: list[str] = []
         try:
+            self._trace(epoch, 'binding-start')
             package = self._package_loader(self.package_path, self.media_path)
+            self._trace(epoch, 'binding-end')
             if self._expected_package is not None and package != self._expected_package:
                 raise ValueError('Review package no longer matches the open editor document.')
             audio = package.get('audio')
@@ -173,7 +207,9 @@ class TimelineAudio:
                 self._end_ms = end_ms
 
             stage = 'decode'
+            self._trace(epoch, 'decode-start')
             pcm = self._decoder(self.media_path, start_ms, stop_event, duration_seconds)
+            self._trace(epoch, 'decode-end')
             if stop_event.is_set() or not self._is_current(epoch):
                 return
             if not isinstance(pcm, bytes) or not pcm or len(pcm) % 2 or len(pcm) > duration_seconds * RATE * 2:
@@ -190,13 +226,17 @@ class TimelineAudio:
             # Recheck the exact package/media binding after decode. If either file
             # changed while FFmpeg read it, discard the decoded audio.
             stage = 'binding'
+            self._trace(epoch, 'binding-recheck-start')
             if self._package_loader(self.package_path, self.media_path) != package:
                 raise ValueError('Review package or source recording changed during playback setup.')
+            self._trace(epoch, 'binding-recheck-end')
             if stop_event.is_set() or not self._is_current(epoch):
                 return
 
             stage = 'output'
+            self._trace(epoch, 'output-runtime-start')
             factory, callback_stop, callback_abort = self._stream_factory()
+            self._trace(epoch, 'output-runtime-end')
             if callback_stop is None or callback_abort is None:
                 raise RuntimeError('Audio output callbacks are unavailable.')
             frame_count = len(pcm) // 2
@@ -225,14 +265,26 @@ class TimelineAudio:
                         raise callback_abort
                     if not started:
                         started = True
+                        self._trace_locked(epoch, 'first-output-callback')
+                        self._first_dac_ms = round((self._clock_anchor_monotonic-self._request_monotonic)*1000, 2)
                         self._state = 'playing'
+                    if getattr(_status, 'output_underflow', False):
+                        self._underflows += 1
                     self._position_ms = min(end_ms, start_ms + first_frame * 1000 / RATE)
                 if self._queued_frame >= frame_count:
                     raise callback_stop
 
-            stream = factory(samplerate=RATE, channels=1, dtype='int16', blocksize=320,
+            self._trace(epoch, 'device-open-start')
+            stream = factory(samplerate=RATE, channels=1, dtype='int16', blocksize=320, latency='low',
                              callback=output, finished_callback=finished.set)
+            with self._lock:
+                latency = getattr(stream, 'latency', None)
+                if isinstance(latency, (int, float)) and math.isfinite(latency):
+                    self._output_latency_ms = round(latency*1000, 2)
+                self._trace_locked(epoch, 'device-open-end')
+            self._trace(epoch, 'stream-start-request')
             stream.start()
+            self._trace(epoch, 'stream-start-return')
             deadline = self._monotonic() + duration_seconds + 3
             while not finished.wait(.05):
                 if stop_event.is_set() or not self._is_current(epoch):
@@ -278,6 +330,7 @@ class TimelineAudio:
                     stream.close()
                 except Exception:
                     pass
+                self._trace(epoch, 'output-close')
 
     def _is_current(self, epoch: int) -> bool:
         with self._lock:

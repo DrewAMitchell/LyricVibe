@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -14,7 +13,7 @@ import time
 
 import numpy as np
 
-from .companion import _validate_score
+from .review_source import load_bound_package
 from .guide_audio_feedback import LiveTapClickMixer
 from .guide_capture import GuideCapture, list_input_devices
 from .guide_features import GuideFeatureStream
@@ -24,23 +23,6 @@ RATE = 16_000
 CLIP_MS = 12_000
 CASES = [('Held: arms', 'phrase-2', 10_500), ('Held: tears', 'phrase-3', 15_000),
          ('Fast: made chains', 'phrase-30', 105_000), ('Fast: need it on sight', 'phrase-41', 139_000)]
-
-
-def load_bound_package(package_path: Path, media_path: Path) -> dict:
-    if package_path.stat().st_size > 10_000_000:
-        raise ValueError('Review package exceeds size limit.')
-    package = json.loads(package_path.read_text(encoding='utf-8'))
-    if package.get('version') != 'lyricvibe.review.v1':
-        raise ValueError('Unsupported review package.')
-    _validate_score(package['score'])
-    digest = hashlib.sha256()
-    with media_path.open('rb') as source:
-        for block in iter(lambda: source.read(1_048_576), b''):
-            digest.update(block)
-    if (digest.hexdigest() != package['audio']['sha256']
-            or media_path.stat().st_size != package['audio']['sizeBytes']):
-        raise ValueError('Recording does not match review package.')
-    return package
 
 
 def decode_clip(media: Path, start_ms: int) -> bytes:

@@ -536,6 +536,9 @@ def main():
     parser.add_argument('--foreground', action='store_true')
     parser.add_argument('--self-test', action='store_true')
     args = parser.parse_args()
+    if not args.self_test:
+        from .windows_runtime import install_headless_children
+        install_headless_children()
     import tkinter as tk
     document = TimelineDocument(args.package)
     root = tk.Tk(); app = LyricTimeline(root, document, args.media)

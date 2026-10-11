@@ -16,6 +16,7 @@ class CallbackAbort(Exception):
 
 class FakeStream:
     def __init__(self, **kwargs):
+        self.settings = kwargs
         self.callback = kwargs['callback']
         self.finished_callback = kwargs['finished_callback']
         self.closed = False
@@ -117,6 +118,7 @@ class TimelineAudioTests(unittest.TestCase):
         self.assertEqual(audio.poll(), {'state': 'preparing', 'positionMs': 1_250.0,
                                         'error': None, 'errorCode': None})
         self.assertEqual(len(calls), 2)
+        self.assertEqual(self.streams[0].settings['latency'], 'low')
         self.assertTrue(all(str(package).endswith('package.json') and str(media).endswith('take.wav')
                             for package, media in calls))
         self.finish_audio(audio)
@@ -157,6 +159,23 @@ class TimelineAudioTests(unittest.TestCase):
                                         'error': None, 'errorCode': None})
         self.finish_audio(audio)
 
+    def test_startup_trace_is_request_bound_numeric_defensive_and_tracks_first_dac(self):
+        audio, _ = self.make_audio()
+        self.assertTrue(audio.play(2000, 3))
+        self.assertTrue(self.stream_ready.wait(1))
+        self.clock[0] = 100.05
+        self.streams[0].emit(clock=types.SimpleNamespace(outputBufferDacTime=10.2, currentTime=10.0))
+        trace = audio.startup_trace()
+        self.assertEqual(trace['firstDacAfterRequestMs'], 250.0)
+        self.assertEqual(trace['outputUnderflows'], 0)
+        names = [item['name'] for item in trace['events']]
+        self.assertLess(names.index('decode-start'), names.index('device-open-start'))
+        self.assertIn('first-output-callback', names)
+        trace['events'].clear()
+        self.assertTrue(audio.startup_trace()['events'])
+        self.finish_audio(audio)
+        self.assertIn('output-close', [item['name'] for item in audio.startup_trace()['events']])
+
     def test_decoder_failure_is_reported_without_leaking_exception_details(self):
         audio, _ = self.make_audio(decoder=lambda *_: (_ for _ in ()).throw(RuntimeError('C:\\private\\take.wav')))
         self.assertTrue(audio.play(100, 3))
@@ -164,6 +183,7 @@ class TimelineAudioTests(unittest.TestCase):
         result = audio.poll()
         self.assertIn('FFmpeg', result['error'])
         self.assertEqual(result['errorCode'], 'AUDIO_DECODE_FAILED')
+        self.assertEqual(audio.startup_trace()['failureCode'], 'AUDIO_DECODE_FAILED')
         self.assertNotIn('private', result['error'])
         self.assertTrue(audio.close())
 

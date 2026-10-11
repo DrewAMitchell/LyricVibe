@@ -595,7 +595,7 @@ class GuideReview:
         def worker():
             failed = False
             try:
-                from .guide_viewer import load_bound_package
+                from .review_source import load_bound_package
                 import sounddevice as sd
                 if self.play_stop.is_set(): return
                 verified = load_bound_package(self.doc.package_path, self.media)
