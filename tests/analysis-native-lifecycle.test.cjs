@@ -35,7 +35,7 @@ function setup() {
     setInterval: fn => { intervals.add(fn); return fn; }, clearInterval: fn => intervals.delete(fn), setTimeout, clearTimeout,
     chrome: { runtime: {
       id: 'fixture-extension', getURL: file => `chrome-extension://fixture-extension/${file}`,
-      sendMessage: async message => { if (message.type === 'LV_ANALYSIS_CLOCK_REQUEST') return { ...clock }; outgoing.push(message); if (message.type === 'LV_ALIGNMENT_PROPOSALS') return { ok: true, score: { ...scoreValue, revision: scoreValue.revision + 1 } }; },
+      sendMessage: async message => { if (message.type === 'LV_ANALYSIS_CLOCK_REQUEST') return { ...clock }; outgoing.push(message); if (message.type === 'LV_ALIGNMENT_PROPOSALS') return { ok: true, score: { ...scoreValue } }; },
       connect: () => {
         const onMessage = event(), onDisconnect = event();
         port = { onMessage, onDisconnect, posts: [], postMessage(message) { this.posts.push(message); if (message.type === 'hello') setImmediate(() => onMessage.emit({ version: native.VERSION, type: 'hello', hostName: native.HOST_NAME, hostVersion: 'fixture-1', state: 'ready', modelReady: true, alignmentReady: true, limits: { maxAudioMs: 12000, sampleRateHz: 16000, channels: 1, encoding: 'pcm_s16le', maxPcmBytes: 384000 } })); else if (message.type === 'analyze') setImmediate(() => onMessage.emit({ version: native.VERSION, type: 'status', state: 'accepted', requestId: message.requestId, sessionId: message.sessionId, source: { ...message.source }, audio: { audioStartMs: message.audio.audioStartMs, sha256: message.audio.sha256 } })); }, disconnect() { this.disconnected = true; onDisconnect.emit(); } };
@@ -81,6 +81,8 @@ test('native offscreen runs without browser worker fallback, submits bounded aud
   assert.equal(proposals.diagnostics.automaticAdmissionEnabled, false);
   const response = await h.request({ type: 'LV_ANALYSIS_OFFSCREEN_STATUS' });
   assert.equal(response.analysis.engine, 'native');
+  assert.equal(response.analysis.state, 'capturing');
+  assert.equal(response.analysis.expectedRevision, 4);
   assert.equal(response.analysis.model, null);
   assert.deepEqual(JSON.parse(JSON.stringify(response.analysis.lastWindow)), { windowNumber: 1, captureEpoch: analyze.source.captureEpoch, expectedWordCount: 3, nativeWordCount: 1, proposalCount: 1, stage: 'result', resultReason: null, nativeReasonCode: null, capturedAudioStartMs: 11250, submittedAudioStartMs: 11250, resultAudioStartMs: 11250, nonZeroSampleCount: 192000, rms: 0.25 });
   assert.equal(h.port.posts[0].type, 'LV_NATIVE_BRIDGE_BIND');
@@ -103,6 +105,34 @@ test('native pause cancels the exact request and discards its late result', asyn
   assert.equal(cancel.source.captureEpoch, analyze.source.captureEpoch);
   assert.equal(h.outgoing.filter(message => message.type === 'LV_ALIGNMENT_PROPOSALS').length, 0);
   await h.request({ type: 'LV_ANALYSIS_OFFSCREEN_STOP' });
+});
+
+test('a completed review-only result permits the next native window at the same score revision', async () => {
+  const h = setup();
+  h.score.source.durationMs = 50000;
+  const later = scoreCore.createScore({ videoId: 'FIXTURE0001', durationMs: 50000 }, '[00:35]shine on', { contentHash: h.score.lyrics.contentHash }).phrases[0];
+  later.id = 'later-phrase';
+  later.words.forEach((word, i) => { word.id = `later-word-${i}`; });
+  h.score.phrases.push(later);
+  await h.request({ type: 'LV_ANALYSIS_OFFSCREEN_START', config: { engine: 'native', tabId: 7, mediaKey: h.clock.mediaKey, sessionId: 'native-session', score: h.score, streamId: 'synthetic' } });
+  try {
+    h.emitPcm(new Float32Array(192000).fill(.1), 0);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const first = h.port.posts.find(message => message.type === 'analyze');
+    assert.ok(first);
+    h.port.onMessage.emit({ version: native.VERSION, type: 'result', requestId: first.requestId, sessionId: first.sessionId, source: { ...first.source }, audio: { audioStartMs: first.audio.audioStartMs, sha256: first.audio.sha256 }, accepted: false, alignmentKind: 'supplied-text-ctc', automaticAdmissionEnabled: false, adapter: 'fixture', model: 'fixture-model', modelRevision: 'r1', words: [{ wordId: first.expectedWords[0].wordId, startMs: 9750, endMs: 10000 }], warnings: [] });
+    await new Promise(resolve => setImmediate(resolve));
+    h.context.currentTime = 24;
+    h.clock.currentTimeMs = 34250;
+    await [...h.intervals][0]();
+    h.emitPcm(new Float32Array(192000).fill(.1), 384000);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const windows = h.port.posts.filter(message => message.type === 'analyze');
+    assert.equal(windows.length, 2);
+    assert.equal(windows[1].source.scoreRevision, windows[0].source.scoreRevision);
+    assert.deepEqual(windows[1].expectedWords.map(word => word.text), ['shine', 'on']);
+    assert.equal((await h.request({ type: 'LV_ANALYSIS_OFFSCREEN_STATUS' })).analysis.expectedRevision, 4);
+  } finally { await h.request({ type: 'LV_ANALYSIS_OFFSCREEN_STOP' }); }
 });
 
 test('native capture clears the busy latch after unsupported and empty windows, then submits the next eligible phrase', async () => {

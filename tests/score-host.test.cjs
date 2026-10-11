@@ -256,6 +256,8 @@ test('uncertain proposals are returned for review and do not alter word timing',
   assert.equal(result.review.length, 1);
   assert.equal(result.review[0].accepted, false);
   assert.equal(recordFor(h).review.length, 1);
+  assert.equal(result.score.revision, score.revision);
+  assert.equal(recordFor(h).history.length, 0);
 });
 
 test('host rejects score requests while an advertisement is active or the media is unready', async () => {
@@ -270,6 +272,25 @@ test('host rejects score requests while an advertisement is active or the media 
   response = await h.dispatch({ type: 'LV_SCORE_GET', mediaKey: `youtube:${ID_A}` });
   assert.equal(response.ok, false);
   assert.equal(response.error.code, 'SOURCE_UNREADY');
+});
+
+test('analysis review and empty windows preserve the real edit as the next undo', async () => {
+  const h = makeHarness(), initial = await h.ensure(), word = firstWord(initial);
+  const manual = await h.dispatch({ type: 'LV_SCORE_OPERATION', expectedRevision: 0,
+    operation: { type: 'setWordTiming', wordId: word.id, startMs: word.startMs + 50, endMs: word.endMs + 50 } });
+  for (const proposals of [[], [{ wordId: word.id, startMs: word.startMs, endMs: word.endMs,
+    accepted: true, confidence: 1, evidenceId: 'review-only' }]]) {
+    const queued = await h.dispatch({ type: 'LV_ALIGNMENT_PROPOSALS', expectedRevision: manual.score.revision, proposals });
+    assert.equal(queued.ok, true);
+    assert.equal(queued.score.revision, manual.score.revision);
+    assert.equal(recordFor(h).history.length, 1);
+  }
+  const undone = await h.dispatch({ type: 'LV_SCORE_UNDO', expectedRevision: manual.score.revision });
+  assert.equal(undone.ok, true);
+  assert.equal(firstWord(undone.score).startMs, word.startMs);
+  assert.equal(recordFor(h).history.length, 0);
+  const again = await h.dispatch({ type: 'LV_SCORE_UNDO', expectedRevision: undone.score.revision });
+  assert.equal(again.error.code, 'UNDO_EMPTY');
 });
 
 test('cached score refreshes duration while retaining valid source title and artist', async () => {
@@ -315,7 +336,7 @@ test('review keeps pending proposals from earlier windows and replaces each word
   });
   assert.equal(firstWindow.ok, true);
   const secondWindow = await h.dispatch({
-    type: 'LV_ALIGNMENT_PROPOSALS', expectedRevision: 1,
+    type: 'LV_ALIGNMENT_PROPOSALS', expectedRevision: 0,
     diagnostics: { validatedForSinging: false, window: 2 },
     proposals: [{ wordId: first.id, startMs: first.startMs + 20, endMs: first.endMs, accepted: false, evidenceId: 'window-2-a', confidence: 0.8 }],
   });
@@ -325,10 +346,11 @@ test('review keeps pending proposals from earlier windows and replaces each word
   const latestFirst = secondWindow.review.find(p => p.wordId === first.id);
   assert.equal(latestFirst.evidenceId, 'window-2-a');
   assert.equal(latestFirst.confidence, 0.8);
-  assert.equal(secondWindow.score.revision, 2);
+  assert.equal(secondWindow.score.revision, 0);
+  assert.equal(recordFor(h).history.length, 0);
   const inspected = await h.dispatch({ type: 'LV_SCORE_GET', mediaKey: `youtube:${ID_A}` });
   assert.equal(inspected.diagnostics.window, 2);
-  const edited = await h.dispatch({ type: 'LV_SCORE_OPERATION', mediaKey: `youtube:${ID_A}`, expectedRevision: 2, operation: { type: 'setOffset', offsetMs: 50 } });
+  const edited = await h.dispatch({ type: 'LV_SCORE_OPERATION', mediaKey: `youtube:${ID_A}`, expectedRevision: 0, operation: { type: 'setOffset', offsetMs: 50 } });
   assert.equal(edited.ok, true);
   const refreshed = await h.dispatch({ type: 'LV_SCORE_GET', mediaKey: `youtube:${ID_A}` });
   assert.equal(refreshed.diagnostics, null);
@@ -350,18 +372,18 @@ test('host review application preserves a syllable-locked word despite a late pr
     diagnostics: { validatedForSinging: false }, proposals: [evidence],
   });
   assert.equal(reviewed.ok, true);
-  const forgedApply = await h.dispatch({ type: 'LV_SCORE_REVIEW_APPLY', tabId: 1, expectedRevision: 2, wordIds: [word.id] }, {
+  const forgedApply = await h.dispatch({ type: 'LV_SCORE_REVIEW_APPLY', tabId: 1, expectedRevision: 1, wordIds: [word.id] }, {
     id: 'test-extension', url: h.context.chrome.runtime.getURL('analysis/offscreen.html'),
   });
   assert.equal(forgedApply.ok, false);
   assert.equal(forgedApply.error.code, 'EDITOR_REQUIRED');
-  assert.equal(recordFor(h).score.revision, 2);
-  const wrongEditor = await h.dispatch({ type: 'LV_SCORE_REVIEW_APPLY', tabId: 1, expectedRevision: 2, wordIds: [word.id] }, {
+  assert.equal(recordFor(h).score.revision, 1);
+  const wrongEditor = await h.dispatch({ type: 'LV_SCORE_REVIEW_APPLY', tabId: 1, expectedRevision: 1, wordIds: [word.id] }, {
     id: 'test-extension', url: h.context.chrome.runtime.getURL(`editor.html?sourceTab=2&mediaKey=${encodeURIComponent(`youtube:${ID_A}`)}`),
   });
   assert.equal(wrongEditor.ok, false);
   assert.equal(wrongEditor.error.code, 'EDITOR_REQUIRED');
-  const applied = await h.dispatch({ type: 'LV_SCORE_REVIEW_APPLY', expectedRevision: 2, wordIds: [word.id] });
+  const applied = await h.dispatch({ type: 'LV_SCORE_REVIEW_APPLY', expectedRevision: 1, wordIds: [word.id] });
   assert.equal(applied.ok, true);
   const after = applied.score.phrases[0].words[0];
   assert.deepEqual([after.startMs, after.endMs], [before.startMs, before.endMs]);

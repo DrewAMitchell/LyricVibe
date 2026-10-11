@@ -133,14 +133,12 @@
         s.lastWindow.resultReason = null;
       }
       result.diagnostics.sampleWindow.requestId = pending.requestId;
-      s.pendingProposal = { requestId: pending.requestId, revision: s.score.revision };
       const response = await chrome.runtime.sendMessage({ type: 'LV_ALIGNMENT_PROPOSALS', engine: 'native', tabId: s.tabId, sessionId: s.sessionId, mediaKey: s.mediaKey, expectedRevision: s.score.revision, proposals: result.proposals, diagnostics: result.diagnostics });
       if (session !== s) return;
       if (!response?.ok) throw Object.assign(new Error(response?.error?.message || 'The score owner rejected native proposals.'), { code: response?.error?.code || 'NATIVE_PROPOSAL_REJECTED' });
-      if (response.score?.revision > s.score.revision) { s.score = response.score; s.pendingProposal = null; clearWindow(s); }
+      if (response.score?.revision !== s.score.revision) throw Object.assign(new Error('Review changed score revision.'), { code: 'REVISION_CONFLICT' });
       s.busy = false;
     } catch (error) {
-      s.pendingProposal = null;
       fail(s, error.code || 'NATIVE_RESULT_INVALID', error.code === 'ANALYSIS_SOURCE_MISMATCH' || error.code === 'REVISION_CONFLICT'
         ? 'The source or score changed during native analysis; stop and start again.'
         : 'Native analysis failed validation; stop and explicitly start a new session.');
@@ -346,9 +344,6 @@
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('service-worker.js')) return;
     if (message.type === 'LV_SCORE_UPDATED' && session && message.mediaKey === session.mediaKey && message.tabId === session.tabId && message.score?.revision > session.score.revision && scoreMatchesMedia(message.score, session.mediaKey)) {
-      if (session.engine === 'native' && session.pendingProposal && message.diagnostics?.sampleWindow?.requestId === session.pendingProposal.requestId && message.score.revision === session.pendingProposal.revision + 1) {
-        session.score = message.score; session.pendingProposal = null; clearWindow(session); publish(); return;
-      }
       if (session.engine === 'native') { cancelInflight(session); fail(session, 'SCORE_REVISION_CHANGED', 'The score changed during native analysis; stop and start again.'); return; }
       session.score = message.score;
       clearWindow(session);

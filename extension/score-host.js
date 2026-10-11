@@ -175,14 +175,17 @@
         // No singing-calibrated adapter is installed. Diagnostics cannot grant admission.
         // A future calibrated adapter needs a host-owned policy, not a sender-supplied flag.
         const proposals = (message.proposals || []).slice(0, 5000).map(p => ({ ...p, accepted: false }));
+        // Validate the envelope without adopting applyAlignment's incremented
+        // clone: receiving evidence is not a score edit or an undo checkpoint.
+        LvScore.applyAlignment(record.score, proposals, record.score.revision);
         const reviewByWord = new Map((record.review || []).map(p => [p.wordId, p]));
-        for (const proposal of proposals) {
-          if (proposal.accepted) reviewByWord.delete(proposal.wordId);
-          else reviewByWord.set(proposal.wordId, proposal);
-        }
+        for (const proposal of proposals) reviewByWord.set(proposal.wordId, proposal);
         record.review = [...reviewByWord.values()].slice(-5000);
         record.diagnostics = message.diagnostics;
-        next = LvScore.applyAlignment(record.score, proposals, record.score.revision);
+        await liveIdentity(tabId, key);
+        await chrome.storage.local.set({ [keyFor(key)]: record });
+        await publish(tabId, record);
+        return { ok: true, score: record.score, review: record.review, tabId, mediaKey: key };
       } else if (message.type === 'LV_SCORE_REVIEW_APPLY') {
         if (!editorSourceBound(sender, tabId, key)) throw fail('EDITOR_REQUIRED', 'Review proposals can only be applied from the editor opened for this source tab.');
         const selected = new Set(message.wordIds || []);
