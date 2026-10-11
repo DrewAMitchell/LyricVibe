@@ -129,9 +129,29 @@ test('a completed review-only result permits the next native window at the same 
     await new Promise(resolve => setTimeout(resolve, 100));
     const windows = h.port.posts.filter(message => message.type === 'analyze');
     assert.equal(windows.length, 2);
-    assert.equal(windows[1].source.scoreRevision, windows[0].source.scoreRevision);
+    assert.equal(windows[0].source.expectedRevision, 4);
+    assert.equal(windows[1].source.expectedRevision, 4);
     assert.deepEqual(windows[1].expectedWords.map(word => word.text), ['shine', 'on']);
     assert.equal((await h.request({ type: 'LV_ANALYSIS_OFFSCREEN_STATUS' })).analysis.expectedRevision, 4);
+  } finally { await h.request({ type: 'LV_ANALYSIS_OFFSCREEN_STOP' }); }
+});
+
+test('an actual score edit cancels native work instead of accepting an analysis-owned revision', async () => {
+  const h = setup();
+  await h.request({ type: 'LV_ANALYSIS_OFFSCREEN_START', config: { engine: 'native', tabId: 7, mediaKey: h.clock.mediaKey, sessionId: 'native-session', score: h.score, streamId: 'synthetic' } });
+  try {
+    h.emitPcm(new Float32Array(192000).fill(.1), 0);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const pending = h.port.posts.find(message => message.type === 'analyze');
+    assert.ok(pending);
+    h.request({ type: 'LV_SCORE_UPDATED', tabId: 7, mediaKey: h.clock.mediaKey,
+      score: { ...h.score, revision: 5 }, diagnostics: { sampleWindow: { requestId: pending.requestId } } });
+    await new Promise(resolve => setImmediate(resolve));
+    const state = (await h.request({ type: 'LV_ANALYSIS_OFFSCREEN_STATUS' })).analysis;
+    assert.equal(state.state, 'error');
+    assert.equal(state.error.code, 'SCORE_REVISION_CHANGED');
+    assert.ok(h.port.posts.some(message => message.type === 'cancel' && message.requestId === pending.requestId));
+    assert.equal(h.outgoing.filter(message => message.type === 'LV_ALIGNMENT_PROPOSALS').length, 0);
   } finally { await h.request({ type: 'LV_ANALYSIS_OFFSCREEN_STOP' }); }
 });
 
