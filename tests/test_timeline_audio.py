@@ -114,7 +114,8 @@ class TimelineAudioTests(unittest.TestCase):
         self.assertLess(time.monotonic() - began, .2)
         self.assertFalse(audio.play(4_000, 3))
         self.assertTrue(self.stream_ready.wait(1))
-        self.assertEqual(audio.poll(), {'state': 'preparing', 'positionMs': 1_250.0, 'error': None})
+        self.assertEqual(audio.poll(), {'state': 'preparing', 'positionMs': 1_250.0,
+                                        'error': None, 'errorCode': None})
         self.assertEqual(len(calls), 2)
         self.assertTrue(all(str(package).endswith('package.json') and str(media).endswith('take.wav')
                             for package, media in calls))
@@ -152,7 +153,8 @@ class TimelineAudioTests(unittest.TestCase):
         with self.assertRaises(CallbackAbort):
             stream.callback(bytearray(640), 320,
                             types.SimpleNamespace(outputBufferDacTime=10.0, currentTime=0.0), None)
-        self.assertEqual(audio.poll(), {'state': 'stopped', 'positionMs': 500.0, 'error': None})
+        self.assertEqual(audio.poll(), {'state': 'stopped', 'positionMs': 500.0,
+                                        'error': None, 'errorCode': None})
         self.finish_audio(audio)
 
     def test_decoder_failure_is_reported_without_leaking_exception_details(self):
@@ -160,7 +162,8 @@ class TimelineAudioTests(unittest.TestCase):
         self.assertTrue(audio.play(100, 3))
         self.assertTrue(self.wait_for(lambda: audio.poll()['state'] == 'failed'))
         result = audio.poll()
-        self.assertIn('failed', result['error'].lower())
+        self.assertIn('FFmpeg', result['error'])
+        self.assertEqual(result['errorCode'], 'AUDIO_DECODE_FAILED')
         self.assertNotIn('private', result['error'])
         self.assertTrue(audio.close())
 
@@ -172,7 +175,8 @@ class TimelineAudioTests(unittest.TestCase):
         for _ in range(26):
             stream.emit()
         self.assertTrue(self.wait_for(lambda: not audio.busy))
-        self.assertEqual(audio.poll(), {'state': 'stopped', 'positionMs': 1_500.0, 'error': None})
+        self.assertEqual(audio.poll(), {'state': 'stopped', 'positionMs': 1_500.0,
+                                        'error': None, 'errorCode': None})
         self.assertEqual(audio._queued_frame, RATE // 2)
         self.assertTrue(audio.close())
 
@@ -184,7 +188,8 @@ class TimelineAudioTests(unittest.TestCase):
         stream.emit(frames=320)
         stream.emit(frames=320)
         self.assertTrue(self.wait_for(lambda: not audio.busy))
-        self.assertEqual(audio.poll(), {'state': 'stopped', 'positionMs': 1_025.0, 'error': None})
+        self.assertEqual(audio.poll(), {'state': 'stopped', 'positionMs': 1_025.0,
+                                        'error': None, 'errorCode': None})
         self.assertEqual(audio._queued_frame, 400)
         self.assertTrue(audio.close())
 
@@ -204,8 +209,35 @@ class TimelineAudioTests(unittest.TestCase):
                                   decoder=lambda *_: decoded.append(True) or b'\x01\x00' * 160)
         self.assertTrue(audio.play(100, 3))
         self.assertTrue(self.wait_for(lambda: audio.poll()['state'] == 'failed'))
+        self.assertIn('matches this editor document', audio.poll()['error'])
+        self.assertEqual(audio.poll()['errorCode'], 'SOURCE_BINDING_FAILED')
         self.assertEqual(decoded, [])
         self.assertEqual(self.streams, [])
+        self.assertTrue(audio.close())
+
+    def test_output_failure_is_actionable_without_leaking_device_details(self):
+        audio, _ = self.make_audio()
+        audio._output_stream_factory = lambda **_kwargs: (_ for _ in ()).throw(RuntimeError('secret device path'))
+        self.assertTrue(audio.play(100, 3))
+        self.assertTrue(self.wait_for(lambda: audio.poll()['state'] == 'failed'))
+        error = audio.poll()['error']
+        self.assertIn('output device', error)
+        self.assertNotIn('secret', error)
+        self.assertEqual(audio.poll()['errorCode'], 'AUDIO_OUTPUT_FAILED')
+        audio.stop()
+        self.assertIsNone(audio.poll()['errorCode'])
+        self.assertTrue(audio.close())
+
+    def test_missing_output_dac_clock_has_its_own_sanitized_error_code(self):
+        audio, _ = self.make_audio()
+        self.assertTrue(audio.play(100, 3))
+        self.assertTrue(self.stream_ready.wait(1))
+        self.streams[0].emit(clock=types.SimpleNamespace())
+        self.assertTrue(self.wait_for(lambda: audio.poll()['state'] == 'failed'))
+        result = audio.poll()
+        self.assertEqual(result['errorCode'], 'OUTPUT_CLOCK_UNAVAILABLE')
+        self.assertIn('DAC clock', result['error'])
+        self.assertNotIn('path', result['error'].lower())
         self.assertTrue(audio.close())
 
     def test_argument_bounds_and_close_reject_new_playback(self):

@@ -56,6 +56,7 @@ class TimelineAudio:
         self._state = 'stopped'
         self._position_ms: float | None = None
         self._error: str | None = None
+        self._error_code: str | None = None
         self._start_ms = 0.0
         self._end_ms = 0.0
         self._clock_anchor_frame: int | None = None
@@ -85,6 +86,7 @@ class TimelineAudio:
             self._start_ms = float(start_ms)
             self._end_ms = float(start_ms)
             self._error = None
+            self._error_code = None
             self._clock_anchor_frame = None
             self._clock_anchor_monotonic = None
             self._queued_frame = 0
@@ -108,13 +110,15 @@ class TimelineAudio:
             self._clock_anchor_monotonic = None
             self._state = 'stopped'
             self._error = None
+            self._error_code = None
 
     def poll(self) -> dict[str, Any]:
         with self._lock:
             position = self._current_position_locked(self._monotonic())
             if position is not None:
                 self._position_ms = position
-            return {'state': self._state, 'positionMs': self._position_ms, 'error': self._error}
+            return {'state': self._state, 'positionMs': self._position_ms,
+                    'error': self._error, 'errorCode': self._error_code}
 
     def close(self) -> bool:
         with self._lock:
@@ -138,17 +142,20 @@ class TimelineAudio:
         import sounddevice as sd
         return sd.RawOutputStream, sd.CallbackStop, sd.CallbackAbort
 
-    def _set_failed(self, epoch: int, message: str) -> None:
+    def _set_failed(self, epoch: int, message: str, code: str) -> None:
         with self._lock:
             if epoch != self._epoch:
                 return
             self._state = 'failed'
             self._error = message
+            self._error_code = code
 
     def _run(self, epoch: int, stop_event: threading.Event, start_ms: float,
              duration_seconds: int) -> None:
         stream = None
         started = False
+        stage = 'binding'
+        callback_error: list[str] = []
         try:
             package = self._package_loader(self.package_path, self.media_path)
             if self._expected_package is not None and package != self._expected_package:
@@ -165,6 +172,7 @@ class TimelineAudio:
                     return
                 self._end_ms = end_ms
 
+            stage = 'decode'
             pcm = self._decoder(self.media_path, start_ms, stop_event, duration_seconds)
             if stop_event.is_set() or not self._is_current(epoch):
                 return
@@ -181,17 +189,18 @@ class TimelineAudio:
                 self._end_ms = effective_end_ms
             # Recheck the exact package/media binding after decode. If either file
             # changed while FFmpeg read it, discard the decoded audio.
+            stage = 'binding'
             if self._package_loader(self.package_path, self.media_path) != package:
                 raise ValueError('Review package or source recording changed during playback setup.')
             if stop_event.is_set() or not self._is_current(epoch):
                 return
 
+            stage = 'output'
             factory, callback_stop, callback_abort = self._stream_factory()
             if callback_stop is None or callback_abort is None:
                 raise RuntimeError('Audio output callbacks are unavailable.')
             frame_count = len(pcm) // 2
             finished = threading.Event()
-            callback_error: list[str] = []
 
             def output(outdata, frames, clock, _status):
                 nonlocal started
@@ -242,10 +251,20 @@ class TimelineAudio:
                     self._position_ms = effective_end_ms
                     self._state = 'stopped'
                     self._error = None
-        except Exception as exc:
-            message = ('Audio output is unavailable.' if 'clock' in str(exc).lower()
-                       else 'Local playback failed. Check the review package, recording, FFmpeg, and output device.')
-            self._set_failed(epoch, message)
+        except Exception:
+            if callback_error:
+                message = 'Output DAC clock is unavailable; playback was stopped.'
+                error_code = 'OUTPUT_CLOCK_UNAVAILABLE'
+            elif stage == 'binding':
+                message = 'Review package or source recording no longer matches this editor document.'
+                error_code = 'SOURCE_BINDING_FAILED'
+            elif stage == 'decode':
+                message = 'FFmpeg could not decode the selected recording segment.'
+                error_code = 'AUDIO_DECODE_FAILED'
+            else:
+                message = 'Audio output could not start or continue; check the selected output device.'
+                error_code = 'AUDIO_OUTPUT_FAILED'
+            self._set_failed(epoch, message, error_code)
         finally:
             if stream is not None:
                 try:
