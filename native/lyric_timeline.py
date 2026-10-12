@@ -409,11 +409,12 @@ class LyricTimeline:
         from tkinter import simpledialog
         word, _ = self.target()
         if not word or self.selected[0] != 'word': return
-        split = simpledialog.askstring('Split lyric syllables', f'Insert | between the syllables of “{word["text"]}”.\nExample: crum|ble. Pitch changes stay inside one syllable.\nNew boundaries start as estimates for you to adjust.',
-                                      initialvalue='|'.join(s['text'] for s in word.get('syllables', [])) or word['text'], parent=self.root)
+        target = word.get('spokenText') or word['text']
+        split = simpledialog.askstring('Split lyric syllables', f'Insert | between the syllables of “{target}”.\nExample: crum|ble. Pitch changes stay inside one syllable.\nNew boundaries start as estimates for you to adjust.',
+                                      initialvalue='|'.join(s['text'] for s in word.get('syllables', [])) or target, parent=self.root)
         if split is None: return
         parts = split.split('|')
-        if ''.join(parts) != word['text'] or any(not part for part in parts):
+        if ''.join(parts) != target or any(not part for part in parts):
             self.status.set('Keep the exact word spelling and insert | only between syllables.'); return
         span = word['endMs']-word['startMs']
         children = [{'id': f'{word["id"]}-syllable-{i+1}', 'text': text,

@@ -285,17 +285,21 @@
       <details class="lvx-perform-options"><summary>Performance options <span>units · grid · clicks</span></summary>
       <div class="lvx-tap-settings"><label>Word gesture <select data-sync="tap-cadence"><option value="hold">Hold for word duration</option><option value="flow">Space → next lyric</option><option value="pairs">Separate start / end</option></select></label><label>Word pass <select data-sync="tap-scope"><option value="lane">Continue through vocal track</option><option value="phrase">This phrase only</option></select></label></div>
       <select data-sync="tap-mode" hidden aria-label="Timing unit"><option value="phrase">Phrases</option><option value="word">Words</option><option value="syllable">Syllables within word</option></select><div class="lvx-tap-settings"><label><input type="checkbox" data-sync="tap-snap"> Snap to ¼ beat</label><label>BPM <input type="number" data-sync="tap-bpm" value="120" min="20" max="400" step="1" aria-label="Timing grid BPM"></label></div>
-      <div class="lvx-tap-segmentation" hidden><label>Syllables · separate with |<input data-sync="tap-split" type="text" spellcheck="false" aria-label="Syllable spelling separated by vertical bars"></label><button data-sync="tap-segment">Set syllables</button><p class="lvx-sync-hint">Spelling must join to the exact word. Initial divisions are estimates; mark their times inside the word.</p></div>
+      <div class="lvx-tap-segmentation" hidden><label>Spoken as <input data-sync="tap-spoken" type="text" maxlength="256" spellcheck="false" aria-label="Spoken form; display lyric stays unchanged"></label><label>Syllables · separate with |<input data-sync="tap-split" type="text" spellcheck="false" aria-label="Syllable spelling separated by vertical bars"></label><div class="lvx-tap-actions"><button data-sync="tap-suggest">Suggest syllables</button><button data-sync="tap-segment">Set syllables</button></div><p class="lvx-pronunciation-hint" role="status">Dictionary counts guide editable spelling splits. Suggestions do not set timing.</p><p class="lvx-sync-hint">The lyric stays as written. Syllables join to its spoken form. Initial divisions are estimates; tap while listening to set times.</p></div>
       <label class="lvx-sync-loop"><input type="checkbox" data-sync="tap-click" checked> Audible marks</label>
       </details>
     </details>
     <details class="lvx-effect-panel"><summary>Perform effects <span>second pass</span></summary><p class="lvx-sync-hint">Play your timed vocal track. Press a key while its word or syllable is active. Gaps stay empty; timings stay unchanged.</p><label class="lvx-sync-loop">Target <select data-sync="effect-scope"><option value="word">Word</option><option value="syllable">Authored syllable</option></select></label><div class="lvx-tap-actions"><button data-sync="effect-start">▶ Start effect pass</button><button data-sync="effect-stop">■ Stop</button></div><div class="lvx-effect-pads"><button data-effect="pulse">1 · Pulse</button><button data-effect="tilt">2 · Tilt</button><button data-effect="shake">3 · Shake</button><button data-effect="clear">0 · Clear</button></div><p class="lvx-effect-status" role="status">Effects are buffered until you use the pass.</p><div class="lvx-tap-actions"><button data-sync="effect-use">Use effects in preview</button><button data-sync="effect-undo">↶ Undo effect</button><button data-sync="effect-discard">Discard effects</button></div></details>
     <details><summary>Exact word timings <span>milliseconds</span></summary><p class="lvx-sync-hint">One word per line: word, start, end. These changes affect the preview until you apply.</p><label class="lvx-sync-protected"><input type="checkbox" data-sync="protected"> Edit saved timings in this phrase</label><textarea aria-label="Exact word timings in milliseconds" spellcheck="false" rows="5"></textarea><div class="lvx-sync-text-actions"><button data-sync="tune">Use these times</button><button data-sync="reset">Reset text</button></div></details>
     <div class="lvx-sync-text-actions"><button data-sync="export">↓ Export preview JSON</button></div>
-    <footer><button data-sync="undo">↶ Undo saved change</button><button data-sync="apply" class="lvx-sync-primary">Apply timings</button></footer>`;
+    <footer><button data-sync="undo">↶ Undo saved change</button><button data-sync="apply" class="lvx-sync-primary"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/></svg> Save timings</button></footer>`;
   const syncNotice = syncPanel.querySelector('.lvx-sync-notice');
   const syncText = syncPanel.querySelector('textarea');
   const syncButton = name => syncPanel.querySelector(`[data-sync="${name}"]`);
+  // Syllable authoring is part of its main phase, not buried in expert options.
+  const syllableFields=syncPanel.querySelector('.lvx-tap-segmentation');
+  const captureActions=syncButton('tap-arm').parentElement;
+  captureActions.before(syncPanel.querySelector('.lvx-tap-words'),syllableFields);
   const setSyncNotice = text => { syncNotice.textContent = text; };
   const timingTapPending = () => Boolean(tapping.take && (tapping.take.status === 'armed' || tapping.take.marks.length || tapping.take.pendingStartMs !== null));
   const effectPending = () => performanceTake.armed || performanceTake.marks.length > 0;
@@ -335,8 +339,12 @@
       }); words.append(button);
     }
     const segmentation = syncPanel.querySelector('.lvx-tap-segmentation'); segmentation.hidden = mode !== 'syllable';
+    const pronunciationHint=syncPanel.querySelector('.lvx-pronunciation-hint');
+    if(pronunciationHint.dataset.word!==word?.id){pronunciationHint.dataset.word=word?.id||'';pronunciationHint.textContent='Dictionary counts guide editable spelling splits. Suggestions do not set timing.';}
     const split = syncButton('tap-split');
-    if (!tapping.splitDirty && document.activeElement !== split) split.value = word?.syllables?.length ? word.syllables.map(s => s.text).join('|') : word?.text || '';
+    if (!tapping.splitDirty && document.activeElement !== split) split.value = word?.syllables?.length ? word.syllables.map(s => s.text).join('|') : word?.spokenText || word?.text || '';
+    const spoken=syncButton('tap-spoken');if(!tapping.splitDirty&&document.activeElement!==spoken)spoken.value=word?.spokenText||word?.text||'';
+    spoken.disabled=timing.busy||tapPending();split.disabled=timing.busy||tapPending();syncButton('tap-suggest').disabled=timing.busy||!word||tapPending();
     syncButton('tap-segment').disabled = timing.busy || !word || tapPending() || Boolean(word.syllables?.some(s => s.locked));
     syncButton('tap-mode').disabled = timing.busy || tapPending() || tapping.splitDirty;
     for (const name of ['tap-cadence','tap-scope']) syncButton(name).disabled = mode === 'syllable' || timing.busy || tapPending();
@@ -582,24 +590,40 @@
       const result = await timingRequest('LV_TIMING_TUNE', { ...payload, allowProtected: syncButton('protected').checked });
       timing.draft = result.preview; discardTapTake(); timing.auditioned = false; state.scoreSignature = '';
       if (take.mode === 'phrase') { syncButton('tap-mode').value='word'; timing.phraseIndex=0; tapping.wordId=timing.draft.score.phrases[0]?.words[0]?.id; }
-      setSyncNotice(take.mode === 'phrase' ? 'Phrases added to preview. Words is ready at the beginning; their internal times are still estimates to refine.' : 'Take added to the unsaved preview. Audition it before Apply timings.');
+      setSyncNotice(take.mode === 'phrase' ? 'Phrases added to preview. Words is ready at the beginning; their internal times are still estimates to refine.' : 'Take added to preview. Click Audition at 1×, then Save timings to keep it for this video.');
     } catch (error) { setSyncNotice(error.message); }
     finally { timing.busy = false; refreshTimingPanel(); }
   }
   async function setTapSyllables() {
     if (timing.busy || !timing.draft || tapPending()) return;
-    const word = tapWord(), parts = syncButton('tap-split').value.split('|');
-    if (!word || parts.some(p => !p) || parts.join('') !== word.text) { setSyncNotice('Separate the exact word spelling with |, without adding or removing letters.'); return; }
+    const word = tapWord(), parts = syncButton('tap-split').value.split('|'), spoken=syncButton('tap-spoken').value.trim();
+    if (!word || !spoken || spoken.length>256 || parts.some(p => !p) || parts.join('') !== spoken) { setSyncNotice('Separate the spoken form with |. The parts must join exactly; the displayed lyric stays unchanged.'); return; }
     timing.busy = true; refreshTimingPanel();
     try {
       const span = word.endMs - word.startMs;
-      const operation = { type:'setWordSyllables', wordId:word.id, startTapping:true,
+      const operation = { type:'setWordSyllables', wordId:word.id, spokenText:spoken===word.text?null:spoken, startTapping:true,
         syllables:parts.map((text,index) => ({id:`${word.id}-syllable-${index+1}`,text,startMs:word.startMs+Math.round(span*index/parts.length),endMs:word.startMs+Math.round(span*(index+1)/parts.length)})) };
       const result = await timingRequest('LV_TIMING_TUNE', { operation, allowProtected:syncButton('protected').checked });
       timing.draft = result.preview; tapping.splitDirty = false; timing.auditioned = false; state.scoreSignature = '';
       setSyncNotice('Syllable spelling added to the preview. Their equal initial divisions are estimates; tap while listening to set their boundaries.');
     } catch (error) { setSyncNotice(error.message); }
     finally { timing.busy = false; refreshTimingPanel(); }
+  }
+  async function suggestTapSyllables(){
+    const word=tapWord(), binding=tapBinding();if(!word||timing.busy||tapPending())return;
+    const beforeSpoken=syncButton('tap-spoken').value,beforeSplit=syncButton('tap-split').value;
+    timing.busy=true;refreshTimingPanel();
+    try{
+      const response=await chrome.runtime.sendMessage({type:'LV_PRONUNCIATION_SUGGEST',text:word.text,...(beforeSpoken&&beforeSpoken!==word.text?{spokenText:beforeSpoken}:{})});
+      if(tapBinding()!==binding||tapWord()?.id!==word.id||syncButton('tap-spoken').value!==beforeSpoken||syncButton('tap-split').value!==beforeSplit)return;
+      if(!response?.ok)throw Error(response?.error?.message||'Pronunciation dictionary unavailable.');
+      const suggestion=response.suggestion,hint=syncPanel.querySelector('.lvx-pronunciation-hint');
+      if(!suggestion.parts?.length){hint.textContent=suggestion.status==='ambiguous'?`The dictionary lists ${suggestion.syllableCounts.join(' or ')} syllables. Enter the way it is sung.`:suggestion.status==='unavailable'?`The dictionary gives ${suggestion.syllableCounts.join(' or ')} syllables, but has no usable spelling split. Enter the split manually.`:'No dictionary suggestion for this spoken form. Enter a split manually.';return;}
+      syncButton('tap-spoken').value=suggestion.spokenText;syncButton('tap-split').value=suggestion.parts.join('|');tapping.splitDirty=true;
+      hint.textContent=`${suggestion.parts.length} syllables · dictionary count, suggested spelling cuts. Edit if sung differently, then Set syllables.`;
+      setSyncNotice('Suggestion only. Your display text, saved score and timings are unchanged.');
+    }catch(error){setSyncNotice(error.message);}
+    finally{timing.busy=false;refreshTimingPanel();}
   }
   for (const name of ['tap-mode','tap-cadence','tap-scope']) syncButton(name).addEventListener('change', refreshTapPanel);
   for (const button of syncPanel.querySelectorAll('[data-phase]')) button.addEventListener('click',()=>{
@@ -628,6 +652,8 @@
   syncButton('tap-use').addEventListener('click', useTapTake);
   syncButton('tap-discard').addEventListener('click', restartTranscript);
   syncButton('tap-segment').addEventListener('click', setTapSyllables);
+  syncButton('tap-suggest').addEventListener('click',suggestTapSyllables);
+  syncButton('tap-spoken').addEventListener('input',()=>{tapping.splitDirty=true;refreshTapPanel();});
   function effectSourceReady() {
     const media = getMedia();
     return media && !media.paused && !media.seeking && !isAdvertisement() && youtubeMediaState()?.clockUsable !== false && media.playbackRate === performanceTake.rate && performanceTake.binding === tapBinding() && LvScore.mediaKey({url:location.href}) === LvScore.mediaKey(state.score.source);
@@ -724,7 +750,7 @@
     syncButton('next').disabled = timing.busy || !draft || timing.phraseIndex >= draft.score.phrases.length - 1;
     for (const name of ['audition', 'tune', 'reset']) syncButton(name).disabled = timing.busy || !draft;
     syncButton('apply').disabled = timing.busy || !draft || timing.dirty || tapping.splitDirty || tapPending() || !timing.auditioned || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source);
-    syncButton('apply').title = !timing.auditioned ? 'Audition the proposed timing before applying' : 'Save one undoable timing revision';
+    syncButton('apply').setAttribute('aria-description', !timing.auditioned ? 'Audition the proposed timing before saving' : 'Save one undoable timing revision for this video');
     syncButton('export').disabled = timing.busy || !draft || timing.dirty || tapping.splitDirty || tapPending();
     syncButton('undo').disabled = timing.busy || Boolean(draft);
     syncPanel.querySelector('.lvx-sync-position').textContent = draft ? `Phrase ${timing.phraseIndex + 1} / ${draft.score.phrases.length}` : 'No preview';
@@ -2136,7 +2162,7 @@
           const span = document.createElement('span');
           span.className = 'lvx-score-word';
           span.dataset.word = word.id;
-          if (word.syllables?.length) {
+          if (word.syllables?.length && (!word.spokenText||word.spokenText===word.text)) {
             for (const syllable of word.syllables) {
               const part = document.createElement('span');
               part.className = 'lvx-score-syllable';

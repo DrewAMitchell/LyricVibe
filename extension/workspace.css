@@ -8,3 +8,9 @@
 @media(prefers-reduced-motion:reduce){button{transition:none}}
 .preview-token{display:inline-block;white-space:nowrap;vertical-align:baseline}.preview-token .preview-token{color:inherit}.preview-token .preview-token.sung-word{color:#f0ffd4}@media(prefers-reduced-motion:reduce){.preview-token{transform:none!important}}
 .proposal-boundary{position:absolute;height:6px;border:1px dashed #8caac7;border-radius:2px;background:#48729840;pointer-events:none}.canvas-footer{font-size:10px}.inspector-help{font-size:12px}.field-hint{font-size:10px}
+details > summary { list-style:none; min-height:44px; cursor:pointer; }
+details > summary::marker { content:''; }
+details > summary::-webkit-details-marker { display:none; }
+details > summary::before { content:'+'; display:inline-block; width:18px; margin-right:8px; color:var(--muted); font:600 16px/1 ui-monospace,monospace; text-align:center; }
+details[open] > summary::before { content:'−'; }
+details > summary:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }

@@ -37,7 +37,7 @@ function PreviewWord({ item, time, offset }: { item: Immutable<ScoreWord | Score
   const transform = effect?.type === 'shake' ? `translate(${Math.sin(phase * 57) * strength * 3}px,${Math.sin(phase * 43) * strength * 2}px)`
     : effect?.type === 'tilt' ? `rotate(${Math.sin(phase * 11) * strength * 6}deg)`
     : effect?.type === 'pulse' ? `scale(${1 + Math.sin(phase * 9) * strength * .06})` : undefined;
-  const children = 'syllables' in item ? item.syllables as readonly Immutable<ScoreSyllable>[] | undefined : undefined;
+  const children = 'syllables' in item && (!('spokenText' in item) || item.spokenText === item.text) ? item.syllables as readonly Immutable<ScoreSyllable>[] | undefined : undefined;
   return <span className={`preview-token ${active ? 'sung-word' : ''}`} style={{ visibility: at >= item.startMs ? 'visible' : 'hidden', clipPath: item.reveal ? `inset(0 ${(1 - progress) * 100}% 0 0)` : undefined, transform }}>
     {children?.length ? children.map(child => <PreviewWord key={child.id} item={child} time={time} offset={offset} />) : item.text}
   </span>;
@@ -61,14 +61,15 @@ function WheelInput({ onWheelStep, ...props }: React.InputHTMLAttributes<HTMLInp
 }
 
 function SyllableDefinition({ word, revision, busy, globalDraft, commit, report }: { word: Immutable<ScoreWord>; revision: number; busy: boolean; globalDraft: boolean; commit(op: ScoreOperation, revision?: number): Promise<boolean>; report(message: string): void }) {
-  const spelling = word.syllables?.map(child => child.text).join('|') || word.text;
+  const target = word.spokenText || word.text;
+  const spelling = word.syllables?.map(child => child.text).join('|') || target;
   const [pending, setPending] = useState<{ text: string; revision: number } | null>(null);
   const applying = useRef(false);
   useEffect(() => { if (!globalDraft && !applying.current) setPending(null); }, [globalDraft]);
   async function apply(event: React.FormEvent) {
     event.preventDefault(); if (!pending) return;
     const parts = pending.text === '' ? [] : pending.text.split('|');
-    if ((parts.length && parts.join('') !== word.text) || parts.some(part => !part) || parts.length > 32) { report('Use up to 32 nonempty syllables that join to the exact word spelling. Empty clears the split.'); return; }
+    if ((parts.length && parts.join('') !== target) || parts.some(part => !part) || parts.length > 32) { report('Use up to 32 nonempty syllables that join to the exact spoken spelling. Empty clears the split.'); return; }
     const draft = pending; applying.current = true; controller.setDraft(false);
     const success = await commit({ type: 'setWordSyllables', wordId: word.id, syllables: parts.map((text, index) => ({ id: `${word.id}-s-${crypto.randomUUID()}`, text, startMs: Math.round(word.startMs + index / parts.length * (word.endMs - word.startMs)), endMs: Math.round(word.startMs + (index + 1) / parts.length * (word.endMs - word.startMs)), provenance: 'estimated', locked: false, effects: [] })) }, draft.revision);
     if (success) setPending(null); else { setPending(draft); controller.setDraft(true); }

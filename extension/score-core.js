@@ -256,11 +256,12 @@
         if (!word || typeof word.id !== "string" || !word.id || ids.has(word.id) || typeof word.text !== "string" || !word.text.trim()) bad("invalid or duplicate word");
         ids.add(word.id);
         if (typeof word.startMs !== "number" || !Number.isFinite(word.startMs) || word.startMs < 0 || typeof word.endMs !== "number" || !Number.isFinite(word.endMs) || word.endMs < 0 || word.endMs < word.startMs || word.startMs < phrase.startMs || word.endMs > phrase.endMs || !["estimated", "manual", "aligned"].includes(word.provenance) || typeof word.locked !== "boolean" || !Array.isArray(word.effects)) bad("invalid word timing or fields");
+        if (word.spokenText !== undefined && (typeof word.spokenText !== "string" || !word.spokenText.trim() || word.spokenText.length > 256 || word.spokenText.includes("|"))) bad("invalid spokenText");
         for (const effect of word.effects) if (!effect || !EFFECTS.has(effect.type) || typeof effect.strength !== "number" || !Number.isFinite(effect.strength) || effect.strength < 0 || effect.strength > 1) bad("invalid effect");
         if (word.reveal !== undefined && !validReveal(word.reveal)) bad("invalid word reveal");
         if (word.syllables !== undefined) {
           if (!Array.isArray(word.syllables) || word.syllables.some(syllable => !syllable || Object.prototype.hasOwnProperty.call(syllable, "syllables"))) bad("invalid syllables");
-          if (word.syllables.length && word.syllables.map(syllable => typeof syllable.text === "string" ? syllable.text : "").join("") !== word.text) bad("syllable text must concatenate exactly to word.text");
+          if (word.syllables.length && word.syllables.map(syllable => typeof syllable.text === "string" ? syllable.text : "").join("") !== (word.spokenText || word.text)) bad("syllable text must concatenate exactly to the spoken word");
           for (const syllable of word.syllables) {
             if (typeof syllable.id !== "string" || !syllable.id || ids.has(syllable.id) || typeof syllable.text !== "string" || !syllable.text) bad("invalid or duplicate syllable");
             ids.add(syllable.id);
@@ -316,7 +317,7 @@
     } else if (op.type === "setWordText") {
       const { word } = locateWord(next, op.wordId);
       if (typeof op.text !== "string" || !op.text.trim()) fail("INVALID_OPERATION", "text must be nonempty");
-      if (op.text !== word.text && word.syllables) delete word.syllables;
+      if (op.text !== word.text) { delete word.spokenText; if (word.syllables) delete word.syllables; }
       word.text = op.text;
     } else if (op.type === "setWordLock") {
       const { word } = locateWord(next, op.wordId);
@@ -358,6 +359,8 @@
       const { word } = locateWord(next, op.wordId);
       if ((word.syllables || []).some(item => item.locked)) fail("LOCKED", "unlock existing syllables before replacing their segmentation");
       if (!Array.isArray(op.syllables)) fail("INVALID_SYLLABLES", "syllables must be an array");
+      if (op.spokenText !== undefined && op.spokenText !== null && (typeof op.spokenText !== "string" || !op.spokenText.trim() || op.spokenText.length > 256 || op.spokenText.includes("|"))) fail("INVALID_SYLLABLES", "spokenText must be nonempty, at most 256 characters, and contain no | separator");
+      const spokenText = op.spokenText === null ? undefined : op.spokenText === undefined ? word.spokenText : op.spokenText;
       const children = op.syllables.map(item => {
         if (!item || typeof item !== "object") fail("INVALID_SYLLABLES", "syllable must be an object");
         const provenance = item.provenance === undefined ? "manual" : item.provenance;
@@ -367,8 +370,10 @@
           provenance, locked, effects: item.effects === undefined ? [] : clone(item.effects),
         };
       });
-      if (children.length && children.map(item => item.text).join("") !== word.text) fail("INVALID_SYLLABLES", "syllable text must concatenate exactly to the word text");
+      if (children.length && children.map(item => item.text).join("") !== (spokenText || word.text)) fail("INVALID_SYLLABLES", "syllable text must concatenate exactly to the spoken word");
       word.syllables = children;
+      if (op.spokenText === null) delete word.spokenText;
+      else if (op.spokenText !== undefined) word.spokenText = op.spokenText;
     } else if (op.type === "setSyllableTiming") {
       const { word, syllable } = locateSyllable(next, op.syllableId);
       finiteNonnegative(op.startMs, "startMs"); finiteNonnegative(op.endMs, "endMs");

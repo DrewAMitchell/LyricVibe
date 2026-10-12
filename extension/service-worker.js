@@ -1,6 +1,22 @@
-importScripts('score-core.js', 'timing-variant.js', 'analysis/controller.js', 'score-host.js');
+importScripts('score-core.js', 'timing-variant.js', 'pronunciation.js', 'analysis/controller.js', 'score-host.js');
 const LRCLIB_BASE = 'https://lrclib.net/api';
 const sessions = new Map();
+let pronunciationIndexPromise;
+chrome.runtime.onMessage.addListener((message, sender, respond) => {
+  if(message?.type!=='LV_PRONUNCIATION_SUGGEST')return;
+  if(typeof message.text!=='string'||!message.text.trim()||message.text.length>256||
+    message.spokenText!==undefined&&(typeof message.spokenText!=='string'||message.spokenText.length>256)){
+    respond({ok:false,error:{code:'INVALID_TEXT',message:'Use a word or spoken form of at most256characters.'}});return;
+  }
+  (async()=>{
+    pronunciationIndexPromise ||= fetch(chrome.runtime.getURL('data/pronunciation-counts.json')).then(response=>{
+      if(!response.ok)throw Error('Packaged pronunciation dictionary could not load.');return response.json();
+    }).catch(error=>{pronunciationIndexPromise=null;throw error;});
+    const index=await pronunciationIndexPromise;
+    return {ok:true,suggestion:LvPronunciation.suggest(message.text,index.entries,message.spokenText),source:index.metadata};
+  })().then(respond,error=>respond({ok:false,error:{code:'DICTIONARY_UNAVAILABLE',message:error.message}}));
+  return true;
+});
 
 /* MV3 service workers are killed after ~30s idle, wiping the in-memory
    `sessions` Map. That made the extension "stop detecting songs": the overlay

@@ -31,6 +31,7 @@ export interface ScoreSyllable {
 export interface ScoreWord {
   id: string;
   text: string;
+  spokenText?: string;
   startMs: number;
   endMs: number;
   provenance: "estimated" | "manual" | "aligned" | string;

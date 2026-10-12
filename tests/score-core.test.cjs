@@ -258,6 +258,42 @@ test('syllable segmentation preserves punctuation, uses global IDs, and exposes 
   assert.equal(score.validateScore(cleared), cleared);
 });
 
+test('spokenText supports phonetic syllables without changing display text or timing', () => {
+  const base = makeScore('[00:01.00]24 now\n[00:04.00]');
+  const word = base.phrases[0].words[0];
+  const original = [word.startMs, word.endMs, word.locked, word.provenance];
+  const splitAt = word.startMs + Math.floor((word.endMs - word.startMs) / 3);
+  const split = score.applyOperation(base, { type: 'setWordSyllables', wordId: word.id, spokenText: 'twentyfour', syllables: [
+    { id: 'spoken-a', text: 'twen', startMs: word.startMs, endMs: splitAt, provenance: 'estimated', locked: false },
+    { id: 'spoken-b', text: 'ty', startMs: splitAt, endMs: splitAt + 1, provenance: 'estimated', locked: false },
+    { id: 'spoken-c', text: 'four', startMs: splitAt + 1, endMs: word.endMs, provenance: 'estimated', locked: false },
+  ] }, 0);
+  const target = split.phrases[0].words[0];
+  assert.equal(target.text, '24');
+  assert.equal(target.spokenText, 'twentyfour');
+  assert.deepEqual(target.syllables.map(child => child.text), ['twen', 'ty', 'four']);
+  assert.deepEqual([target.startMs, target.endMs, target.locked, target.provenance], original);
+  assert.equal(score.validateScore(split), split);
+  const ordinary = structuredClone(base);
+  errorCode(() => score.applyOperation(ordinary, { type: 'setWordSyllables', wordId: word.id, syllables: [
+    { id: 'ordinary-bad', text: 'twentyfour', startMs: word.startMs, endMs: word.endMs },
+  ] }, 0), 'INVALID_SYLLABLES');
+  const malformed = [ '', 'has|pipe', 'x'.repeat(257), 123 ];
+  for (const spokenText of malformed) errorCode(() => score.applyOperation(base, { type: 'setWordSyllables', wordId: word.id, spokenText, syllables: [] }, 0), 'INVALID_SYLLABLES');
+  const corrupted = structuredClone(base); corrupted.phrases[0].words[0].spokenText = 'bad|alias';
+  assert.throws(() => score.validateScore(corrupted), error => error.code === 'INVALID_SCORE');
+  const locked = structuredClone(split); locked.phrases[0].words[0].syllables[0].locked = true;
+  const before = structuredClone(locked);
+  errorCode(() => score.applyOperation(locked, { type: 'setWordSyllables', wordId: word.id, spokenText: 'bad|alias', syllables: [] }, 1), 'LOCKED');
+  assert.deepEqual(locked, before);
+  const cleared = score.applyOperation(split, { type: 'setWordSyllables', wordId: word.id, spokenText: null, syllables: [] }, 1);
+  assert.equal(cleared.phrases[0].words[0].spokenText, undefined);
+  assert.deepEqual(cleared.phrases[0].words[0].syllables, []);
+  const changed = score.applyOperation(split, { type: 'setWordText', wordId: word.id, text: 'twenty-four' }, 1);
+  assert.equal(changed.phrases[0].words[0].spokenText, undefined);
+  assert.equal(changed.phrases[0].words[0].syllables, undefined);
+});
+
 test('syllable timing, lock, effect, word resize, and text edits preserve valid boundaries', () => {
   const base = makeScore('[00:01.00]sing! now\n[00:04.00]');
   const word = base.phrases[0].words[0];
