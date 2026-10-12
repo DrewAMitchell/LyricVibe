@@ -1,4 +1,4 @@
-importScripts('score-core.js', 'analysis/controller.js', 'score-host.js');
+importScripts('score-core.js', 'timing-variant.js', 'analysis/controller.js', 'score-host.js');
 const LRCLIB_BASE = 'https://lrclib.net/api';
 const sessions = new Map();
 
@@ -837,21 +837,25 @@ async function recognize(body) {
 
 function trackFromHints(hints) {
   let title = hints.track;
+  let artist = hints.artist;
   if (/(^|\.)youtube\.com$/i.test(hints.host || '')) {
     title = cleanPageTitle(title);
     const parsed = parsePageTitle(title);
+    // Standard watch-page hints often contain only "Artist - Title".
+    // The same title parser used for page-title fallback must also apply here.
+    if (!artist && parsed.artist) artist = parsed.artist;
     // Strip an artist prefix only when it agrees with the supplied artist.
-    if (parsed.title && parsed.artist && hints.artist &&
-        normalizeText(cleanArtistName(parsed.artist)) === normalizeText(cleanArtistName(hints.artist))) {
+    if (parsed.title && parsed.artist && artist &&
+        normalizeText(cleanArtistName(parsed.artist)) === normalizeText(cleanArtistName(artist))) {
       title = parsed.title;
     }
   }
-  if (hints.track && hints.artist) {
+  if (hints.track && artist) {
     return {
       title: cleanTrackTitle(title),
-      artist: cleanArtistName(hints.artist),
+      artist: cleanArtistName(artist),
       rawTitle: hints.track,
-      rawArtist: hints.artist,
+      rawArtist: artist,
       album: hints.album || '',
       durationMs: secondsToMs(hints.duration),
       playOffsetMs: secondsToMs(hints.currentTime),

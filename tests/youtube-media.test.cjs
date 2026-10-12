@@ -58,3 +58,14 @@ test('mobile YouTube watch identity binds to desktop canonical identity', () => 
   assert.equal(mobile.metadataMatches, true);
   assert.equal(mobile.clockUsable, true);
 });
+
+test('catalog lookup uses verified native duration rather than rounded YouTube metadata', () => {
+  const cinematic={...snapshot,url:'https://www.youtube.com/watch?v=FIXTURE0001',canonicalUrl:'https://www.youtube.com/watch?v=FIXTURE0001',isoDuration:'PT2M47S',mediaDurationSec:166.321};
+  const live=media.inspect(cinematic);
+  assert.equal(live.clockUsable,true);
+  assert.equal(live.contentDurationMs,167000);
+  assert.equal(live.lookupDurationMs,166321);
+  const ad=media.inspect({...cinematic,playerClassName:'ad-showing',mediaDurationSec:15.421});
+  assert.equal(ad.lookupDurationMs,167000);
+  assert.equal(ad.clockUsable,false);
+});

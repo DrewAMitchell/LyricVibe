@@ -93,6 +93,7 @@
     offsetWasRestored: false,  // true if offset loaded from per-song memory
     errorShown: false          // true when error screen is up (observer stays active)
   };
+  const timing = { draft: null, view: 'proposed', phraseIndex: 0, dirty: false, busy: false, auditioned: false, priorLoop: null };
 
   /* ══════════════════════════════════════
      DOM CONSTRUCTION
@@ -183,7 +184,7 @@
   const quickSyncButton = document.createElement('button');
   quickSyncButton.className = 'lvx-quick-sync-btn';
   quickSyncButton.textContent = '⟳ SYNC';
-  quickSyncButton.title = 'Auto Sync: reset manual timing and recalibrate this song';
+  quickSyncButton.title = 'Preview catalog timing and fine-tune this video';
   quickSyncButton.addEventListener('click', () => quickSyncLyrics());
 
   const helpButton = document.createElement('button');
@@ -258,7 +259,145 @@
   ].join('\n');
   shortcutsPanel.querySelector('.lvx-shortcuts-close').addEventListener('click', () => toggleShortcutsPanel(false));
 
-  root.append(stage, preview, progress, hud, shortcutsPanel);
+  const syncPanel = document.createElement('section');
+  syncPanel.className = 'lvx-sync-panel'; syncPanel.hidden = true; syncPanel.tabIndex = -1;
+  syncPanel.setAttribute('aria-label', 'Sync this video');
+  syncPanel.innerHTML = `<header><div><span class="lvx-sync-eyebrow">TIMING REVIEW</span><h2>Sync this video</h2></div><button data-sync="close" aria-label="Close timing preview">✕</button></header>
+    <p class="lvx-sync-notice" role="status" aria-live="polite">Load a timing preview to begin.</p>
+    <div class="lvx-sync-tabs" role="group" aria-label="Timing to audition"><button data-sync="saved" aria-pressed="false">Saved</button><button data-sync="proposed" aria-pressed="true">Proposed · unsaved</button></div>
+    <div class="lvx-sync-nav"><button data-sync="previous" aria-label="Previous lyric phrase">‹</button><span class="lvx-sync-position"></span><button data-sync="next" aria-label="Next lyric phrase">›</button></div>
+    <p class="lvx-sync-phrase"></p><div class="lvx-sync-range"></div>
+    <div class="lvx-sync-transport"><button data-sync="audition">▶ Audition phrase</button><button data-sync="pause">Ⅱ Pause</button><output class="lvx-sync-clock" aria-label="Source playback time" aria-live="off">0.000s</output></div>
+    <label class="lvx-sync-loop"><input type="checkbox" data-sync="loop"> Loop this phrase</label>
+    <details><summary>Exact word timings <span>milliseconds</span></summary><p class="lvx-sync-hint">One word per line: word, start, end. These changes affect the preview until you apply.</p><label class="lvx-sync-protected"><input type="checkbox" data-sync="protected"> Edit saved timings in this phrase</label><textarea aria-label="Exact word timings in milliseconds" spellcheck="false" rows="5"></textarea><div class="lvx-sync-text-actions"><button data-sync="tune">Use these times</button><button data-sync="reset">Reset text</button></div></details>
+    <footer><button data-sync="undo">↶ Undo saved change</button><button data-sync="apply" class="lvx-sync-primary">Apply timings</button></footer>`;
+  const syncNotice = syncPanel.querySelector('.lvx-sync-notice');
+  const syncText = syncPanel.querySelector('textarea');
+  const syncButton = name => syncPanel.querySelector(`[data-sync="${name}"]`);
+  const setSyncNotice = text => { syncNotice.textContent = text; };
+  const timingEnvelope = type => ({ type, mediaKey: LvScore.mediaKey(state.score.source), expectedRevision: state.score.revision,
+    lyricsHash: state.score.lyrics.contentHash, token: timing.draft?.token, previewRevision: timing.draft?.previewRevision });
+  async function timingRequest(type, extra = {}) {
+    if (!state.score || LvScore.mediaKey({ url: location.href }) !== LvScore.mediaKey(state.score.source)) throw Error('The video changed. Reopen Sync for the current video.');
+    const result = await chrome.runtime.sendMessage({ ...timingEnvelope(type), ...extra });
+    if (!result?.ok) throw Error(result?.error?.message || 'Timing request failed.');
+    return result;
+  }
+  function timingPhrase(score = timing.draft?.score) { return score?.phrases[timing.phraseIndex]; }
+  function refreshTimingPanel() {
+    const draft = timing.draft, phrase = timingPhrase();
+    syncPanel.setAttribute('aria-busy', String(timing.busy));
+    syncButton('close').disabled = timing.busy;
+    root.classList.toggle('lvx-sync-open', !syncPanel.hidden);
+    for (const control of [offsetInput, syncEarlier, syncLater]) control.disabled = Boolean(draft);
+    syncButton('saved').setAttribute('aria-pressed', String(timing.view === 'saved'));
+    syncButton('proposed').setAttribute('aria-pressed', String(timing.view === 'proposed'));
+    syncButton('previous').disabled = timing.busy || !draft || timing.phraseIndex === 0;
+    syncButton('next').disabled = timing.busy || !draft || timing.phraseIndex >= draft.score.phrases.length - 1;
+    for (const name of ['audition', 'tune', 'reset']) syncButton(name).disabled = timing.busy || !draft;
+    syncButton('apply').disabled = timing.busy || !draft || timing.dirty || !timing.auditioned || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source);
+    syncButton('apply').title = !timing.auditioned ? 'Audition the proposed timing before applying' : 'Save one undoable timing revision';
+    syncButton('undo').disabled = timing.busy || Boolean(draft);
+    syncPanel.querySelector('.lvx-sync-position').textContent = draft ? `Phrase ${timing.phraseIndex + 1} / ${draft.score.phrases.length}` : 'No preview';
+    syncPanel.querySelector('.lvx-sync-phrase').textContent = phrase?.words.map(w => w.text).join(' ') || 'Your saved score stays unchanged while you review.';
+    const shown = timing.view === 'saved' ? timingPhrase(state.score) : phrase;
+    const protectedPhrase = draft?.preservedPhraseIds.includes(phrase?.id);
+    syncPanel.querySelector('.lvx-sync-range').textContent = shown ? `${(shown.startMs / 1000).toFixed(3)}–${(shown.endMs / 1000).toFixed(3)}s · ${protectedPhrase ? 'saved edits preserved' : 'catalog estimate'}` : '';
+    syncPanel.querySelector('.lvx-sync-protected').hidden = !protectedPhrase;
+    syncText.disabled = timing.busy || !draft;
+    if (!timing.dirty) syncText.value = phrase?.words.map(w => `${w.text}\t${w.startMs}\t${w.endMs}`).join('\n') || '';
+  }
+  async function openTimingReview() {
+    if (timing.busy) return;
+    if (!syncPanel.hidden && timing.draft) { syncPanel.focus(); return; }
+    timing.priorLoop = state.auditionLoop; syncPanel.hidden = false; timing.busy = true; refreshTimingPanel();
+    setSyncNotice('Finding the timing source for this exact video…');
+    try {
+      const result = await timingRequest('LV_TIMING_PREPARE');
+      timing.draft = result.preview; timing.phraseIndex = 0; timing.view = 'proposed'; timing.dirty = false; timing.auditioned = false;
+      setSyncNotice(`Unsaved preview · ${result.preview.changedWords} words retimed · ${result.preview.preservedPhraseIds.length} phrases with saved edits preserved. Audition, then apply.`);
+    } catch (error) { setSyncNotice(error.message); }
+    finally { timing.busy = false; refreshTimingPanel(); }
+  }
+  function discardTimingLocal() {
+    timing.draft = null; timing.dirty = false; timing.auditioned = false; state.auditionLoop = timing.priorLoop; timing.priorLoop = null; state.scoreSignature = '';
+    refreshTimingPanel();
+  }
+  async function closeTimingReview() {
+    if (timing.busy) return;
+    if (timing.draft) await timingRequest('LV_TIMING_CANCEL').catch(() => {});
+    discardTimingLocal(); syncPanel.hidden = true; refreshTimingPanel();
+  }
+  function navigateTiming(delta) {
+    if (timing.dirty) { setSyncNotice('Use these times or reset the text before changing phrases.'); return false; }
+    if (!timing.draft || timing.busy || !Number.isInteger(delta)) return false;
+    timing.phraseIndex = clamp(timing.phraseIndex + delta, 0, timing.draft.score.phrases.length - 1);
+    syncButton('protected').checked = false; refreshTimingPanel(); return true;
+  }
+  async function tuneTimingText() {
+    if (timing.busy || !timing.draft) return;
+    const phrase = timingPhrase(), lines = syncText.value.trim().split(/\r?\n/);
+    try {
+      if (lines.length !== phrase.words.length) throw Error('Keep one line for every word in this phrase.');
+      const changes = [];
+      lines.forEach((line, index) => {
+        const match = line.match(/^(.+?)\s+(\d+)\s+(\d+)\s*$/), word = phrase.words[index];
+        if (!match || match[1] !== word.text) throw Error(`Line ${index + 1}: keep the word, then enter start and end milliseconds.`);
+        const startMs = Number(match[2]), endMs = Number(match[3]);
+        if (startMs !== word.startMs || endMs !== word.endMs) changes.push({ wordId: word.id, startMs, endMs });
+      });
+      timing.busy = true; refreshTimingPanel();
+      const result = await timingRequest('LV_TIMING_TUNE', { changes, allowProtected: syncButton('protected').checked });
+      timing.draft = result.preview; timing.dirty = false; timing.auditioned = false; state.scoreSignature = '';
+      setSyncNotice('Preview updated. Nothing saved. Audition the proposed timing again before applying.');
+    } catch (error) { setSyncNotice(error.message); }
+    finally { timing.busy = false; refreshTimingPanel(); }
+  }
+  async function auditionTiming() {
+    if (!timing.draft || timing.busy) return;
+    if (timing.dirty) { setSyncNotice('Use these times or reset the text before auditioning.'); return; }
+    const media = getMedia(), phrase = timingPhrase(timing.view === 'saved' ? state.score : timing.draft.score);
+    if (!media || isAdvertisement() || youtubeMediaState()?.clockUsable === false || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source)) { setSyncNotice('Wait for this video’s main audio before auditioning.'); return; }
+    const startMs = Math.max(0, phrase.startMs + state.score.offsetMs - 600), endMs = phrase.endMs + state.score.offsetMs + 400;
+    state.auditionLoop = syncButton('loop').checked ? { startMs, endMs } : null;
+    media.currentTime = startMs / 1000;
+    try { await media.play(); if (timing.view === 'proposed') timing.auditioned = true; setSyncNotice(`${timing.view === 'proposed' ? 'Proposed · unsaved' : 'Saved'} timing is playing. Pause whenever you need.`); }
+    catch (error) { setSyncNotice(`Playback could not start: ${error.message}`); }
+    refreshTimingPanel();
+  }
+  async function applyTimingReview() {
+    if (!timing.draft || timing.busy || timing.dirty || !timing.auditioned) return;
+    timing.busy = true; refreshTimingPanel();
+    try {
+      const result = await timingRequest('LV_TIMING_APPLY');
+      state.score = result.score; state.syncOffsetMs = result.score.offsetMs;
+      discardTimingLocal(); setSyncNotice('Timings saved. Undo saved change restores the previous score and timing source.');
+    } catch (error) { setSyncNotice(error.message); }
+    finally { timing.busy = false; refreshTimingPanel(); }
+  }
+  syncButton('close').addEventListener('click', closeTimingReview);
+  syncButton('previous').addEventListener('click', () => navigateTiming(-1));
+  syncButton('next').addEventListener('click', () => navigateTiming(1));
+  for (const view of ['saved', 'proposed']) syncButton(view).addEventListener('click', () => { timing.view = view; state.scoreSignature = ''; refreshTimingPanel(); });
+  syncButton('audition').addEventListener('click', auditionTiming);
+  syncButton('pause').addEventListener('click', () => getMedia()?.pause());
+  syncButton('loop').addEventListener('change', () => { if (!syncButton('loop').checked) state.auditionLoop = null; });
+  syncText.addEventListener('input', () => { timing.dirty = true; refreshTimingPanel(); });
+  syncButton('tune').addEventListener('click', tuneTimingText);
+  syncButton('reset').addEventListener('click', () => { timing.dirty = false; refreshTimingPanel(); });
+  syncButton('apply').addEventListener('click', applyTimingReview);
+  syncButton('undo').addEventListener('click', async () => {
+    if (timing.busy || timing.draft) return;
+    timing.busy = true; refreshTimingPanel();
+    try { const result = await timingRequest('LV_SCORE_UNDO'); state.score = result.score; state.syncOffsetMs = result.score.offsetMs; state.scoreSignature = ''; setSyncNotice('Previous saved score restored.'); }
+    catch (error) { setSyncNotice(error.message); }
+    finally { timing.busy = false; refreshTimingPanel(); }
+  });
+  syncPanel.addEventListener('keydown', event => {
+    event.stopPropagation();
+    if (event.key === 'Escape') { event.preventDefault(); closeTimingReview(); }
+  });
+  root.append(stage, preview, progress, hud, shortcutsPanel, syncPanel);
   function mountRoot() {
     const surface = document.fullscreenElement;
     if (surface && !['VIDEO', 'AUDIO'].includes(surface.tagName)) surface.appendChild(root);
@@ -276,7 +415,10 @@
     },
     show,
     hide: teardown,
-    hints: getPageHints
+    hints: getPageHints,
+    sync: Object.freeze({ getState: () => JSON.parse(JSON.stringify(timing)), open: openTimingReview,
+      selectPhrase: index => navigateTiming(index - timing.phraseIndex), setView: view => { if (['saved','proposed'].includes(view)) syncButton(view).click(); },
+      tuneText: text => { syncText.value = text; timing.dirty = true; return tuneTimingText(); }, audition: auditionTiming, cancel: closeTimingReview })
   };
 
   setHud('Ready. Play music, then click LyricVibe.', false, true);
@@ -322,6 +464,9 @@
       if (message.mediaKey !== LvScore.mediaKey({ url: location.href })) return;
       try {
         LvScore.validateScore(message.score);
+        if (timing.draft && (message.score.revision !== timing.draft.baseRevision || message.score.lyrics.contentHash !== timing.draft.baseHash)) {
+          discardTimingLocal(); setSyncNotice('The saved score changed. Reopen Sync to refresh the preview.');
+        }
         state.score = message.score;
         state.scoreSignature = '';
         state.active = true;
@@ -330,6 +475,7 @@
         state.trackDurationMs = message.score.source.durationMs;
         state.trackKey = message.mediaKey;
         state.syncOffsetMs = message.score.offsetMs;
+        if (!syncPanel.hidden) refreshTimingPanel();
         stage.style.setProperty('--lvx-score-scale', state.fontScale);
         preview.textContent = '';
         show();
@@ -482,7 +628,7 @@
       host,
       pageTitle: title,
       currentTime: media && Number.isFinite(media.currentTime) ? media.currentTime : null,
-      duration: youtube?.contentDurationMs ? youtube.contentDurationMs / 1000 : !isAdvertisement() && media && Number.isFinite(media.duration) ? media.duration : null,
+      duration: youtube?.lookupDurationMs ? youtube.lookupDurationMs / 1000 : !isAdvertisement() && media && Number.isFinite(media.duration) ? media.duration : null,
       isAd: isAdvertisement(),
       mediaReady: youtube ? youtube.clockUsable : true
     };
@@ -1386,6 +1532,7 @@
         if (key !== LvScore.mediaKey(state.score.source)) {
           stage.textContent = '';
           state.auditionLoop = null;
+          if (!syncPanel.hidden) { setSyncNotice('The video changed. Close this preview and reopen Sync for the current video.'); refreshTimingPanel(); }
           state.rafId = requestAnimationFrame(tick);
           return;
         }
@@ -1401,6 +1548,7 @@
         }
         if (state.auditionLoop && media && !media.paused && mediaMs >= state.auditionLoop.endMs) media.currentTime = state.auditionLoop.startMs / 1000;
         renderScore(mediaMs);
+        if (!syncPanel.hidden) syncPanel.querySelector('.lvx-sync-clock').textContent = `${(mediaMs / 1000).toFixed(3)}s · ${media?.paused ? 'paused' : 'playing'}`;
         if (performance.now() - state.lastClockSent > 100) {
           state.lastClockSent = performance.now();
           chrome.runtime.sendMessage({ type: 'LV_SCORE_PLAYBACK', mediaKey: key, mediaMs, paused: media?.paused ?? true, durationMs: Math.round((media?.duration || 0) * 1000) }).catch(() => {});
@@ -1472,14 +1620,15 @@
   }
 
   function renderScore(mediaMs) {
-    const active = LvScore.activeAt(state.score, mediaMs);
-    const signature = `${state.score.revision}:${state.theme}:` + active.phrases.map(p => p.id).join('|');
+    const score = timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score;
+    const active = LvScore.activeAt(score, mediaMs);
+    const signature = `${score.revision}:${timing.draft?.previewRevision ?? 'saved'}:${timing.view}:${state.theme}:` + active.phrases.map(p => p.id).join('|');
     if (signature !== state.scoreSignature || !stage.classList.contains('lvx-score-stage')) {
       stage.textContent = '';
       stage.classList.add('lvx-score-stage');
       for (const phrase of active.phrases) {
         const line = document.createElement('div');
-        const lane = state.score.lanes.find(l => l.id === phrase.laneId);
+        const lane = score.lanes.find(l => l.id === phrase.laneId);
         line.className = `lvx-score-phrase lvx-score-${lane?.role || 'lead'}`;
         line.dataset.phrase = phrase.id;
         for (const word of phrase.words) {
@@ -1517,15 +1666,15 @@
       for (let index = 0; index < phrase.words.length; index++) {
         const word = phrase.words[index];
         const span = line.children[index];
-        span.style.visibility = mediaMs - state.score.offsetMs >= word.startMs ? 'visible' : 'hidden';
+        span.style.visibility = mediaMs - score.offsetMs >= word.startMs ? 'visible' : 'hidden';
         span.classList.toggle('lvx-score-current', phrase.activeWords.includes(word.id));
-        applyReveal(span, word, mediaMs - state.score.offsetMs);
+        applyReveal(span, word, mediaMs - score.offsetMs);
         for (const syllable of word.syllables || []) {
           const part = [...span.children].find(el => el.dataset.syllable === syllable.id);
           if (!part) continue;
-          part.style.visibility = mediaMs - state.score.offsetMs >= syllable.startMs ? 'visible' : 'hidden';
+          part.style.visibility = mediaMs - score.offsetMs >= syllable.startMs ? 'visible' : 'hidden';
           part.classList.toggle('lvx-score-current', (phrase.activeSyllables || []).includes(syllable.id));
-          applyReveal(part, syllable, mediaMs - state.score.offsetMs);
+          applyReveal(part, syllable, mediaMs - score.offsetMs);
         }
       }
     }
@@ -1871,6 +2020,7 @@
     /* Esc closes shortcuts panel first; if panel is closed, Esc closes the overlay */
     if (event.key === 'Escape' && root.isConnected && root.classList.contains('lvx-active')) {
       event.preventDefault();
+      if (!syncPanel.hidden) { closeTimingReview(); return; }
       if (shortcutsPanel.classList.contains('lvx-shortcuts-open')) {
         toggleShortcutsPanel(false);
         return;
@@ -1896,6 +2046,7 @@
 
     if (event.key === '[' || event.key === ']') {
       event.preventDefault();
+      if (timing.draft) return;
       nudgeSync(event.key === '[' ? -SYNC_NUDGE_MS : SYNC_NUDGE_MS);
     }
 
@@ -1983,7 +2134,7 @@
    */
   function quickSyncLyrics() {
     if (state.score) {
-      editButton.click();
+      openTimingReview();
       return;
     }
     if (!state.active || !state.lines.length) {
@@ -2459,6 +2610,7 @@
      TEARDOWN / SHOW
      ══════════════════════════════════════ */
   function teardown() {
+    syncPanel.hidden = true; discardTimingLocal();
     flowTeardown();
     clearRevealTimers();
     cancelLoop();

@@ -38,7 +38,9 @@
     else if (!durationMatches) reason = 'YOUTUBE_MEDIA_DURATION_MISMATCH';
     else if (!Number.isFinite(snapshot.mediaCurrentTimeSec) || snapshot.mediaCurrentTimeSec < 0) reason = 'YOUTUBE_MEDIA_CLOCK_UNAVAILABLE';
     const clockUsable = !reason;
-    return { adActive, contentDurationMs, nativeDurationMs, durationMatches, metadataMatches, sourceVideoId, clockUsable, reason, paused: !clockUsable || Boolean(snapshot.mediaPaused), seeking: !clockUsable || Boolean(snapshot.mediaSeeking) };
+    // Catalog rounding must use the verified recording, not integer page metadata.
+    const lookupDurationMs = clockUsable ? nativeDurationMs : contentDurationMs;
+    return { adActive, contentDurationMs, nativeDurationMs, lookupDurationMs, durationMatches, metadataMatches, sourceVideoId, clockUsable, reason, paused: !clockUsable || Boolean(snapshot.mediaPaused), seeking: !clockUsable || Boolean(snapshot.mediaSeeking) };
   }
   const api = { parseIsoDurationMs, videoIdFromUrl, isAdActive, inspect };
   root.LvYoutubeMedia = api;

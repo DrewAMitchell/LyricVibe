@@ -1,6 +1,7 @@
 /* Revisioned score owner. Raw lyric lookup caches may be shared; scores never are. */
 (function (root) {
   const queues = new Map();
+  const timingPreviews = new Map();
   const fail = (code, message) => Object.assign(new Error(message), { code });
   const keyFor = (key) => `lvScore:${key}`;
   async function serial(key, work) {
@@ -51,6 +52,10 @@
       await chrome.storage.local.set({ [keyFor(key)]: record });
     }
     return record.score;
+  }
+  function timingControlBound(sender, tabId, key) {
+    return sender.id === chrome.runtime.id && (editorSourceBound(sender, tabId, key) ||
+      (sender.tab?.id === tabId && LvScore.mediaKey({ url: sender.url || sender.tab.url }) === key));
   }
   async function ensure(tabId, payload) {
     const requested = LvScore.mediaKey(payload.hints || {});
@@ -145,6 +150,39 @@
       if (!record) throw fail('SCORE_MISSING', 'No timed score is loaded yet. Wait for lyrics or import a score.');
       if (message.type === 'LV_SCORE_GET') return { ok: true, score: record.score, review: record.review || [], diagnostics: record.diagnostics || null, tabId, mediaKey: key, analysis: await root.LvAnalysis?.analysisStatus() };
       if (message.expectedRevision !== record.score.revision) throw fail('REVISION_CONFLICT', 'The score changed. Reload it before editing.');
+      if (message.type.startsWith('LV_TIMING_')) {
+        if (!timingControlBound(sender, tabId, key)) throw fail('SOURCE_REQUIRED', 'Open Sync in this video’s extension overlay.');
+        if (message.lyricsHash !== record.score.lyrics.contentHash) throw fail('LYRIC_REVISION_MISMATCH', 'Saved lyric revision changed. Refresh the preview.');
+        const previewKey = `${tabId}:${key}`;
+        if (message.type === 'LV_TIMING_PREPARE') {
+          const { hints } = await liveIdentity(tabId, key);
+          const result = await root.recognize({ hints });
+          if (!result?.ok || !result.lyrics?.synced) throw fail('TIMING_UNAVAILABLE', 'No matching timed catalog source is available.');
+          const hash = await digest(result.lyrics.synced);
+          const candidate = LvScore.createScore(record.score.source, result.lyrics.synced,
+            { provider: result.lyrics.provider, entryId: String(result.match?.id ?? ''), contentHash: hash });
+          const draft = { ...root.LvTimingVariant.merge(record.score, candidate), token: crypto.randomUUID(), previewRevision: 0,
+            baseRevision: record.score.revision, baseHash: record.score.lyrics.contentHash, createdAt: Date.now() };
+          await liveIdentity(tabId, key); timingPreviews.set(previewKey, draft);
+          return { ok: true, preview: draft, tabId, mediaKey: key };
+        }
+        const draft = timingPreviews.get(previewKey);
+        if (!draft || draft.token !== message.token || draft.baseRevision !== record.score.revision || draft.baseHash !== record.score.lyrics.contentHash || Date.now() - draft.createdAt > 30 * 60 * 1000) throw fail('PREVIEW_EXPIRED', 'Refresh this timing preview before continuing.');
+        if (message.previewRevision !== draft.previewRevision) throw fail('PREVIEW_CONFLICT', 'This preview changed. Refresh before submitting another adjustment.');
+        if (message.type === 'LV_TIMING_CANCEL') { timingPreviews.delete(previewKey); return { ok: true }; }
+        if (message.type === 'LV_TIMING_TUNE') {
+          const tuned = { ...root.LvTimingVariant.tune(draft, message.changes, message.allowProtected === true), previewRevision: draft.previewRevision + 1 };
+          timingPreviews.set(previewKey, tuned); return { ok: true, preview: tuned, tabId, mediaKey: key };
+        }
+        if (message.type !== 'LV_TIMING_APPLY') throw fail('MESSAGE_UNKNOWN', 'Unknown timing preview action.');
+        await liveIdentity(tabId, key);
+        record.history = [...(record.history || []), record.score].slice(-30);
+        record.score = { ...draft.score, revision: record.score.revision + 1 };
+        record.review = []; record.diagnostics = null; delete record.lyricRevisionAvailable;
+        await chrome.storage.local.set({ [keyFor(key)]: record });
+        timingPreviews.delete(previewKey); await publish(tabId, record);
+        return { ok: true, score: record.score, tabId, mediaKey: key };
+      }
       let next;
       if (message.type === 'LV_NATIVE_ALIGNMENT_IMPORT') {
         if (!editorSourceBound(sender, tabId, key)) throw fail('EDITOR_REQUIRED', 'Import alignment from the editor opened for this source.');
@@ -206,6 +244,7 @@
     });
   }
   const types = new Set(['LV_ANALYSIS_CACHE_CLEAR_REQUEST', 'LV_EDITOR_OPEN', 'LV_SCORE_GET', 'LV_SCORE_OPERATION', 'LV_SCORE_IMPORT', 'LV_NATIVE_ALIGNMENT_IMPORT', 'LV_SCORE_UNDO', 'LV_SCORE_SEEK', 'LV_SCORE_TRANSPORT', 'LV_SCORE_REVIEW_APPLY', 'LV_ANALYSIS_START', 'LV_ANALYSIS_STOP', 'LV_ANALYSIS_STATUS', 'LV_NATIVE_ANALYSIS_START', 'LV_NATIVE_ANALYSIS_STOP', 'LV_NATIVE_ANALYSIS_STATUS', 'LV_ALIGNMENT_PROPOSALS']);
+  for (const type of ['LV_TIMING_PREPARE', 'LV_TIMING_TUNE', 'LV_TIMING_APPLY', 'LV_TIMING_CANCEL']) types.add(type);
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!types.has(message?.type)) return;
     // Only this extension can submit score mutations; content scripts supply their own tab ID.

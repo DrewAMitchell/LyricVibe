@@ -45,6 +45,7 @@ function makeHarness() {
     LvAnalysis: { async analysisStatus() { return analysisStatus; }, async startAnalysis(args) { analysisCalls.push(args); return { state: 'capturing', engine: args.engine }; }, async stopAnalysis(scope) { analysisCalls.push({ stopScope: scope }); return { state: 'stopped' }; } },
   });
   vm.runInContext(scoreSource, context, { filename: 'score-core.js' });
+  vm.runInContext(fs.readFileSync(path.join(root, 'extension/timing-variant.js'), 'utf8'), context, { filename: 'timing-variant.js' });
   vm.runInContext(hostSource, context, { filename: 'score-host.js' });
 
   function dispatch(message, sender = { id: chrome.runtime.id, tab: { id: 1 } }) {
@@ -77,6 +78,46 @@ function makeHarness() {
 }
 
 function recordFor(h, id = ID_A) { return h.values[`lvScore:youtube:${id}`]; }
+
+test('catalog preview, exact tuning, cancellation and application preserve history until commit', async () => {
+  const h=makeHarness(), score=await h.ensure();
+  h.context.recognize=async()=>({ok:true,lyrics:{synced:'[00:05.00]hello world\n[00:07.00]',provider:'fixture'},match:{id:2}});
+  const sender={id:'test-extension',tab:{id:1,url:`https://www.youtube.com/watch?v=${ID_A}`},url:`https://www.youtube.com/watch?v=${ID_A}`};
+  const envelope={mediaKey:`youtube:${ID_A}`,expectedRevision:score.revision,lyricsHash:score.lyrics.contentHash};
+  const before=JSON.stringify(recordFor(h));
+  const prepared=await h.dispatch({type:'LV_TIMING_PREPARE',...envelope},sender);
+  assert.equal(prepared.ok,true); assert.equal(JSON.stringify(recordFor(h)),before);
+  const id=score.phrases[0].words[0].id;
+  const tuned=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:prepared.preview.token,previewRevision:0,changes:[{wordId:id,startMs:5055,endMs:5500}]},sender);
+  assert.equal(tuned.ok,true);assert.equal(JSON.stringify(recordFor(h)),before);
+  assert.equal((await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:prepared.preview.token,previewRevision:0},sender)).error.code,'PREVIEW_CONFLICT');
+  const applied=await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:prepared.preview.token,previewRevision:tuned.preview.previewRevision},sender);
+  assert.equal(applied.ok,true);assert.equal(applied.score.revision,1);assert.equal(applied.score.phrases[0].words[0].startMs,5055);
+  assert.equal(recordFor(h).history.length,1);
+  const undone=await h.dispatch({type:'LV_SCORE_UNDO',mediaKey:envelope.mediaKey,expectedRevision:1},sender);
+  assert.equal(undone.ok,true);assert.equal(undone.score.revision,2);
+  assert.deepEqual(JSON.parse(JSON.stringify({...undone.score,revision:0})),JSON.parse(JSON.stringify(score)));
+  const again=await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:prepared.preview.token},sender);
+  assert.equal(again.ok,false);assert.equal(again.error.code,'REVISION_CONFLICT');
+});
+
+test('catalog preview rejects wrong sender, hash, source changes and stale tokens without saved writes', async () => {
+  const h=makeHarness(), score=await h.ensure();
+  h.context.recognize=async()=>({ok:true,lyrics:{synced:'[00:05.00]hello world\n[00:07.00]'},match:{id:2}});
+  const sender={id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`};
+  const envelope={mediaKey:`youtube:${ID_A}`,expectedRevision:0,lyricsHash:score.lyrics.contentHash};
+  const before=JSON.stringify(recordFor(h));
+  assert.equal((await h.dispatch({type:'LV_TIMING_PREPARE',...envelope},{id:'test-extension',tab:{id:2},url:sender.url})).ok,false);
+  assert.equal((await h.dispatch({type:'LV_TIMING_PREPARE',...envelope,lyricsHash:'b'.repeat(64)},sender)).ok,false);
+  const preview=await h.dispatch({type:'LV_TIMING_PREPARE',...envelope},sender);assert.equal(preview.ok,true);
+  assert.equal((await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:'forged'},sender)).ok,false);
+  h.tabs.get(1).url=`https://www.youtube.com/watch?v=${ID_B}`;
+  assert.equal((await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:preview.preview.token,previewRevision:0},sender)).ok,false);
+  h.tabs.get(1).url=sender.url;
+  assert.equal((await h.dispatch({type:'LV_TIMING_CANCEL',...envelope,token:preview.preview.token,previewRevision:0},sender)).ok,true);
+  assert.equal((await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:preview.preview.token},sender)).error.code,'PREVIEW_EXPIRED');
+  assert.equal(JSON.stringify(recordFor(h)),before);
+});
 function firstWord(score) { return score.phrases.flatMap(p => p.words)[0]; }
 
 function nativeReceipt(score) {

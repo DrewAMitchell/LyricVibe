@@ -95,6 +95,15 @@ test('YouTube full video title is cleaned without stripping a different artist p
   h.context.want = { ...VIDEO, track: 'Other - Sample Track (Official Video)' };
   assert.equal(h.run('trackFromHints(normalizeHints(want)).title'), 'Other - Sample Track');
 });
+
+test('normal watch-page hints without an artist field use the title artist for exact lookup', async () => {
+  const h=harness();
+  h.context.want={url:'https://www.youtube.com/watch?v=FIXTURE0001',host:'www.youtube.com',duration:166.321,track:'Tëst Artist - Sample Track (Official Music Video)'};
+  const track=h.run('trackFromHints(normalizeHints(want))');
+  assert.equal(track.title,'Sample Track');assert.equal(track.artist,'Tëst Artist');
+  const result=await h.run('recognize({hints:want})');assert.equal(result.match.id,222);
+  assert.ok(h.calls.some(url=>new URL(url).searchParams.get('artist_name')==='Tëst Artist'&&new URL(url).searchParams.get('duration')==='166'));
+});
 test('healthy duration-specific metadata lookup wins over conflicting fast cache', async () => {
   const h = harness(); h.context.want = VIDEO;
   const result = await h.run('recognize({hints:want})');
