@@ -47,6 +47,18 @@
 #lvx-root .lvx-sync-text-actions { display: flex; gap: 8px; margin-top: 10px; }
 #lvx-root .lvx-sync-panel footer { position: sticky; bottom: -22px; display: flex; gap: 8px; justify-content: space-between; border-top: 1px solid #3c4335; padding: 16px 0 22px; margin: 20px 0 -22px; background: #181b17; }
 #lvx-root .lvx-sync-panel .lvx-sync-primary { color: #19220e; background: #c7dfa1; border-color: #c7dfa1; }
+#lvx-root .lvx-tap-words { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
+#lvx-root .lvx-tap-words button { flex: 1 0 65px; white-space: normal; padding: 9px 8px; }
+#lvx-root .lvx-tap-words button[aria-pressed="true"] { border-color: #c7dfa1; background: #3b4630; }
+#lvx-root .lvx-tap-words small { display: block; color: #acb89f; font: 9px/1.5 Consolas, monospace; margin-top: 4px; }
+#lvx-root .lvx-tap-settings { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 16px 0; }
+#lvx-root .lvx-tap-settings label, #lvx-root .lvx-tap-segmentation label { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11px; color: #c0c7b8; }
+#lvx-root .lvx-tap-panel select, #lvx-root .lvx-tap-panel input[type="text"], #lvx-root .lvx-tap-panel input[type="number"] { min-height: 34px; border: 1px solid #4c5345; border-radius: 5px; padding: 5px 8px; background: #10130f; color: #e3edd4; font: 12px/1.4 'Segoe UI', Arial, sans-serif; max-width: 100%; }
+#lvx-root .lvx-tap-panel input[type="number"] { width: 68px; }
+#lvx-root .lvx-tap-segmentation input { width: 100%; margin: 6px 0 10px; }
+#lvx-root .lvx-tap-segmentation[hidden] { display: none; }
+#lvx-root .lvx-tap-status { border-left: 2px solid #c7dfa1; padding: 8px 10px; margin: 12px 0; color: #e1edcc; font-size: 13px; }
+#lvx-root .lvx-tap-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
 #lvx-root.lvx-sync-open .lvx-stage { right: 438px; }
 #lvx-root.lvx-sync-open .lvx-hud { opacity: 1; }
 @media (max-width: 760px) {

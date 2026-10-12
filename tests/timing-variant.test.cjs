@@ -46,3 +46,47 @@ test('precise preview tuning is repeatable and remains isolated from the saved s
   assert.equal(base.phrases[0].words[0].startMs,1000);
   assert.throws(()=>variant.tune(draft,[{wordId:id,startMs:21925.5,endMs:22200}]),{code:'INVALID_TIMING'});
 });
+
+test('syllable operations preserve the preview revision and support tapping plus repeat manual timing', () => {
+  const base=make('[00:01.00]hello world'), before=JSON.stringify(base);
+  const draft=variant.merge(base,make('[00:22.00]hello world','b'));
+  const word=draft.score.phrases[0].words[0], originalPreviewRevision=draft.score.revision;
+  const split=variant.operate(draft,{type:'setWordSyllables',wordId:word.id,startTapping:true,syllables:[
+    {id:'hel',text:'hel',startMs:22000,endMs:22100},{id:'lo',text:'lo',startMs:22100,endMs:22200},
+  ]});
+  const children=split.score.phrases[0].words[0].syllables;
+  assert.equal(children.map(s=>s.text).join(''),'hello');
+  assert.ok(children.every(s=>s.startMs>=word.startMs&&s.endMs<=word.endMs));
+  assert.ok(children.every(s=>s.provenance==='estimated'&&!s.locked));
+  assert.equal(split.score.revision,originalPreviewRevision);
+  let timed=variant.operate(split,{type:'setSyllableTiming',syllableId:'hel',startMs:22010,endMs:22110});
+  timed=variant.operate(timed,{type:'setSyllableTiming',syllableId:'hel',startMs:22020,endMs:22120});
+  assert.deepEqual([timed.score.phrases[0].words[0].syllables[0].startMs,timed.score.phrases[0].words[0].syllables[0].endMs],[22020,22120]);
+  assert.equal(timed.score.phrases[0].words[0].syllables[0].locked,true);
+  assert.equal(timed.score.source.videoId,base.source.videoId);
+  assert.equal(timed.score.lyrics.contentHash,'b'.repeat(64));
+  assert.equal(timed.score.revision,originalPreviewRevision);
+  assert.equal(JSON.stringify(base),before);
+});
+
+test('syllable operation batches are atomic, whitelisted and protect preserved phrase syllables', () => {
+  const base=make('[00:01.00]hello world\n[00:04.00]another line');
+  const protectedWord=base.phrases[0].words[0];
+  protectedWord.locked=true;
+  protectedWord.syllables=[{id:'protected-child',text:protectedWord.text,startMs:protectedWord.startMs,endMs:protectedWord.endMs,provenance:'manual',locked:true,effects:[]}];
+  const draft=variant.merge(base,make('[00:22.00]hello world\n[00:25.00]another line','b'));
+  const word=draft.score.phrases[1].words[0], untouched=JSON.stringify(draft);
+  const middle=word.startMs+Math.floor((word.endMs-word.startMs)/2);
+  assert.throws(()=>variant.operate(draft,[
+    {type:'setWordSyllables',wordId:word.id,syllables:[{id:'an',text:'an',startMs:word.startMs,endMs:middle},{id:'other',text:'other',startMs:middle,endMs:word.endMs}]},
+    {type:'setWordTiming',wordId:word.id,startMs:25000,endMs:25500},
+  ]),{code:'INVALID_OPERATION'});
+  assert.equal(JSON.stringify(draft),untouched);
+  assert.throws(()=>variant.operate(draft,{type:'setWordSyllables',wordId:base.phrases[0].words[0].id,syllables:[]}),{code:'MANUAL_PROTECTED'});
+  assert.throws(()=>variant.operate(draft,{type:'setSyllableTiming',syllableId:'protected-child',startMs:1100,endMs:1200}),{code:'MANUAL_PROTECTED'});
+  assert.throws(()=>variant.operate(draft,{type:'setWordSyllables',wordId:protectedWord.id,syllables:[]},true),{code:'LOCKED'});
+  assert.throws(()=>variant.operate(draft,{type:'setWordSyllables',wordId:word.id,syllables:[
+    {id:'a',text:'an',startMs:25000,endMs:25100},{id:'b',text:'other line',startMs:25100,endMs:25500},
+  ]}),{code:'INVALID_SYLLABLES'});
+  assert.throws(()=>variant.operate(draft,{type:'setSyllableTiming',syllableId:'protected-child',startMs:1100,endMs:1100},true),{code:'INVALID_TIME'});
+});

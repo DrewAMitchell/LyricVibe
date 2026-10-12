@@ -171,7 +171,12 @@
         if (message.previewRevision !== draft.previewRevision) throw fail('PREVIEW_CONFLICT', 'This preview changed. Refresh before submitting another adjustment.');
         if (message.type === 'LV_TIMING_CANCEL') { timingPreviews.delete(previewKey); return { ok: true }; }
         if (message.type === 'LV_TIMING_TUNE') {
-          const tuned = { ...root.LvTimingVariant.tune(draft, message.changes, message.allowProtected === true), previewRevision: draft.previewRevision + 1 };
+          const supplied = ['changes', 'operation', 'operations'].filter(name => Object.prototype.hasOwnProperty.call(message, name));
+          if (supplied.length !== 1) throw fail('INVALID_TIMING', 'Submit exactly one of changes, operation, or operations.');
+          const tunedDraft = supplied[0] === 'changes'
+            ? root.LvTimingVariant.tune(draft, message.changes, message.allowProtected === true)
+            : root.LvTimingVariant.operate(draft, supplied[0] === 'operation' ? message.operation : message.operations, message.allowProtected === true);
+          const tuned = { ...tunedDraft, previewRevision: draft.previewRevision + 1 };
           timingPreviews.set(previewKey, tuned); return { ok: true, preview: tuned, tabId, mediaKey: key };
         }
         if (message.type !== 'LV_TIMING_APPLY') throw fail('MESSAGE_UNKNOWN', 'Unknown timing preview action.');

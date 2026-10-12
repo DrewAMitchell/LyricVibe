@@ -118,6 +118,36 @@ test('catalog preview rejects wrong sender, hash, source changes and stale token
   assert.equal((await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:preview.preview.token},sender)).error.code,'PREVIEW_EXPIRED');
   assert.equal(JSON.stringify(recordFor(h)),before);
 });
+
+test('timing preview accepts a syllable operation batch as one isolated revision', async () => {
+  const h=makeHarness(), score=await h.ensure();
+  h.context.recognize=async()=>({ok:true,lyrics:{synced:'[00:05.00]hello world\n[00:07.00]'},match:{id:2}});
+  const sender={id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`};
+  const envelope={mediaKey:`youtube:${ID_A}`,expectedRevision:score.revision,lyricsHash:score.lyrics.contentHash};
+  const saved=JSON.stringify(recordFor(h));
+  const prepared=await h.dispatch({type:'LV_TIMING_PREPARE',...envelope},sender);
+  const [hello,world]=prepared.preview.score.phrases[0].words;
+  const syllables=(word, firstText, secondText, prefix)=>{
+    const split=word.startMs+Math.floor((word.endMs-word.startMs)/2);
+    return [{id:`${prefix}-a`,text:firstText,startMs:word.startMs,endMs:split},{id:`${prefix}-b`,text:secondText,startMs:split,endMs:word.endMs}];
+  };
+  const tuned=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:prepared.preview.token,previewRevision:0,operations:[
+    {type:'setWordSyllables',wordId:hello.id,startTapping:true,syllables:syllables(hello,'hel','lo','hello')},
+    {type:'setWordSyllables',wordId:world.id,startTapping:true,syllables:syllables(world,'wor','ld','world')},
+  ]},sender);
+  assert.equal(tuned.ok,true);
+  assert.equal(tuned.preview.previewRevision,1);
+  assert.equal(tuned.preview.score.revision,prepared.preview.score.revision);
+  assert.ok(tuned.preview.score.phrases[0].words.every(w=>w.syllables.every(s=>s.provenance==='estimated'&&!s.locked)));
+  assert.equal(tuned.preview.score.source.videoId,score.source.videoId);
+  assert.equal(tuned.preview.score.lyrics.contentHash,prepared.preview.score.lyrics.contentHash);
+  assert.equal(JSON.stringify(recordFor(h)),saved);
+  const stale=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:prepared.preview.token,previewRevision:0,operation:{type:'setSyllableTiming',syllableId:'hello-a',startMs:5010,endMs:5210}},sender);
+  assert.equal(stale.error.code,'PREVIEW_CONFLICT');
+  assert.equal(JSON.stringify(recordFor(h)),saved);
+  const both=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:prepared.preview.token,previewRevision:1,operation:{type:'setSyllableTiming',syllableId:'hello-a',startMs:5010,endMs:5210},changes:[]},sender);
+  assert.equal(both.error.code,'INVALID_TIMING');
+});
 function firstWord(score) { return score.phrases.flatMap(p => p.words)[0]; }
 
 function nativeReceipt(score) {

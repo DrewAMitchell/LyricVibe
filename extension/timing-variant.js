@@ -58,5 +58,31 @@
     }
     return { ...draft, score: core.validateScore(next) };
   }
-  return { merge, tune };
+  function operate(draft, operation, allowProtected = false) {
+    const operations = Array.isArray(operation) ? operation : [operation];
+    if (!operations.length || operations.length > 128) fail('INVALID_OPERATION', 'Provide one to 128 syllable operations.');
+    // Apply against a private copy so a failed batch cannot leave a partial preview.
+    let score = clone(draft.score);
+    for (const submitted of operations) {
+      if (!submitted || !['setWordSyllables', 'setSyllableTiming'].includes(submitted.type)) fail('INVALID_OPERATION', 'Only syllable segmentation and timing may be changed in this preview.');
+      const op = clone(submitted);
+      let wordId = op.wordId;
+      if (op.type === 'setSyllableTiming') {
+        wordId = score.phrases.flatMap(p => p.words).find(w => (w.syllables || []).some(s => s.id === op.syllableId))?.id;
+        if (!wordId) fail('UNKNOWN_ID', 'Choose a syllable from this preview.');
+        if (!Number.isSafeInteger(op.startMs) || !Number.isSafeInteger(op.endMs) || op.endMs <= op.startMs) fail('INVALID_TIME', 'Use whole milliseconds with a positive syllable interval.');
+      }
+      if (draft.protectedIds.includes(wordId) && !allowProtected) fail('MANUAL_PROTECTED', 'Enable editing saved timings before changing this protected phrase.');
+      // This explicit mode is used for newly split children that will be tapped;
+      // preserve the core operation as the authority for IDs, text and bounds.
+      if (op.type === 'setWordSyllables' && op.startTapping === true) {
+        delete op.startTapping;
+        if (Array.isArray(op.syllables)) op.syllables = op.syllables.map(s => ({ ...s, provenance: 'estimated', locked: false }));
+      }
+      score = core.applyOperation(score, op, score.revision);
+      score.revision = draft.score.revision;
+    }
+    return { ...draft, score: core.validateScore(score) };
+  }
+  return { merge, tune, operate };
 });
