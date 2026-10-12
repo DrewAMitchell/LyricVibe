@@ -148,6 +148,38 @@ test('timing preview accepts a syllable operation batch as one isolated revision
   const both=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:prepared.preview.token,previewRevision:1,operation:{type:'setSyllableTiming',syllableId:'hello-a',startMs:5010,endMs:5210},changes:[]},sender);
   assert.equal(both.error.code,'INVALID_TIMING');
 });
+
+test('timing preview buffers appearance effects on protected manual timing until apply', async () => {
+  const h=makeHarness(), initial=await h.ensure();
+  const word=firstWord(initial);
+  const segmented=await h.dispatch({type:'LV_SCORE_OPERATION',expectedRevision:initial.revision,operation:{
+    type:'setWordSyllables',wordId:word.id,syllables:[{id:'saved-first-syllable',text:word.text,startMs:word.startMs,endMs:word.endMs}],
+  }});
+  assert.equal(segmented.ok,true);
+  const savedBefore=JSON.stringify(recordFor(h));
+  const sender={id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`};
+  const envelope={mediaKey:`youtube:${ID_A}`,expectedRevision:segmented.score.revision,lyricsHash:segmented.score.lyrics.contentHash};
+  h.context.recognize=async()=>({ok:true,lyrics:{synced:'[00:05.00]hello world\n[00:07.00]'},match:{id:2}});
+  const prepared=await h.dispatch({type:'LV_TIMING_PREPARE',...envelope},sender);
+  const protectedWord=prepared.preview.score.phrases[0].words[0];
+  const originalTiming=[protectedWord.startMs,protectedWord.endMs,protectedWord.syllables[0].startMs,protectedWord.syllables[0].endMs];
+  const tuned=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:prepared.preview.token,previewRevision:0,operations:[
+    {type:'setWordEffect',wordId:protectedWord.id,effect:{type:'tilt',strength:0.4}},
+    {type:'setSyllableEffect',syllableId:'saved-first-syllable',effect:{type:'pulse',strength:0.7}},
+  ]},sender);
+  assert.equal(tuned.ok,true);
+  assert.equal(tuned.preview.score.revision,prepared.preview.score.revision);
+  assert.deepEqual(JSON.parse(JSON.stringify(recordFor(h))),JSON.parse(savedBefore));
+  assert.deepEqual([tuned.preview.score.phrases[0].words[0].startMs,tuned.preview.score.phrases[0].words[0].endMs,
+    tuned.preview.score.phrases[0].words[0].syllables[0].startMs,tuned.preview.score.phrases[0].words[0].syllables[0].endMs],originalTiming);
+  const applied=await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:prepared.preview.token,previewRevision:tuned.preview.previewRevision},sender);
+  assert.equal(applied.ok,true);
+  assert.deepEqual([firstWord(applied.score).startMs,firstWord(applied.score).endMs,
+    firstWord(applied.score).syllables[0].startMs,firstWord(applied.score).syllables[0].endMs],originalTiming);
+  assert.deepEqual(JSON.parse(JSON.stringify(firstWord(applied.score).effects)),[{type:'tilt',strength:0.4}]);
+  assert.deepEqual(JSON.parse(JSON.stringify(firstWord(applied.score).syllables[0].effects)),[{type:'pulse',strength:0.7}]);
+  assert.equal(applied.score.revision,segmented.score.revision+1);
+});
 function firstWord(score) { return score.phrases.flatMap(p => p.words)[0]; }
 
 function nativeReceipt(score) {

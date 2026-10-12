@@ -64,15 +64,16 @@
     // Apply against a private copy so a failed batch cannot leave a partial preview.
     let score = clone(draft.score);
     for (const submitted of operations) {
-      if (!submitted || !['setWordSyllables', 'setSyllableTiming'].includes(submitted.type)) fail('INVALID_OPERATION', 'Only syllable segmentation and timing may be changed in this preview.');
+      if (!submitted || !['setWordSyllables', 'setSyllableTiming', 'setWordEffect', 'setSyllableEffect'].includes(submitted.type)) fail('INVALID_OPERATION', 'Only syllable segmentation, timing, and appearance effects may be changed in this preview.');
       const op = clone(submitted);
       let wordId = op.wordId;
-      if (op.type === 'setSyllableTiming') {
+      const effectOnly = op.type === 'setWordEffect' || op.type === 'setSyllableEffect';
+      if (op.type === 'setSyllableTiming' || op.type === 'setSyllableEffect') {
         wordId = score.phrases.flatMap(p => p.words).find(w => (w.syllables || []).some(s => s.id === op.syllableId))?.id;
         if (!wordId) fail('UNKNOWN_ID', 'Choose a syllable from this preview.');
-        if (!Number.isSafeInteger(op.startMs) || !Number.isSafeInteger(op.endMs) || op.endMs <= op.startMs) fail('INVALID_TIME', 'Use whole milliseconds with a positive syllable interval.');
+        if (op.type === 'setSyllableTiming' && (!Number.isSafeInteger(op.startMs) || !Number.isSafeInteger(op.endMs) || op.endMs <= op.startMs)) fail('INVALID_TIME', 'Use whole milliseconds with a positive syllable interval.');
       }
-      if (draft.protectedIds.includes(wordId) && !allowProtected) fail('MANUAL_PROTECTED', 'Enable editing saved timings before changing this protected phrase.');
+      if (!effectOnly && draft.protectedIds.includes(wordId) && !allowProtected) fail('MANUAL_PROTECTED', 'Enable editing saved timings before changing this protected phrase.');
       // This explicit mode is used for newly split children that will be tapped;
       // preserve the core operation as the authority for IDs, text and bounds.
       if (op.type === 'setWordSyllables' && op.startTapping === true) {

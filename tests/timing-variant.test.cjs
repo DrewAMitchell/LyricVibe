@@ -90,3 +90,38 @@ test('syllable operation batches are atomic, whitelisted and protect preserved p
   ]}),{code:'INVALID_SYLLABLES'});
   assert.throws(()=>variant.operate(draft,{type:'setSyllableTiming',syllableId:'protected-child',startMs:1100,endMs:1100},true),{code:'INVALID_TIME'});
 });
+
+test('appearance effects can change a protected manual word without changing its timing', () => {
+  const base=make('[00:01.00]hello world');
+  const word=base.phrases[0].words[0];
+  word.locked=true;
+  word.provenance='manual';
+  word.syllables=[{id:'hello-first',text:word.text,startMs:word.startMs,endMs:word.endMs,provenance:'manual',locked:true,effects:[]}];
+  const draft=variant.merge(base,make('[00:22.00]hello world','b'));
+  const protectedWord=draft.score.phrases[0].words[0];
+  const timing=[protectedWord.startMs,protectedWord.endMs,protectedWord.syllables[0].startMs,protectedWord.syllables[0].endMs];
+  const updated=variant.operate(draft,[
+    {type:'setWordEffect',wordId:protectedWord.id,effect:{type:'tilt',strength:0.4}},
+    {type:'setSyllableEffect',syllableId:'hello-first',effect:{type:'pulse',strength:0.7}},
+  ]);
+  const result=updated.score.phrases[0].words[0];
+  assert.deepEqual([result.startMs,result.endMs,result.syllables[0].startMs,result.syllables[0].endMs],timing);
+  assert.deepEqual(result.effects,[{type:'tilt',strength:0.4}]);
+  assert.deepEqual(result.syllables[0].effects,[{type:'pulse',strength:0.7}]);
+  assert.equal(updated.score.revision,draft.score.revision);
+  assert.deepEqual(base.phrases[0].words[0].effects,[]);
+});
+
+test('effect operation batches reject unknown syllables and illegal types atomically', () => {
+  const base=make('[00:01.00]hello world');
+  const draft=variant.merge(base,make('[00:22.00]hello world','b'));
+  const word=draft.score.phrases[0].words[0];
+  const untouched=JSON.stringify(draft);
+  assert.throws(()=>variant.operate(draft,[
+    {type:'setWordEffect',wordId:word.id,effect:{type:'shake',strength:0.5}},
+    {type:'setSyllableEffect',syllableId:'missing-syllable',effect:{type:'tilt',strength:0.5}},
+  ]),{code:'UNKNOWN_ID'});
+  assert.equal(JSON.stringify(draft),untouched);
+  assert.throws(()=>variant.operate(draft,{type:'setWordEffect',wordId:word.id,effect:{type:'sparkle',strength:0.5}}),{code:'INVALID_EFFECT'});
+  assert.throws(()=>variant.operate(draft,{type:'setWordReveal',wordId:word.id,reveal:null}),{code:'INVALID_OPERATION'});
+});
