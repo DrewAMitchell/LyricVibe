@@ -142,7 +142,7 @@ async function _apiFetchRaw(url, apiName, timeoutMs) {
    Tier 1: In-memory Map (instant, lost on SW death)
    Tier 2: chrome.storage.session (survives SW suspension within browser session)
    Tier 3: chrome.storage.local (PERSISTENT — survives browser restarts, works when API is down)
-   This means any song that was EVER successfully fetched will always be available. ── */
+   Timed entries are scoped to the recording and rounded source duration. ── */
 const lyricsCache = new Map();
 const CACHE_MAX = 100;
 
@@ -153,27 +153,35 @@ const CACHE_MAX = 100;
 const negativeCache = new Map();
 const NEGATIVE_TTL_MS = 5 * 60 * 1000;
 
-function isKnownMiss(track, artist) {
-  const key = cacheKey(track, artist);
+function isKnownMiss(track, artist, hints) {
+  const key = cacheKey(track, artist, hints);
   const t = negativeCache.get(key);
   if (!t) return false;
   if (Date.now() - t > NEGATIVE_TTL_MS) { negativeCache.delete(key); return false; }
   return true;
 }
 
-function markMiss(track, artist) {
+function markMiss(track, artist, hints) {
   if (negativeCache.size > 200) negativeCache.clear();
-  negativeCache.set(cacheKey(track, artist), Date.now());
+  negativeCache.set(cacheKey(track, artist, hints), Date.now());
 }
 const PERSISTENT_CACHE_MAX = 500;   // max songs in chrome.storage.local
 const PERSISTENT_PREFIX = 'lvxP:';  // prefix for persistent cache keys
 
-function cacheKey(track, artist) {
-  return `${(artist || '').toLowerCase().trim()}|${(track || '').toLowerCase().trim()}`;
+function lookupScope(hints = {}) {
+  // Catalog identity is not recording identity. Unknown duration has its own
+  // scope, so neither legacy entries nor pre-roll metadata become timed hits.
+  return JSON.stringify([LvScore.mediaKey(hints) || hints.host || '',
+    Math.round(secondsToMs(hints.duration) / 1000)]);
 }
 
-async function getCachedLyrics(track, artist) {
-  const key = cacheKey(track, artist);
+function cacheKey(track, artist, hints) {
+  return `v2:${JSON.stringify([(artist || '').toLowerCase().trim(),
+    (track || '').toLowerCase().trim(), lookupScope(hints)])}`;
+}
+
+async function getCachedLyrics(track, artist, hints) {
+  const key = cacheKey(track, artist, hints);
 
   // Tier 1: In-memory
   if (lyricsCache.has(key)) return lyricsCache.get(key);
@@ -207,9 +215,9 @@ async function getCachedLyrics(track, artist) {
  * Tier 4 (OUTAGE-ONLY): fuzzy match against the persistent cache.
  * Exact keys often miss because the same song arrives with slightly different
  * metadata ("Song (Official Video)" vs "Song", "A, B" vs "A"). During a real
- * API outage this rescues any song you've played before, even with messy keys.
+ * API outage this rescues matching metadata within the same recording scope.
  */
-async function getFuzzyCachedLyrics(track, artist) {
+async function getFuzzyCachedLyrics(track, artist, hints) {
   try {
     const norm = (s) => (s || '').toLowerCase()
       .replace(/\(.*?\)|\[.*?\]/g, '')                    // strip (...) [...]
@@ -222,8 +230,9 @@ async function getFuzzyCachedLyrics(track, artist) {
 
     const all = await chrome.storage.local.get(null);
     for (const [k, v] of Object.entries(all)) {
-      if (!k.startsWith(PERSISTENT_PREFIX) || !v) continue;
-      const [cArtist, cTrack] = k.slice(PERSISTENT_PREFIX.length).split('|');
+      if (!k.startsWith(`${PERSISTENT_PREFIX}v2:`) || !v ||
+          lookupScope(v.hints) !== lookupScope(hints)) continue;
+      const cArtist = v.track?.artist, cTrack = v.track?.title;
       const haveTrack = norm(cTrack);
       const haveArtist = norm((cArtist || '').split(/[,&]/)[0]);
       const trackMatch = haveTrack && (haveTrack === wantTrack ||
@@ -237,7 +246,7 @@ async function getFuzzyCachedLyrics(track, artist) {
 }
 
 function setCachedLyrics(track, artist, payload) {
-  const key = cacheKey(track, artist);
+  const key = cacheKey(track, artist, payload.hints);
   if (lyricsCache.size >= CACHE_MAX) {
     const oldest = lyricsCache.keys().next().value;
     lyricsCache.delete(oldest);
@@ -491,7 +500,7 @@ async function _detectAndSyncInner(tabId, prevKey, detectStart) {
     const currentKey = getHintsTrackKey(hints);
     const cacheStale = prevKey && currentKey === prevKey;
     if (!cacheStale) {
-      const cached = await getCachedLyrics(hints.track, hints.artist);
+      const cached = await getCachedLyrics(hints.track, hints.artist, hints);
       if (cached) {
         if (cached.track && hints.currentTime != null) {
           cached.track.playOffsetMs = Math.round((hints.currentTime || 0) * 1000);
@@ -651,7 +660,7 @@ async function _tryOfflineRescue(tabId) {
   try {
     const hints = await getPageHints(tabId);
     if (!hints.track && !hints.pageTitle) return false;
-    const fuzzy = await getFuzzyCachedLyrics(hints.track || hints.pageTitle, hints.artist);
+    const fuzzy = await getFuzzyCachedLyrics(hints.track || hints.pageTitle, hints.artist, hints);
     if (fuzzy && fuzzy.ok && hasUsableLyrics(fuzzy)) {
       if (fuzzy.track && hints.currentTime != null) {
         fuzzy.track.playOffsetMs = Math.round((hints.currentTime || 0) * 1000);
@@ -753,7 +762,7 @@ async function recognize(body) {
   }
 
   // Check cache before hitting API
-  const cached = await getCachedLyrics(detected.title, detected.artist);
+  const cached = await getCachedLyrics(detected.title, detected.artist, hints);
   if (cached) {
     if (cached.track && detected.playOffsetMs != null) {
       cached.track.playOffsetMs = detected.playOffsetMs;
@@ -762,7 +771,7 @@ async function recognize(body) {
   }
 
   // Known miss (recent, API was healthy) — don't hammer the API again
-  if (isKnownMiss(detected.title, detected.artist)) {
+  if (isKnownMiss(detected.title, detected.artist, hints)) {
     return {
       ok: false,
       apiError: false,
@@ -781,7 +790,7 @@ async function recognize(body) {
       (h.lastErrorType && h.lastErrorType !== 'NOT_FOUND' && h.lastFailure > h.lastSuccess);
     // Only cache as a definitive miss if the API was healthy — a failure during
     // an outage must stay retryable once the server recovers.
-    if (!apiTrouble) markMiss(detected.title, detected.artist);
+    if (!apiTrouble) markMiss(detected.title, detected.artist, hints);
     return {
       ok: false,
       apiError: apiTrouble,  // surface API health to caller
@@ -792,6 +801,13 @@ async function recognize(body) {
   }
 
   const matched = lyricResult.match || {};
+  // A duration-free provider fallback may supply useful words, but its timing
+  // must not be presented as matching this recording.
+  if (lyricResult.lyrics.synced && detected.durationMs > 0 && matched.duration > 0 &&
+      Math.abs(secondsToMs(matched.duration) - detected.durationMs) > 2000) {
+    lyricResult.lyrics = { ...lyricResult.lyrics,
+      plain: lyricResult.lyrics.plain || cleanPlainLyrics(lyricResult.lyrics.synced), synced: '' };
+  }
   const track = {
     title: detected.title || matched.trackName || matched.name || '',
     artist: detected.artist || matched.artistName || '',
@@ -820,9 +836,19 @@ async function recognize(body) {
 }
 
 function trackFromHints(hints) {
+  let title = hints.track;
+  if (/(^|\.)youtube\.com$/i.test(hints.host || '')) {
+    title = cleanPageTitle(title);
+    const parsed = parsePageTitle(title);
+    // Strip an artist prefix only when it agrees with the supplied artist.
+    if (parsed.title && parsed.artist && hints.artist &&
+        normalizeText(cleanArtistName(parsed.artist)) === normalizeText(cleanArtistName(hints.artist))) {
+      title = parsed.title;
+    }
+  }
   if (hints.track && hints.artist) {
     return {
-      title: cleanTrackTitle(hints.track),
+      title: cleanTrackTitle(title),
       artist: cleanArtistName(hints.artist),
       rawTitle: hints.track,
       rawArtist: hints.artist,
@@ -835,12 +861,12 @@ function trackFromHints(hints) {
 
   if (hints.track) {
     return {
-      title: cleanTrackTitle(hints.track),
+      title: cleanTrackTitle(title),
       artist: '',
       rawTitle: hints.track,
       rawArtist: '',
       album: hints.album || '',
-      query: cleanTrackTitle(hints.track),
+      query: cleanTrackTitle(title),
       durationMs: secondsToMs(hints.duration),
       playOffsetMs: secondsToMs(hints.currentTime),
       source: 'page-metadata-partial'
@@ -881,7 +907,15 @@ async function findLyrics(track, hints) {
     const cachedPromise = getLrclibCached(track);
     const directPromise = !lrclibDown ? getLrclibByMetadata(track) : null;
 
-    const cached = await cachedPromise;
+    // A fast cache entry can disagree with the duration-specific /get result.
+    // When healthy, prefer the primary metadata lookup; both requests already
+    // run in parallel and remain bounded by their existing timeouts.
+    const [cached, direct] = await Promise.all([cachedPromise, directPromise]);
+    if (direct && (direct.syncedLyrics || direct.plainLyrics) &&
+        !(direct.syncedLyrics && isFakeLRC(direct.syncedLyrics))) {
+      return { lyrics: { synced: direct.syncedLyrics || '',
+        plain: cleanPlainLyrics(direct.plainLyrics || ''), provider: 'LRCLIB' }, match: direct };
+    }
     if (cached && (cached.syncedLyrics || cached.plainLyrics)) {
       const isFake = cached.syncedLyrics && isFakeLRC(cached.syncedLyrics);
       if (!isFake) {
@@ -896,22 +930,6 @@ async function findLyrics(track, hints) {
       }
     }
 
-    if (directPromise) {
-      const direct = await directPromise;
-      if (direct && (direct.syncedLyrics || direct.plainLyrics)) {
-        const directIsFake = direct.syncedLyrics && isFakeLRC(direct.syncedLyrics);
-        if (!directIsFake) {
-          return {
-            lyrics: {
-              synced: direct.syncedLyrics || '',
-              plain: cleanPlainLyrics(direct.plainLyrics || ''),
-              provider: 'LRCLIB'
-            },
-            match: direct
-          };
-        }
-      }
-    }
   }
 
   // When LRCLIB is degraded, skip remaining slow endpoints and go to fallback
@@ -1336,6 +1354,7 @@ function cleanPlainLyrics(raw) {
 function normalizeHints(hints) {
   return {
     url:       stringValue(hints.url),
+    videoId:   stringValue(hints.videoId),
     host:      stringValue(hints.host),
     pageTitle: stringValue(hints.pageTitle),
     track:     cleanMaybe(hints.track),
