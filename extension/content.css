@@ -130,6 +130,40 @@
   #lvx-root.lvx-sync-open .lvx-stage { right: 0; }
 }
 
+/* Compact ear-sync controls; the lyric cue and input behavior stay unchanged. */
+#lvx-root .lvx-sync-panel:has(.lvx-tap-panel[open]) .lvx-sync-phrase { display:none; }
+#lvx-root .lvx-sync-panel:has(.lvx-tap-panel[open]) .lvx-sync-nav { margin-top:10px; }
+#lvx-root .lvx-sync-panel:has(.lvx-tap-panel[open]) .lvx-sync-range { margin-top:4px; }
+#lvx-root .lvx-sync-panel:has(.lvx-tap-panel[open]) .lvx-sync-transport { margin-top:10px; gap:6px; }
+#lvx-root .lvx-sync-panel:has(.lvx-tap-panel[open]) .lvx-sync-clock { width:auto; margin-left:auto; }
+#lvx-root .lvx-sync-panel .lvx-tap-panel { margin-top:8px; padding-top:4px; }
+#lvx-root .lvx-tap-panel .lvx-capture-phases { margin:6px 0; gap:4px; }
+#lvx-root .lvx-tap-panel .lvx-sync-hint { margin:6px 0; }
+#lvx-root .lvx-tap-panel .lvx-perform-cue { position:static; padding:10px; margin-top:8px; }
+#lvx-root .lvx-tap-panel .lvx-perform-phrase { margin:6px 0; line-height:1.5; }
+#lvx-root .lvx-tap-panel .lvx-estimated-phrase { margin:6px 0 2px; }
+#lvx-root .lvx-tap-panel .lvx-cue-legend { margin-top:4px; }
+#lvx-root .lvx-tap-panel .lvx-practice-speed { margin:8px 0; gap:6px; }
+#lvx-root .lvx-tap-panel .lvx-tap-actions { margin:6px 0; }
+#lvx-root .lvx-tap-panel:has(.lvx-perform-cue[data-recording=false]) .lvx-perform-actions [data-sync=tap-mark],
+#lvx-root .lvx-tap-panel:has(.lvx-perform-cue[data-recording=false]) .lvx-perform-actions [data-sync=tap-release] { display:none; }
+#lvx-root .lvx-tap-actions:has(>[data-sync=tap-discard]:disabled) { display:none; }
+#lvx-root .lvx-tap-panel .lvx-tap-status { margin:6px 0; padding:6px 8px; font-size:12px; }
+#lvx-root .lvx-tap-panel .lvx-tap-words { margin:8px 0; gap:4px; }
+#lvx-root .lvx-tap-panel .lvx-tap-words button { padding:6px; }
+#lvx-root .lvx-tap-panel .lvx-tap-timeline { height:48px; margin:8px 0; }
+#lvx-root .lvx-tap-panel .lvx-tap-blocks button { top:6px; }
+#lvx-root .lvx-tap-panel .lvx-tap-segmentation { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px 10px; }
+#lvx-root .lvx-tap-panel .lvx-tap-segmentation label { min-width:0; align-content:start; }
+#lvx-root .lvx-tap-panel .lvx-tap-segmentation input { min-width:0; margin:0; }
+#lvx-root .lvx-tap-panel .lvx-tap-segmentation > .lvx-tap-actions,
+#lvx-root .lvx-tap-panel .lvx-tap-segmentation > p { grid-column:1/-1; }
+#lvx-root .lvx-tap-panel .lvx-pronunciation-hint { margin:4px 0; font-size:12px; }
+#lvx-root .lvx-tap-panel .lvx-perform-options { margin-top:8px; padding-top:4px; }
+#lvx-root .lvx-tap-panel .lvx-tap-settings { margin:8px 0; gap:6px 10px; }
+#lvx-root .lvx-tap-panel .lvx-live-recovery { margin-top:8px; gap:4px; }
+#lvx-root .lvx-tap-panel .lvx-live-recovery button { padding:6px 8px; min-height:44px; }
+
 /* ── THEME VARIABLES ── */
 #lvx-root {
   --lvx-color-main:    #F2EDD7;
