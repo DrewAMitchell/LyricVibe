@@ -172,9 +172,30 @@
         originMs: take.marks.length ? take.originMs : null, status: 'armed' };
     }
     if (!take.marks.length) return take;
-    const marks = take.marks.slice(0, -1), index = marks.length;
+    const removed = take.marks[take.marks.length - 1];
+    const index = take.units.findIndex(unit => unit.id === removed.id);
+    const marks = take.marks.slice(0, -1);
     return { ...take, marks, index, pendingStartMs: null, lastMs: marks.length ? marks[marks.length - 1].endMs : null,
       originMs: marks.length ? take.originMs : null, status: 'armed' };
+  }
+
+  // Move the live recording cursor without seeking the source clock. Marks at
+  // or after the selected unit are discarded; earlier marks remain intact.
+  function reposition(take, index) {
+    if (!take || !['armed', 'complete', 'stopped'].includes(take.status)) fail('INVALID_TAKE', 'Provide a take returned by begin.');
+    if (!Number.isSafeInteger(index) || index < 0 || index >= take.units.length) {
+      fail('INVALID_INDEX', 'Cursor index must identify a timing unit.');
+    }
+    if (take.mode !== 'word' && take.mode !== 'phrase') {
+      fail('REPOSITION_UNSUPPORTED', 'Live cursor recovery is supported only for word and phrase modes.');
+    }
+    const positionById = new Map(take.units.map((unit, position) => [unit.id, position]));
+    const marks = take.marks.filter(mark => positionById.get(mark.id) < index);
+    return { ...take, index, marks, pendingStartMs: null,
+      lastMs: marks.length ? marks[marks.length - 1].endMs : null,
+      originMs: marks.length ? take.originMs : null,
+      status: take.status === 'complete' ? 'stopped' : take.status,
+      actionHistory: [] };
   }
 
   function stop(take) {
@@ -222,5 +243,5 @@
       actionHistory: take.actionHistory ? [] : undefined };
   }
 
-  return { begin, mark, release, undo, stop, adjust };
+  return { begin, mark, release, undo, stop, adjust, reposition };
 });

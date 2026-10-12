@@ -266,3 +266,68 @@ test('subdivide adjustment moves internal shared boundaries on both children', (
   assert.throws(() => tap.adjust(take, { id: 's0', edge: 'start', deltaMs: 10 }), { code: 'OUT_OF_BOUNDS' });
   assert.throws(() => tap.adjust(take, { id: 's2', edge: 'end', deltaMs: -10 }), { code: 'OUT_OF_BOUNDS' });
 });
+
+test('undo after skipped units returns the removed mark unit position', () => {
+  let take = tap.begin(units(4));
+  take = tap.reposition(take, 2);
+  take = tap.mark(take, 100);
+  take = tap.mark(take, 200);
+  take = tap.undo(take);
+  assert.equal(take.index, 2);
+  assert.deepEqual(take.marks, []);
+});
+
+test('reposition rewinds immutably, pruning the target and later marks and pending start', () => {
+  let take = tap.begin(units(4));
+  take = tap.mark(take, 100); take = tap.mark(take, 200);
+  take = tap.mark(take, 300); take = tap.mark(take, 400);
+  take = tap.mark(take, 500); // pending unit 2
+  const before = JSON.stringify(take);
+  const rewound = tap.reposition(take, 1);
+  assert.equal(JSON.stringify(take), before);
+  assert.equal(rewound.index, 1);
+  assert.equal(rewound.pendingStartMs, null);
+  assert.deepEqual(rewound.marks.map(({ id }) => id), ['u0']);
+  assert.equal(rewound.lastMs, 200);
+  assert.equal(rewound.originMs, 100);
+  assert.equal(rewound.status, 'armed');
+  assert.deepEqual(rewound.actionHistory, []);
+});
+
+test('reposition drops pending input when advancing and closes complete takes as stopped', () => {
+  let take = tap.begin(units(3), { cadence: 'flow' });
+  take = tap.mark(take, 100);
+  take = tap.reposition(take, 2);
+  assert.equal(take.index, 2);
+  assert.equal(take.pendingStartMs, null);
+  assert.deepEqual(take.marks, []);
+  assert.equal(take.status, 'armed');
+  assert.equal(take.actionHistory.length, 0);
+
+  let complete = tap.begin(units(1));
+  complete = tap.mark(complete, 100); complete = tap.mark(complete, 200);
+  const repositioned = tap.reposition(complete, 0);
+  assert.equal(repositioned.status, 'stopped');
+  assert.equal(repositioned.index, 0);
+  assert.equal(repositioned.marks.length, 0);
+  assert.equal(repositioned.lastMs, null);
+  assert.equal(repositioned.originMs, null);
+});
+
+test('reposition rejects invalid indices and syllable modes', () => {
+  const take = tap.begin(units(3));
+  for (const index of [-1, 3, 1.5, '1']) {
+    assert.throws(() => tap.reposition(take, index), { code: 'INVALID_INDEX' });
+  }
+  const syllables = tap.begin(syllableUnits(2), { mode: 'syllable', cadence: 'subdivide' });
+  assert.throws(() => tap.reposition(syllables, 0), { code: 'REPOSITION_UNSUPPORTED' });
+});
+
+test('flow recovery clears an open start so a later mark cannot create a false interval', () => {
+  let take = tap.begin(units(3), { cadence: 'flow' });
+  take = tap.mark(take, 100); // opens unit 0
+  take = tap.reposition(take, 1);
+  take = tap.mark(take, 500); // starts unit 1, rather than ending unit 0
+  take = tap.mark(take, 600);
+  assert.deepEqual(take.marks.map(({ id, startMs, endMs }) => [id, startMs, endMs]), [['u1', 500, 600]]);
+});
