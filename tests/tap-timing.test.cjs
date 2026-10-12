@@ -233,3 +233,36 @@ test('subdivide BPM snaps an internal tap while preserving the parent endpoints'
   assert.equal(take.status, 'complete');
   assert.deepEqual(take.marks.map(({ startMs, endMs }) => [startMs, endMs]), [[100, 225], [225, 500]]);
 });
+
+test('phrase mode supports pair and flow capture', () => {
+  let take = tap.begin(units(2), { mode: 'phrase' });
+  take = tap.mark(take, 100); take = tap.mark(take, 200);
+  assert.equal(take.marks[0].id, 'u0');
+  take = tap.begin(units(2), { mode: 'phrase', cadence: 'flow' });
+  take = tap.mark(take, 100); take = tap.mark(take, 200); take = tap.mark(take, 300);
+  assert.equal(take.status, 'complete');
+  assert.throws(() => tap.begin(units(2), { mode: 'phrase', cadence: 'subdivide' }), { code: 'INVALID_CADENCE' });
+});
+
+test('adjust shifts stopped and complete marks immutably and clears stale undo history', () => {
+  let take = tap.begin(units(2), { cadence: 'flow' });
+  take = tap.mark(take, 100); take = tap.mark(take, 200); take = tap.mark(take, 300);
+  const changed = tap.adjust(take, { id: 'u1', edge: 'move', deltaMs: 20 });
+  assert.deepEqual(changed.marks.map(({ startMs, endMs }) => [startMs, endMs]), [[100, 200], [220, 320]]);
+  assert.equal(take.marks[1].startMs, 200);
+  assert.deepEqual(changed.actionHistory, []);
+  assert.equal(tap.undo(changed).marks.length, 1);
+  assert.throws(() => tap.adjust(tap.begin(units(1)), { id: 'u0', edge: 'move', deltaMs: 1 }), { code: 'TAKE_OPEN' });
+  assert.throws(() => tap.adjust(changed, { id: 'u0', edge: 'move', deltaMs: 200 }), { code: 'OVERLAP' });
+  assert.throws(() => tap.adjust(changed, { id: 'u1', edge: 'end', deltaMs: 1.5 }), { code: 'INVALID_ADJUSTMENT' });
+});
+
+test('subdivide adjustment moves internal shared boundaries on both children', () => {
+  let take = tap.begin(syllableUnits(3), { mode: 'syllable', cadence: 'subdivide' });
+  take = tap.mark(take, 220); take = tap.mark(take, 350);
+  const changed = tap.adjust(take, { id: 's1', edge: 'start', deltaMs: 10 });
+  assert.deepEqual(changed.marks.map(({ startMs, endMs }) => [startMs, endMs]), [[100, 230], [230, 350], [350, 500]]);
+  assert.throws(() => tap.adjust(take, { id: 's1', edge: 'move', deltaMs: 10 }), { code: 'ADJUST_UNSUPPORTED' });
+  assert.throws(() => tap.adjust(take, { id: 's0', edge: 'start', deltaMs: 10 }), { code: 'OUT_OF_BOUNDS' });
+  assert.throws(() => tap.adjust(take, { id: 's2', edge: 'end', deltaMs: -10 }), { code: 'OUT_OF_BOUNDS' });
+});

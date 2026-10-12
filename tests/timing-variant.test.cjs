@@ -188,3 +188,19 @@ test('effect operation batches reject unknown syllables and illegal types atomic
   assert.throws(()=>variant.operate(draft,{type:'setWordEffect',wordId:word.id,effect:{type:'sparkle',strength:0.5}}),{code:'INVALID_EFFECT'});
   assert.throws(()=>variant.operate(draft,{type:'setWordReveal',wordId:word.id,reveal:null}),{code:'INVALID_OPERATION'});
 });
+
+test('phrase capture rescales preview contents atomically and rejects protected phrases', () => {
+  const base=make('[00:01.00]hello world\n[00:03.00]again');
+  const draft=variant.merge(base,make('[00:22.00]hello world\n[00:24.00]again','b'));
+  const phrase=draft.score.phrases[0], original=JSON.stringify(draft);
+  const updated=variant.operate(draft,{type:'setPhraseTiming',phraseId:phrase.id,startMs:23000,endMs:25000});
+  assert.equal(JSON.stringify(draft),original);
+  assert.deepEqual([updated.score.phrases[0].startMs,updated.score.phrases[0].endMs],[23000,25000]);
+  assert.ok(updated.score.phrases[0].words.every(w=>w.startMs>=23000&&w.endMs<=25000));
+  assert.equal(updated.score.revision,draft.score.revision);
+  const guarded={...draft,protectedIds:[phrase.words[0].id]};
+  assert.throws(()=>variant.operate(guarded,{type:'setPhraseTiming',phraseId:phrase.id,startMs:23000,endMs:25000}),{code:'MANUAL_PROTECTED'});
+  assert.doesNotThrow(()=>variant.operate(guarded,{type:'setPhraseTiming',phraseId:phrase.id,startMs:23000,endMs:25000},true));
+  assert.throws(()=>variant.operate(draft,[{type:'setPhraseTiming',phraseId:phrase.id,startMs:23000,endMs:25000},{type:'setPhraseTiming',phraseId:'missing',startMs:1,endMs:2}]),{code:'UNKNOWN_ID'});
+  assert.equal(JSON.stringify(draft),original);
+});

@@ -99,10 +99,16 @@
     // Apply against a private copy so a failed batch cannot leave a partial preview.
     let score = clone(draft.score);
     for (const submitted of operations) {
-      if (!submitted || !['setWordSyllables', 'setSyllableTiming', 'setWordEffect', 'setSyllableEffect'].includes(submitted.type)) fail('INVALID_OPERATION', 'Only syllable segmentation, timing, and appearance effects may be changed in this preview.');
+      if (!submitted || !['setPhraseTiming', 'setWordSyllables', 'setSyllableTiming', 'setWordEffect', 'setSyllableEffect'].includes(submitted.type)) fail('INVALID_OPERATION', 'Only phrase timing, syllable segmentation, timing, and appearance effects may be changed in this preview.');
       const op = clone(submitted);
       let wordId = op.wordId;
       const effectOnly = op.type === 'setWordEffect' || op.type === 'setSyllableEffect';
+      if (op.type === 'setPhraseTiming') {
+        const phrase=score.phrases.find(p=>p.id===op.phraseId);
+        if (!phrase) fail('UNKNOWN_ID','Choose a phrase from this preview.');
+        if (!Number.isSafeInteger(op.startMs)||!Number.isSafeInteger(op.endMs)||op.endMs<=op.startMs) fail('INVALID_TIME','Use whole milliseconds with a positive phrase interval.');
+        if (!allowProtected && phrase.words.some(w=>draft.protectedIds.includes(w.id))) fail('MANUAL_PROTECTED','Enable editing saved timings before changing this protected phrase.');
+      }
       if (op.type === 'setSyllableTiming' || op.type === 'setSyllableEffect') {
         wordId = score.phrases.flatMap(p => p.words).find(w => (w.syllables || []).some(s => s.id === op.syllableId))?.id;
         if (!wordId) fail('UNKNOWN_ID', 'Choose a syllable from this preview.');

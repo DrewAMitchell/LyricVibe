@@ -12,7 +12,7 @@
     if (!Array.isArray(units) || units.length === 0) fail('INVALID_UNITS', 'Provide at least one timing unit.');
     if (!options || typeof options !== 'object' || Array.isArray(options)) fail('INVALID_OPTIONS', 'Timing options must be an object.');
     const mode = options.mode === undefined ? 'word' : options.mode;
-    if (mode !== 'word' && mode !== 'syllable') fail('INVALID_MODE', 'Mode must be word or syllable.');
+    if (mode !== 'word' && mode !== 'phrase' && mode !== 'syllable') fail('INVALID_MODE', 'Mode must be word, phrase, or syllable.');
     const cadence = options.cadence === undefined ? 'pairs' : options.cadence;
     if (cadence !== 'pairs' && cadence !== 'flow' && cadence !== 'subdivide') fail('INVALID_CADENCE', 'Cadence must be pairs, flow, or subdivide.');
     if (cadence === 'subdivide' && mode !== 'syllable') fail('INVALID_CADENCE', 'Subdivide cadence requires syllable mode.');
@@ -185,5 +185,42 @@
       originMs: take.marks.length ? take.originMs : null };
   }
 
-  return { begin, mark, release, undo, stop };
+  // Late keyboard corrections operate on the immutable completed mark list.
+  // A subdivided child edge is the parent's shared boundary, so update both
+  // adjacent children atomically to keep the partition gapless.
+  function adjust(take, change) {
+    if (!take || !['armed', 'complete', 'stopped'].includes(take.status)) fail('INVALID_TAKE', 'Provide a take returned by begin.');
+    if (take.status !== 'complete' && take.status !== 'stopped') fail('TAKE_OPEN', 'Only stopped or complete takes can be adjusted.');
+    if (!change || typeof change !== 'object' || Array.isArray(change) ||
+        typeof change.id !== 'string' || !['start', 'end', 'move'].includes(change.edge) ||
+        !Number.isSafeInteger(change.deltaMs)) fail('INVALID_ADJUSTMENT', 'Adjustment needs an id, start/end/move edge, and integer deltaMs.');
+    const index = take.marks.findIndex(item => item.id === change.id);
+    if (index < 0) fail('UNKNOWN_MARK', 'No completed mark has that id.');
+    const marks = take.marks.map(item => ({ ...item }));
+    const current = marks[index];
+    const delta = change.deltaMs;
+    if (take.cadence === 'subdivide' && delta !== 0 && (change.edge === 'start' && index === 0 || change.edge === 'end' && index === take.units.length - 1)) fail('OUT_OF_BOUNDS', 'The first syllable start and final release are fixed by the word.');
+    if (take.cadence === 'subdivide' && change.edge === 'move') fail('ADJUST_UNSUPPORTED', 'Move adjustment is not supported for subdivided syllables. Adjust a shared boundary instead.');
+    if (take.cadence === 'subdivide' && change.edge === 'start' && index > 0) {
+      marks[index - 1].endMs += delta;
+      current.startMs += delta;
+    } else if (take.cadence === 'subdivide' && change.edge === 'end' && index + 1 < marks.length) {
+      current.endMs += delta;
+      marks[index + 1].startMs += delta;
+    } else if (change.edge === 'start') current.startMs += delta;
+    else if (change.edge === 'end') current.endMs += delta;
+    else { current.startMs += delta; current.endMs += delta; }
+
+    const unitById = new Map(take.units.map(unit => [unit.id, unit]));
+    for (let i = 0; i < marks.length; i++) {
+      const item = marks[i], unit = unitById.get(item.id);
+      if (item.startMs < unit.minMs || item.endMs > unit.maxMs) fail('OUT_OF_BOUNDS', 'Adjusted mark is outside its unit bounds.');
+      if (item.endMs <= item.startMs) fail('INVALID_INTERVAL', 'Adjusted mark must have a positive interval.');
+      if (i && item.startMs < marks[i - 1].endMs) fail('OVERLAP', 'Adjusted marks cannot overlap.');
+    }
+    return { ...take, marks, lastMs: marks.length ? marks[marks.length - 1].endMs : null,
+      actionHistory: take.actionHistory ? [] : undefined };
+  }
+
+  return { begin, mark, release, undo, stop, adjust };
 });

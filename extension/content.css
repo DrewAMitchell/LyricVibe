@@ -68,6 +68,28 @@
 #lvx-root .lvx-perform-cue { position: sticky; top: -22px; z-index: 2; background: #20271b; border: 1px solid #65764f; border-radius: 8px; padding: 14px; margin-top: 12px; }
 #lvx-root .lvx-perform-cue small { display: block; color: #b9ca9e; font-size: 9px; letter-spacing: .12em; }
 #lvx-root .lvx-perform-cue strong { display: block; font-size: 30px; line-height: 1.2; margin: 5px 0; overflow-wrap: anywhere; }
+#lvx-root .lvx-perform-cue .lvx-perform-phrase { font-size:22px; line-height:1.7; margin:10px 0; font-weight:600; }
+#lvx-root .lvx-perform-cue .lvx-context-word { display:inline; color:#edf1e8; font-size:inherit; line-height:inherit; border-radius:4px; padding:2px 1px; box-decoration-break:clone; -webkit-box-decoration-break:clone; }
+#lvx-root .lvx-perform-cue .lvx-next-record { outline:2px solid #e9ce88; outline-offset:1px; }
+#lvx-root .lvx-perform-cue .lvx-estimated-playing, #lvx-root .lvx-tap-blocks button.lvx-estimated-playing { color:#f4fbff; background:#244f68; box-shadow:inset 0 -2px #85d2ff; }
+#lvx-root .lvx-estimated-phrase { color:#a6daef; font-size:12px; margin:10px 0 4px; line-height:1.5; }
+#lvx-root .lvx-cue-legend { color:#c4cdbb; font-size:10px; margin:8px 0 0; }
+#lvx-root .lvx-capture-phases { display:flex; gap:6px; margin:14px 0; }
+#lvx-root .lvx-capture-phases button { flex:1; min-width:0; white-space:normal; padding:8px 4px; }
+#lvx-root .lvx-capture-phases [aria-pressed=true] { color:#e9ce88; border-color:#e9ce88; background:#36301f; }
+#lvx-root .lvx-tap-panel [hidden] { display:none !important; }
+#lvx-root .lvx-mark-correction { border-top:1px solid #58614f; padding-top:14px; margin-top:16px; }
+#lvx-root .lvx-mark-correction label { display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:12px; }
+#lvx-root .lvx-mark-correction select { flex:1; min-width:0; }
+#lvx-root .lvx-correction-times { display:flex; gap:10px; margin-top:12px; }
+#lvx-root .lvx-correction-times label { flex:1; }
+#lvx-root .lvx-correction-times input[type=number] { width:100%; }
+#lvx-root .lvx-capture-transcript { max-width:900px; padding:24px 30px; border-radius:14px; background:#101710e8; text-align:left; text-transform:none; letter-spacing:normal; font-family:'Segoe UI',Arial,sans-serif; }
+#lvx-root .lvx-capture-transcript small { display:block; color:#bad1dc; font-size:12px; letter-spacing:.08em; }
+#lvx-root .lvx-capture-transcript p { color:#edf1e8; font-size:clamp(26px,4vw,56px); line-height:1.65; margin:12px 0 0; font-weight:600; }
+#lvx-root .lvx-capture-transcript span { color:#edf1e8; border-radius:5px; padding:2px; box-decoration-break:clone; -webkit-box-decoration-break:clone; }
+#lvx-root .lvx-capture-transcript .lvx-estimated-playing { color:#f4fbff; background:#244f68; box-shadow:inset 0 -3px #85d2ff; }
+#lvx-root .lvx-capture-transcript .lvx-next-record { outline:2px solid #e9ce88; outline-offset:2px; }
 #lvx-root .lvx-perform-cue span { color: #bec6b4; font-size: 11px; }
 #lvx-root .lvx-perform-cue[data-recording="true"] { border-color: #c7dfa1; box-shadow: inset 3px 0 #c7dfa1; }
 #lvx-root .lvx-tap-words button.lvx-marked { background: #263d2b; }
@@ -76,6 +98,7 @@
 #lvx-root .lvx-tap-blocks { position: relative; height: 100%; }
 #lvx-root .lvx-tap-blocks button { position: absolute; top: 13px; min-height: 35px; min-width: 0; padding: 4px; border-radius: 3px; background: #38432e; overflow: hidden; text-overflow: ellipsis; font-size: 10px; }
 #lvx-root .lvx-tap-blocks button[aria-pressed="true"] { border-color: #d6edb1; background: #4b5e37; }
+#lvx-root .lvx-tap-blocks button:disabled { opacity:1; color:#edf1e8; cursor:default; }
 #lvx-root .lvx-tap-playhead { position: absolute; top: 0; height: 100%; width: 2px; background: #f2f9df; pointer-events: none; }
 #lvx-root .lvx-tap-playhead[hidden] { display: none; }
 #lvx-root .lvx-effect-pads { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; }
