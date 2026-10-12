@@ -77,6 +77,26 @@
     return cues;
   }
 
+  // Return display-ready pieces of a compound word, keeping each joiner on
+  // the preceding piece so joining the result always recovers the source.
+  function hyphenWordParts(text) {
+    if (typeof text !== "string") fail("INVALID_TEXT", "word text must be a string");
+    // Scan code points so Unicode letters and digits work without changing
+    // any source spelling.
+    const result = [];
+    let part = "";
+    const chars = Array.from(text);
+    for (let i = 0; i < chars.length; i++) {
+      const ch = chars[i], prev = chars[i - 1], next = chars[i + 1];
+      part += ch;
+      if ((ch === "-" || ch === "\u2010" || ch === "\u2011") && /[\p{L}\p{N}]/u.test(prev || "") && /[\p{L}\p{N}]/u.test(next || "")) {
+        result.push(part); part = "";
+      }
+    }
+    if (part) result.push(part);
+    return result.length > 1 ? result : [text];
+  }
+
   function wordsForText(text) {
     const result = [];
     const re = /\([^)]*\)|[^\s]+/gu;
@@ -474,5 +494,5 @@
     return { version: receipt.version, mediaKey: receipt.mediaKey, lyricsHash: receipt.lyricsHash, expectedRevision: receipt.expectedRevision, adapter: receipt.adapter, model: receipt.model, proposals, automaticAdmissionEnabled: false };
   }
 
-  return { VERSION, ScoreError, mediaKey, parseLrc, createScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, applyOperation, applyAlignment };
+  return { VERSION, ScoreError, mediaKey, parseLrc, hyphenWordParts, createScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, applyOperation, applyAlignment };
 });

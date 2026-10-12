@@ -62,6 +62,8 @@
 #lvx-root .lvx-tap-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
 #lvx-root .lvx-perform-actions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
 #lvx-root .lvx-perform-actions button { white-space: normal; min-height: 40px; }
+#lvx-root .lvx-practice-speed { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; margin:12px 0; font-size:12px; color:#dce7d0; }
+#lvx-root .lvx-practice-speed select { min-height:36px; max-width:100%; }
 #lvx-root .lvx-perform-actions [data-sync="tap-arm"] { background: #c7dfa1; border-color: #c7dfa1; color: #19220e; }
 #lvx-root .lvx-perform-cue { position: sticky; top: -22px; z-index: 2; background: #20271b; border: 1px solid #65764f; border-radius: 8px; padding: 14px; margin-top: 12px; }
 #lvx-root .lvx-perform-cue small { display: block; color: #b9ca9e; font-size: 9px; letter-spacing: .12em; }

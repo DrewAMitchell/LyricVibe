@@ -15,7 +15,7 @@
     let changedWords = 0;
     for (const phrase of next.phrases) {
       const proposed = candidate.phrases.find(p => p.id === phrase.id);
-      if (!proposed || proposed.words.length !== phrase.words.length || phrase.words.some((w, i) => w.id !== proposed.words[i].id || w.text !== proposed.words[i].text)) fail('LYRICS_CHANGED', 'Timing migration requires the same words and grouping.');
+      if (!proposed || !sameWordsOrHyphenSplit(phrase.words, proposed.words)) fail('LYRICS_CHANGED', 'Timing migration requires the same words and grouping.');
       // Preserve the whole phrase to avoid a long display spanning two timelines.
       if (phrase.words.some(protectedWord)) {
         protectedIds.push(...phrase.words.map(w => w.id)); preservedPhraseIds.push(phrase.id); continue;
@@ -36,6 +36,21 @@
     next.lyrics = clone(candidate.lyrics); next.revision = base.revision + 1;
     return { score: core.validateScore(next), protectedIds, preservedPhraseIds, changedWords };
   }
+  function sameWordsOrHyphenSplit(savedWords, proposedWords) {
+    let i = 0, j = 0;
+    while (i < savedWords.length && j < proposedWords.length) {
+      const saved = savedWords[i], proposed = proposedWords[j];
+      if (saved.id === proposed.id && saved.text === proposed.text) { i++; j++; continue; }
+      const parts = core.hyphenWordParts(proposed.text);
+      if (parts.length < 2 || saved.id !== proposed.id || saved.text !== parts[0]) return false;
+      for (let k = 0; k < parts.length; k++) {
+        const fragment = savedWords[i + k];
+        if (!fragment || fragment.id !== `${proposed.id}${k ? `-hyphen-${k + 1}` : ''}` || fragment.text !== parts[k] || !fragment.locked || fragment.provenance !== 'manual') return false;
+      }
+      i += parts.length; j++;
+    }
+    return i === savedWords.length && j === proposedWords.length;
+  }
   function tune(draft, changes, allowProtected = false) {
     if (!Array.isArray(changes) || changes.length > 5000) fail('INVALID_TIMING', 'Provide a bounded list of word timings.');
     const next = clone(draft.score), seen = new Set();
@@ -46,6 +61,26 @@
       const word = phrase?.words.find(w => w.id === change.wordId);
       if (!word) fail('UNKNOWN_ID', 'Choose a word from this preview.');
       if (draft.protectedIds.includes(word.id) && !allowProtected) fail('MANUAL_PROTECTED', 'Enable editing saved timings before changing this protected phrase.');
+      if (change.hyphenParts !== undefined) {
+        const expected = core.hyphenWordParts(word.text);
+        const parts = change.hyphenParts;
+        if (expected.length < 2 || !Array.isArray(parts) || parts.length !== expected.length || parts.some((part, i) => !part || part.text !== expected[i])) fail('INVALID_TIMING', 'Hyphen parts must match the complete source word exactly.');
+        if ((word.syllables || []).length) fail('INVALID_SYLLABLES', 'Clear authored syllables before splitting a word into hyphen parts.');
+        if (![change.startMs, change.endMs].every(n => Number.isSafeInteger(n) && n >= 0) || change.endMs <= change.startMs || change.endMs > next.source.durationMs || parts[0].startMs !== change.startMs || parts.at(-1).endMs !== change.endMs) fail('INVALID_TIMING', 'Hyphen part bounds must match the parent timing and fit within the video.');
+        let priorEnd = change.startMs;
+        for (const part of parts) {
+          if (!Number.isSafeInteger(part.startMs) || !Number.isSafeInteger(part.endMs) || part.startMs < change.startMs || part.endMs > change.endMs || part.startMs < priorEnd || part.endMs <= part.startMs) fail('INVALID_TIMING', 'Hyphen parts need positive ordered nonoverlapping whole-millisecond timings.');
+          priorEnd = part.endMs;
+        }
+        const generatedIds = parts.slice(1).map((_, i) => `${word.id}-hyphen-${i + 2}`);
+        const ids = new Set(next.phrases.flatMap(p => p.words.map(w => w.id)));
+        if (generatedIds.some(id => ids.has(id))) fail('INVALID_TIMING', 'A generated hyphen part ID already exists.');
+        const replacements = parts.map((part, i) => ({ ...clone(word), id: i ? generatedIds[i - 1] : word.id, text: part.text, startMs: part.startMs, endMs: part.endMs, provenance: 'manual', locked: true }));
+        const at = phrase.words.findIndex(item => item.id === word.id);
+        phrase.words.splice(at, 1, ...replacements);
+        phrase.startMs = Math.min(...phrase.words.map(w => w.startMs)); phrase.endMs = Math.max(...phrase.words.map(w => w.endMs)); phrase.endEstimated = false;
+        continue;
+      }
       if (![change.startMs, change.endMs].every(n => Number.isSafeInteger(n) && n >= 0) || change.endMs < change.startMs || change.endMs > next.source.durationMs) fail('INVALID_TIMING', 'Use whole milliseconds within the video, with end after start.');
       const oldSpan = word.endMs - word.startMs;
       for (const s of word.syllables || []) {

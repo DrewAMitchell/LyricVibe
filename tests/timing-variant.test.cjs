@@ -47,6 +47,69 @@ test('precise preview tuning is repeatable and remains isolated from the saved s
   assert.throws(()=>variant.tune(draft,[{wordId:id,startMs:21925.5,endMs:22200}]),{code:'INVALID_TIMING'});
 });
 
+test('hyphenParts split a compound word into protected word cues and preserve appearance', () => {
+  const base=make('[00:01.00]ice-breaker now');
+  const original=base.phrases[0].words[0];
+  original.effects=[{type:'pulse',strength:0.6}];
+  original.reveal={type:'sweep',easing:'linear'};
+  const draft=variant.merge(base,make('[00:22.00]ice-breaker now','b'));
+  const word=draft.score.phrases[0].words[0];
+  const split=variant.tune(draft,[{wordId:word.id,startMs:22000,endMs:22400,hyphenParts:[
+    {text:'ice-',startMs:22000,endMs:22150},{text:'breaker',startMs:22200,endMs:22400},
+  ]}]);
+  const [first,second]=split.score.phrases[0].words;
+  assert.deepEqual([first.id,first.text,first.startMs,first.endMs],[word.id,'ice-',22000,22150]);
+  assert.deepEqual([second.id,second.text,second.startMs,second.endMs],[`${word.id}-hyphen-2`,'breaker',22200,22400]);
+  for(const part of [first,second]) {
+    assert.equal(part.locked,true); assert.equal(part.provenance,'manual');
+    assert.deepEqual(part.effects,original.effects); assert.deepEqual(part.reveal,original.reveal);
+  }
+  assert.equal(split.score.phrases[0].words.map(w=>w.text).join(' '),'ice- breaker now');
+  assert.equal(variant.tune(split,[{wordId:first.id,startMs:22000,endMs:22160}]).score.phrases[0].words[0].endMs,22160); // same-preview manual repair stays editable
+  const protectedDraft={...draft,protectedIds:[word.id]};
+  assert.throws(()=>variant.tune(protectedDraft,[{wordId:word.id,startMs:22000,endMs:22400,hyphenParts:[{text:'ice-',startMs:22000,endMs:22150},{text:'breaker',startMs:22200,endMs:22400}]}]),{code:'MANUAL_PROTECTED'});
+});
+
+test('hyphenParts reject authored syllables, partial or invalid parts and timing collisions atomically', () => {
+  const base=make('[00:01.00]ice-breaker later');
+  const original=base.phrases[0].words[0];
+  const draft=variant.merge(base,make('[00:22.00]ice-breaker later','b'));
+  const word=draft.score.phrases[0].words[0], before=JSON.stringify(draft);
+  const change=(parts,endMs=22400)=>({wordId:word.id,startMs:22000,endMs,hyphenParts:parts});
+  for(const bad of [
+    change([{text:'ice-',startMs:22000,endMs:22200}]),
+    change([{text:'wrong-',startMs:22000,endMs:22100},{text:'breaker',startMs:22100,endMs:22400}]),
+    change([{text:'ice-',startMs:22000,endMs:22200},{text:'breaker',startMs:22100,endMs:22400}]),
+    change([{text:'ice-',startMs:22000,endMs:22100},{text:'breaker',startMs:22100,endMs:22400}],22450),
+  ]) assert.throws(()=>variant.tune(draft,[bad]),{code:'INVALID_TIMING'});
+  const collision=structuredClone(draft);collision.score.phrases[0].words[1].id=`${word.id}-hyphen-2`;
+  assert.throws(()=>variant.tune(collision,[change([
+    {text:'ice-',startMs:22000,endMs:22100},{text:'breaker',startMs:22100,endMs:22400},
+  ])]),{code:'INVALID_TIMING'});
+  assert.equal(JSON.stringify(draft),before);
+  const syllabled=structuredClone(draft);
+  syllabled.score.phrases[0].words[0].syllables=[{id:'authored',text:word.text,startMs:word.startMs,endMs:word.endMs,provenance:'manual',locked:true,effects:[]}];
+  assert.throws(()=>variant.tune(syllabled,[change([
+    {text:'ice-',startMs:22000,endMs:22100},{text:'breaker',startMs:22100,endMs:22400},
+  ])],true),{code:'INVALID_SYLLABLES'});
+  assert.equal(JSON.stringify(draft),before);
+});
+
+test('a saved manual hyphen split remains protected when the candidate still has its compound word', () => {
+  const base=make('[00:01.00]ice-breaker stays\n[00:04.00]free');
+  const saved=variant.merge(base,make('[00:22.00]ice-breaker stays\n[00:25.00]free','b'));
+  const compound=saved.score.phrases[0].words[0];
+  const split=variant.tune(saved,[{wordId:compound.id,startMs:1100,endMs:1500,hyphenParts:[
+    {text:'ice-',startMs:1100,endMs:1250},{text:'breaker',startMs:1300,endMs:1500},
+  ]}],true);
+  const candidate=make('[00:35.00]ice-breaker stays\n[00:39.00]free','c');
+  const migrated=variant.merge(split.score,candidate);
+  assert.deepEqual(migrated.score.phrases[0].words,split.score.phrases[0].words);
+  assert.deepEqual(migrated.protectedIds,split.score.phrases[0].words.map(w=>w.id));
+  assert.deepEqual(migrated.preservedPhraseIds,[split.score.phrases[0].id]);
+  assert.equal(migrated.score.phrases[1].startMs,39000);
+});
+
 test('syllable operations preserve the preview revision and support tapping plus repeat manual timing', () => {
   const base=make('[00:01.00]hello world'), before=JSON.stringify(base);
   const draft=variant.merge(base,make('[00:22.00]hello world','b'));

@@ -101,6 +101,28 @@ test('catalog preview, exact tuning, cancellation and application preserve histo
   assert.equal(again.ok,false);assert.equal(again.error.code,'REVISION_CONFLICT');
 });
 
+test('hyphen word capture stages atomically and saved application can undo the structural split', async () => {
+  const h=makeHarness(), score=await h.ensure(1,ID_A,{lyrics:{synced:'[00:01.00]ice-breaker now\n[00:03.00]',provider:'fixture'}});
+  h.context.recognize=async()=>({ok:true,lyrics:{synced:'[00:05.00]ice-breaker now\n[00:07.00]'},match:{id:2}});
+  const sender={id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`};
+  const envelope={mediaKey:`youtube:${ID_A}`,expectedRevision:0,lyricsHash:score.lyrics.contentHash};
+  const before=JSON.stringify(recordFor(h));
+  const prepared=await h.dispatch({type:'LV_TIMING_PREPARE',...envelope},sender);
+  assert.equal(prepared.ok,true);
+  const wordId=score.phrases[0].words[0].id;
+  const tuned=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:prepared.preview.token,previewRevision:0,changes:[{
+    wordId,startMs:5050,endMs:5600,hyphenParts:[{text:'ice-',startMs:5050,endMs:5200},{text:'breaker',startMs:5250,endMs:5600}],
+  }]},sender);
+  assert.equal(tuned.ok,true);assert.equal(JSON.stringify(recordFor(h)),before);
+  const applied=await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:prepared.preview.token,previewRevision:tuned.preview.previewRevision},sender);
+  assert.equal(applied.ok,true);
+  assert.deepEqual(Array.from(applied.score.phrases[0].words,w=>w.text),['ice-','breaker','now']);
+  assert.equal(recordFor(h).history.length,1);
+  const undone=await h.dispatch({type:'LV_SCORE_UNDO',mediaKey:envelope.mediaKey,expectedRevision:1},sender);
+  assert.equal(undone.ok,true);
+  assert.deepEqual(JSON.parse(JSON.stringify({...undone.score,revision:0})),JSON.parse(JSON.stringify(score)));
+});
+
 test('catalog preview rejects wrong sender, hash, source changes and stale tokens without saved writes', async () => {
   const h=makeHarness(), score=await h.ensure();
   h.context.recognize=async()=>({ok:true,lyrics:{synced:'[00:05.00]hello world\n[00:07.00]'},match:{id:2}});

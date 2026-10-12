@@ -32,6 +32,20 @@ test('parseLrc retains empty cues and expands multiple timestamps', () => {
   assert.deepEqual(score.parseLrc('[ar:Artist]\nnot a cue'), []);
 });
 
+test('hyphenWordParts splits only internal letter or digit joins and preserves source spelling', () => {
+  for (const [text, expected] of [
+    ['ice-breaker', ['ice-', 'breaker']],
+    ['co‐operate', ['co‐', 'operate']],
+    ['re‑enter', ['re‑', 'enter']],
+    ['A1-B2', ['A1-', 'B2']],
+    ['-leading', ['-leading']], ['trailing-', ['trailing-']], ['rock\'n\'roll', ["rock'n'roll"]],
+    ['single', ['single']],
+  ]) {
+    assert.deepEqual(score.hyphenWordParts(text), expected);
+    assert.equal(score.hyphenWordParts(text).join(''), text);
+  }
+});
+
 test('score construction uses nearby blank cues as exact ends and preserves parenthetical suggestions', () => {
   const s = makeScore('[00:01.00]Hello (echo it)\n[00:02.80]\n[00:05.00]Again');
   const lead = s.phrases.find(p => p.laneId === 'lead');
