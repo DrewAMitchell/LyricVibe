@@ -55,6 +55,12 @@
   function spellingParts(word, expectedCount) {
     if (expectedCount === 1) return [word];
     if (!/^[A-Za-z]+$/.test(word)) return null;
+    // A terminal -ing spelling is a useful editable cut when the dictionary
+    // confirms two syllables (e.g. stay|ing). The count remains authoritative;
+    // this is an English orthographic heuristic, not a universal rule.
+    if (expectedCount === 2 && /^[A-Za-z]+ing$/i.test(word)) {
+      return [word.slice(0, -3), word.slice(-3)];
+    }
     const lower = word.toLowerCase();
     const nuclei = [];
     for (let i = 0; i < lower.length;) {
@@ -181,8 +187,19 @@
       const wrapped = shell(text);
       if (!wrapped) return failure('unknown', text, [], 'cmudict-count', 'unsupported-token-shape');
       ({ prefix, core: spokenText, suffix } = wrapped);
+      // Treat apostrophe-dropped g as a candidate English spelling variant
+      // only when it matches this exact suffix form and CMUdict has the form
+      // restored below. The source lyric itself remains untouched by suggest().
+      const droppedG = /^(.*)in$/i.exec(spokenText);
+      const droppedGMarker = /^['’](.*)$/.exec(suffix);
+      if (droppedG && droppedGMarker) {
+        spokenText = `${droppedG[1]}ing`;
+        suffix = droppedGMarker[1];
+        method = 'cmudict-count+english-g-dropping+orthographic-heuristic';
+      } else {
+        method = 'cmudict-count+orthographic-heuristic';
+      }
       lookupWords = [spokenText];
-      method = 'cmudict-count+orthographic-heuristic';
     }
 
     const componentCounts = lookupWords.map(word => countsFor(countsIndex, word));

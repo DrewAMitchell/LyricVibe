@@ -24,6 +24,11 @@ test('build compiles pinned CMUdict variants into sorted unique positive vowel c
   // The real dictionary contains the word "entries"; it is not a wrapper.
   assert.deepEqual(pronunciation.suggest('about', saved.entries).parts, ['a', 'bout']);
   assert.deepEqual(pronunciation.suggest('24', saved.entries).parts, ['twen', 'ty', 'four']);
+  const stayin = pronunciation.suggest("stayin'", saved.entries);
+  assert.equal(stayin.status, 'suggested');
+  assert.equal(stayin.syllableCounts[0], 2);
+  assert.equal(stayin.spokenText, 'staying');
+  assert.deepEqual(stayin.parts, ['stay', 'ing']);
   for (const word of ['hour', 'hours', 'our', 'fire']) assert.deepEqual(saved.entries[word], [1, 2]);
   const curated = new Map([['hour', ['hou', 'r']], ['hours', ['hou', 'rs']], ['our', ['ou', 'r']], ['fire', ['fi', 're']]]);
   for (const [word, expected] of curated) {
@@ -64,6 +69,27 @@ test('unique dictionary count gates heuristic splits and preserves original case
   assert.deepEqual(heldStone.parts, ['stone']);
   assert.equal(heldStone.parts.join(''), heldStone.spokenText);
   assert.equal(heldStone.syllableCounts[0], 1);
+});
+
+test('English dropped-g spelling uses the restored dictionary form as an editable syllable suggestion', () => {
+  const englishCounts = { entries: { staying: [2], singing: [2], stayin: [1] } };
+  const result = pronunciation.suggest("Stayin'", englishCounts);
+  assert.equal(result.status, 'suggested');
+  assert.equal(result.syllableCounts[0], 2);
+  assert.equal(result.spokenText, 'Staying');
+  assert.deepEqual(result.parts, ['Stay', 'ing']);
+  assert.equal(result.method, 'cmudict-count+english-g-dropping+orthographic-heuristic');
+
+  const curly = pronunciation.suggest('singin’', englishCounts);
+  assert.equal(curly.status, 'suggested');
+  assert.equal(curly.syllableCounts[0], 2);
+  assert.equal(curly.spokenText, 'singing');
+  assert.deepEqual(curly.parts, ['sing', 'ing']);
+
+  // A dropped-g-looking form with no restored dictionary entry stays unknown.
+  assert.equal(pronunciation.suggest("walkin'", englishCounts).status, 'unknown');
+  // Ordinary dictionary lookup retains its existing behavior.
+  assert.deepEqual(pronunciation.suggest('singing', englishCounts).parts, ['sing', 'ing']);
 });
 
 test('unknown and multiple-count dictionary entries produce no guessed parts', () => {

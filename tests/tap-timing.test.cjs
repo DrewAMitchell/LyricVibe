@@ -1,6 +1,129 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const tap = require('../extension/tap-timing.js');
+
+test('performance events preserve exact raw taps until later count association', () => {
+  const units = [
+    { id:'a', wordId:'a', phraseId:'p', text:'known', minMs:100, maxMs:500, expectedCount:1 },
+    { id:'b', wordId:'b', phraseId:'p', text:'unknown', minMs:100, maxMs:500, expectedCount:null },
+  ];
+  let take = tap.beginEvents(units);
+  take = tap.markEvent(take, 137); take = tap.markEvent(take, 281);
+  assert.deepEqual(take.events.map(e=>e.sourceMs), [137,281]);
+  assert.deepEqual(take.marks, []); assert.equal(take.index,0);
+  const reviewed = tap.associateEvents(take);
+  assert.equal(reviewed.ready,false);
+  assert.deepEqual(take.events.map(e=>e.sourceMs), [137,281]);
+  const edited = tap.associateEvents(take, { counts:{a:1,b:1} });
+  assert.equal(edited.ready,true);
+  assert.deepEqual(edited.phrases[0].marks.map(m=>[m.wordId,m.startMs,m.endMs]), [['a',137,281],['b',281,500]]);
+  assert.equal(edited.phrases[0].counts[1].source,'human');
+});
+
+test('performance events consider dictionary alternatives and leave extra or ambiguous taps for review', () => {
+  let take = tap.beginEvents([
+    { id:'a',wordId:'a',phraseId:'p',text:'a',minMs:100,maxMs:500,expectedCount:1,countOptions:[2] },
+  ]);
+  take = tap.markEvent(take,120); take=tap.markEvent(take,210);
+  let report=tap.associateEvents(take);
+  assert.equal(report.ready,true); assert.equal(report.phrases[0].counts[0].count,2);
+  take=tap.markEvent(take,510);
+  report=tap.associateEvents(take);
+  assert.equal(report.ready,false); assert.deepEqual(report.unassigned.map(e=>e.sourceMs),[510]);
+  assert.equal(report.phrases[0].marks.length,2);
+  assert.equal(report.phrases[0].ready,true);
+});
+
+test('performance event undo and stopped phrase rewind retain exact surviving timestamps', () => {
+  let take=tap.beginEvents([
+    {id:'a',wordId:'a',phraseId:'p1',text:'a',minMs:100,maxMs:500,expectedCount:1},
+    {id:'b',wordId:'b',phraseId:'p2',text:'b',minMs:600,maxMs:900,expectedCount:1},
+  ]);
+  take=tap.markEvent(take,123); take=tap.markEvent(take,650);
+  assert.equal(tap.undoEvent(take).lastMs,123);
+  take=tap.stopEvents(take);
+  const rewound=tap.rewindEvents(take,'p2');
+  assert.deepEqual(rewound.events.map(e=>e.sourceMs),[123]);
+  assert.equal(rewound.lastMs,123); assert.equal(rewound.status,'stopped');
+  assert.deepEqual(tap.undoEvent(rewound).events.map(e=>e.sourceMs),[123,650]);
+});
+
+test('event association uses half-open adjacent phrases and never stretches phrase ends to song stop', () => {
+  let take=tap.beginEvents([
+    {id:'a',wordId:'a',phraseId:'p1',text:'a',minMs:100,maxMs:500,expectedCount:1},
+    {id:'b',wordId:'b',phraseId:'p2',text:'b',minMs:500,maxMs:900,expectedCount:1},
+  ]);
+  take=tap.markEvent(take,500); take=tap.stopEvents(take); take.stoppedScoreMs=1200;
+  const report=tap.associateEvents(take);
+  assert.equal(report.phrases[0].eventCount,0);
+  assert.deepEqual(report.phrases[1].marks.map(m=>[m.startMs,m.endMs]),[[500,900]]);
+  take={...take,stoppedScoreMs:700};
+  const partial=tap.associateEvents(take).phrases[1];
+  assert.equal(partial.ready,false); assert.deepEqual(partial.marks,[]);
+  assert.ok(partial.issues.includes('phrase-incomplete'));
+});
+
+test('duplicate timestamps and non-syllable event kinds stay captured and require review', () => {
+  let take=tap.beginEvents([{id:'a',wordId:'a',phraseId:'p',text:'a',minMs:100,maxMs:500,expectedCount:2}]);
+  take=tap.markEvent(take,120); take=tap.markEvent(take,120);
+  const report=tap.associateEvents(take);
+  assert.ok(report.phrases[0].issues.includes('duplicate-time'));
+  assert.deepEqual(report.phrases[0].marks,[]);
+  let tonal=tap.beginEvents([{id:'a',wordId:'a',phraseId:'p',text:'a',minMs:100,maxMs:500,expectedCount:1}],{kind:'tonal-shift'});
+  tonal=tap.markEvent(tonal,120);
+  const tonalReport=tap.associateEvents(tonal);
+  assert.equal(tonalReport.phrases[0].eventCount,0);
+  assert.deepEqual(tonalReport.unassigned.map(e=>e.sourceMs),[120]);
+});
+
+test('a word end is provisional unless a manual boundary lies inside its release window', () => {
+  let take=tap.beginEvents([
+    {id:'a',wordId:'a',phraseId:'p',text:'stayin',minMs:100,maxMs:2000,expectedCount:2,referenceStartMs:90,referenceEndMs:700,referenceManual:true},
+    {id:'b',wordId:'b',phraseId:'p',text:'alive',minMs:100,maxMs:2000,expectedCount:2,referenceStartMs:700,referenceEndMs:1500,referenceManual:false},
+  ]);
+  for(const ms of [120,400,800,1000]) take=tap.markEvent(take,ms);
+  const marks=tap.associateEvents(take).phrases[0].marks;
+  // Internal syllables end at the next entrance; word onsets are first entrances.
+  assert.deepEqual(marks.map(m=>[m.wordId,m.startMs,m.endMs,m.endSource]),[
+    ['a',120,400,'next-entrance'],['a',400,700,'manual-word-boundary'],
+    ['b',800,1000,'next-entrance'],['b',1000,2000,'provisional-phrase-end']]);
+  // A manual end outside (last onset, next onset] is ignored rather than trusted.
+  take={...take,units:take.units.map(u=>u.id==='a'?{...u,referenceEndMs:900}:u)};
+  assert.equal(tap.associateEvents(take).phrases[0].marks[1].endSource,'provisional-next-entrance');
+});
+
+test('long gaps between entrances are flagged at and inside word boundaries without blocking', () => {
+  let take=tap.beginEvents([
+    {id:'a',wordId:'a',phraseId:'p',text:'a',minMs:0,maxMs:5000,expectedCount:2},
+    {id:'b',wordId:'b',phraseId:'p',text:'b',minMs:0,maxMs:5000,expectedCount:2},
+  ]);
+  // Held first syllable of "a" (inside-word gap), then even spacing.
+  for(const ms of [100,1400,1650,1900]) take=tap.markEvent(take,ms);
+  const p=tap.associateEvents(take).phrases[0];
+  assert.equal(p.ready,true);
+  assert.ok(p.issues.includes('long-gap-boundary'));
+  assert.deepEqual(p.gaps.map(g=>[g.afterEventId,g.beforeEventId,g.gapMs,g.atWordBoundary]),[['event-1','event-2',1300,false]]);
+  let boundary=tap.beginEvents(take.units);
+  for(const ms of [100,350,1700,1950]) boundary=tap.markEvent(boundary,ms);
+  const q=tap.associateEvents(boundary).phrases[0];
+  assert.deepEqual(q.gaps.map(g=>[g.previousWordId,g.nextWordId,g.atWordBoundary]),[['a','b',true]]);
+  // Even spacing produces no gap flags.
+  let even=tap.beginEvents(take.units);
+  for(const ms of [100,350,600,850]) even=tap.markEvent(even,ms);
+  assert.deepEqual(tap.associateEvents(even).phrases[0].gaps,[]);
+  assert.throws(()=>tap.associateEvents(even,{gapRatio:1}),/INVALID_GAP|Gap ratio/);
+});
+
+test('partial human counts merge with lexical defaults to resolve an exact total', () => {
+  let take=tap.beginEvents([
+    {id:'a',wordId:'a',phraseId:'p',text:'a',minMs:100,maxMs:500,expectedCount:1},
+    {id:'b',wordId:'b',phraseId:'p',text:'b',minMs:100,maxMs:500,expectedCount:1},
+  ]);
+  take=tap.markEvent(take,120); take=tap.markEvent(take,210); take=tap.markEvent(take,330);
+  const report=tap.associateEvents(take,{counts:{a:2}});
+  assert.equal(report.phrases[0].ready,true);
+  assert.deepEqual(report.phrases[0].counts.map(c=>[c.count,c.source]),[[2,'human'],[1,'dictionary']]);
+});
 const scoreCore = require('../extension/score-core.js');
 const timingVariant = require('../extension/timing-variant.js');
 
@@ -830,4 +953,142 @@ test('restorePhraseStreamTake accepts an armed cross-phrase cursor with prior ma
   assert.equal(take.activePhraseId, 'p2');
   assert.equal(take.openTailId, null);
   assert.deepEqual(tap.restorePhraseStreamTake(tap.stop(take)), tap.stop(take));
+});
+
+test('word pass claims recorded syllables by press and ends the last syllable at release', () => {
+  const units=[
+    {wordId:'w1',phraseId:'p',text:"stayin'",minMs:0,maxMs:5000,expectedCount:2},
+    {wordId:'w2',phraseId:'p',text:'alive',minMs:0,maxMs:5000,expectedCount:2},
+  ];
+  const syllables=[100,400,1000,1300].map((ms,i)=>({id:`event-${i+1}`,kind:'syllable-entrance',sourceMs:ms}));
+  let take=tap.beginWordHolds(units,syllables);
+  take=tap.pressWord(take,160); take=tap.releaseWord(take,820);   // reaction-late press still claims 100
+  take=tap.pressWord(take,1040); take=tap.releaseWord(take,2100); // held final syllable
+  assert.equal(take.status,'complete');
+  const p=tap.associateWordHolds(take).phrases[0];
+  assert.equal(p.ready,true); assert.deepEqual(p.issues,[]);
+  assert.deepEqual(p.marks.map(m=>[m.wordId,m.startMs,m.endMs,m.endSource]),[
+    ['w1',100,400,'next-entrance'],['w1',400,820,'word-release'],
+    ['w2',1000,1300,'next-entrance'],['w2',1300,2100,'word-release']]);
+  // Raw syllable entrances never move.
+  assert.deepEqual(take.syllableEvents.map(e=>e.sourceMs),[100,400,1000,1300]);
+});
+
+test('word pass flags a syllable after release, count differences and unheld words', () => {
+  const units=[
+    {wordId:'a',phraseId:'p',text:'a',minMs:0,maxMs:5000,expectedCount:1},
+    {wordId:'b',phraseId:'p',text:'b',minMs:0,maxMs:5000,expectedCount:1},
+    {wordId:'c',phraseId:'q',text:'c',minMs:5000,maxMs:9000,expectedCount:1},
+  ];
+  const syllables=[100,900,2000].map((ms,i)=>({id:`e${i}`,sourceMs:ms}));
+  let take=tap.beginWordHolds(units,syllables);
+  take=tap.pressWord(take,100); take=tap.releaseWord(take,300);
+  take=tap.pressWord(take,2000); take=tap.releaseWord(take,2400);
+  take=tap.stopWordHolds(take);
+  const r=tap.associateWordHolds(take);
+  const p=r.phrases[0];
+  assert.deepEqual(p.words.map(w=>[w.wordId,w.count,w.issues]),[['a',2,['syllable-after-release','count-differs','release-before-last-syllable']],['b',1,[]]]);
+  assert.deepEqual(p.marks.filter(m=>m.wordId==='a').map(m=>[m.startMs,m.endMs,m.endSource]),[[100,900,'next-entrance'],[900,2000,'provisional-next-press']]);
+  assert.equal(p.ready,true);
+  assert.equal(r.phrases[1].heldCount,0); assert.equal(r.phrases[1].ready,false);
+  // A partially held phrase blocks only itself.
+  let partial=tap.beginWordHolds(units,syllables);
+  partial=tap.pressWord(partial,100); partial=tap.releaseWord(partial,300); partial=tap.stopWordHolds(partial);
+  const q=tap.associateWordHolds(partial).phrases[0];
+  assert.ok(q.issues.includes('word-not-held')); assert.equal(q.ready,false);
+});
+
+test('word pass falls back to the press when no syllable was recorded and supports undo, skip and rewind', () => {
+  const units=[
+    {wordId:'a',phraseId:'p1',text:'a',minMs:0,maxMs:1000,expectedCount:1},
+    {wordId:'b',phraseId:'p2',text:'b',minMs:1000,maxMs:3000,expectedCount:1},
+  ];
+  let take=tap.beginWordHolds(units,[]);
+  take=tap.pressWord(take,200); take=tap.releaseWord(take,600);
+  const m=tap.associateWordHolds(take).phrases[0];
+  assert.deepEqual(m.marks.map(x=>[x.startMs,x.endMs,x.startSource]),[[200,600,'word-press']]);
+  assert.ok(m.issues.includes('no-syllable-claimed'));
+  assert.throws(()=>tap.releaseWord(take,700),/Press before/);
+  take=tap.pressWord(take,1200);
+  assert.throws(()=>tap.skipWords(take,1),/Release/);
+  take=tap.undoWordHold(take); assert.equal(take.pendingStartMs,null);
+  take=tap.skipWords(take,-1); assert.equal(take.index,0); assert.deepEqual(take.holds,[]);
+  take=tap.pressWord(take,250); take=tap.releaseWord(take,650); take=tap.pressWord(take,1100); take=tap.releaseWord(take,1500);
+  const rewound=tap.rewindWordHolds(take,'p2');
+  assert.deepEqual(rewound.holds.map(h=>h.wordId),['a']); assert.equal(rewound.index,1);
+});
+
+test('a Words hold take becomes a word pass, merging hyphen parts and applying the score offset', () => {
+  const pairs={cadence:'pairs',status:'complete',marks:[
+    {id:'a__take-part-1',wordId:'a',startMs:100,endMs:200},{id:'a__take-part-2',wordId:'a',startMs:220,endMs:390},
+    {id:'b',wordId:'b',startMs:500,endMs:900}]};
+  const units=[
+    {wordId:'a',phraseId:'p',text:'ice-night',minMs:0,maxMs:2000,expectedCount:2},
+    {wordId:'b',phraseId:'p',text:'long',minMs:0,maxMs:2000,expectedCount:1},
+    {wordId:'c',phraseId:'q',text:'more',minMs:2000,maxMs:3000,expectedCount:1}];
+  const syllables=[110,250,520].map((ms,i)=>({id:`e${i}`,kind:'syllable-entrance',sourceMs:ms+10}));
+  const take=tap.wordHoldsFromPairs(pairs,units,syllables,10);
+  assert.equal(take.status,'stopped'); assert.equal(take.index,2);
+  assert.deepEqual(take.holds.map(h=>[h.wordId,h.pressMs,h.releaseMs]),[['a',110,400],['b',510,910]]);
+  const p=tap.associateWordHolds(take).phrases[0];
+  assert.equal(p.ready,true);
+  assert.deepEqual(p.marks.map(m=>[m.wordId,m.startMs,m.endMs,m.endSource]),[['a',120,260,'next-entrance'],['a',260,400,'word-release'],['b',530,910,'word-release']]);
+  assert.throws(()=>tap.wordHoldsFromPairs({cadence:'entrances',marks:[]},units,syllables),/Words hold take/);
+});
+
+test('word pass trims a legato release at the next entrance and flags it', () => {
+  const units=[{wordId:'a',phraseId:'p',text:'a',minMs:0,maxMs:3000,expectedCount:1},{wordId:'b',phraseId:'p',text:'b',minMs:0,maxMs:3000,expectedCount:1}];
+  let take=tap.beginWordHolds(units,[{id:'e1',sourceMs:100},{id:'e2',sourceMs:560}]);
+  // Converted hold pairs can overlap even though one live key cannot.
+  take={...take,holds:[{wordId:'a',phraseId:'p',pressMs:100,releaseMs:650},{wordId:'b',phraseId:'p',pressMs:520,releaseMs:900}]};
+  const p=tap.associateWordHolds(take).phrases[0];
+  assert.deepEqual(p.marks.map(m=>[m.startMs,m.endMs,m.endSource]),[[100,560,'word-release-trimmed'],[560,900,'word-release']]);
+  assert.deepEqual(p.words[0].issues,['release-overlaps-next']); assert.equal(p.ready,true);
+});
+
+test('retiming one phrase replaces only its holds and returns the cursor', () => {
+  const units=[
+    {wordId:'a',phraseId:'p1',text:'a',minMs:0,maxMs:1000,expectedCount:1},
+    {wordId:'b',phraseId:'p1',text:'b',minMs:0,maxMs:1000,expectedCount:1},
+    {wordId:'c',phraseId:'p2',text:'c',minMs:1000,maxMs:2000,expectedCount:1},
+    {wordId:'d',phraseId:'p3',text:'d',minMs:2000,maxMs:3000,expectedCount:1}];
+  let take=tap.beginWordHolds(units,[]);
+  for(const [p,r] of [[100,300],[400,600],[1100,1500]]){take=tap.pressWord(take,p);take=tap.releaseWord(take,r);}
+  take=tap.stopWordHolds(take); assert.equal(take.index,3);
+  take={...tap.retimePhraseHolds(take,'p1'),status:'armed'};
+  assert.equal(take.index,0); assert.equal(take.lastMs,null);
+  take=tap.pressWord(take,120); take=tap.releaseWord(take,320);
+  take=tap.pressWord(take,380); take=tap.releaseWord(take,700);
+  assert.equal(take.status,'stopped'); assert.equal(take.index,3); assert.equal(take.retime,null);
+  assert.deepEqual(take.holds.map(h=>[h.wordId,h.pressMs,h.releaseMs]).sort(),[['a',120,320],['b',380,700],['c',1100,1500]]);
+  // Stopping partway restores the untouched word's earlier hold.
+  let partial={...tap.retimePhraseHolds(take,'p1'),status:'armed'};
+  partial=tap.pressWord(partial,130); partial=tap.releaseWord(partial,330); partial=tap.stopWordHolds(partial);
+  assert.deepEqual(partial.holds.map(h=>[h.wordId,h.pressMs]).sort(),[['a',130],['b',380],['c',1100]]);
+  assert.equal(partial.index,3);
+  assert.throws(()=>tap.retimePhraseHolds({...take,status:'armed'},'p1'),/Stop the pass/);
+});
+
+test('a quick word keeps the tap inside its hold even when the next press follows within the lead', () => {
+  // Real Sample Track case: "bust a move" with a brief "a".
+  const units=['bust','a','move'].map((text,i)=>({wordId:text,phraseId:'p',text,minMs:0,maxMs:30000,expectedCount:1}));
+  const syllables=[19021,19261,19387].map((ms,i)=>({id:`e${i}`,sourceMs:ms}));
+  let take=tap.beginWordHolds(units,syllables);
+  take={...take,holds:[{wordId:'bust',phraseId:'p',pressMs:18991,releaseMs:19087},{wordId:'a',phraseId:'p',pressMs:19272,releaseMs:19318},{wordId:'move',phraseId:'p',pressMs:19407,releaseMs:19521}]};
+  const p=tap.associateWordHolds(take).phrases[0];
+  // 19261 precedes a's press by 11ms -> "a"; 19387 precedes move's press by 20ms -> "move".
+  assert.deepEqual(p.words.map(w=>[w.text,w.count]),[['bust',1],['a',1],['move',1]]);
+  assert.equal(p.ready,true); assert.ok(!p.issues.includes('order-conflict'));
+});
+
+test('tap tempo fits period and phase, tolerating jitter and a skipped beat', () => {
+  // 120 BPM (500ms) with beats on 250 + 500n; jittered taps and one skipped beat.
+  const taps=[10250,10760,11245,12255,12748,13252,13751];
+  const t=tap.estimateTempo(taps);
+  assert.ok(Math.abs(t.bpm-120)<1,`bpm ${t.bpm}`);
+  assert.ok(Math.abs(t.anchorMs-250)<=15,`anchor ${t.anchorMs}`);
+  assert.ok(t.residualMs<15); assert.equal(t.count,7);
+  assert.equal(tap.estimateTempo([1000,1500,2000]),null);
+  assert.equal(tap.estimateTempo([0,5000,10000,15000]),null); // 12 BPM is out of range
+  assert.throws(()=>tap.estimateTempo([1.5,2,3,4]),/whole milliseconds/);
 });

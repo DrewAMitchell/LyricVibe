@@ -824,5 +824,382 @@
       actionHistory: take.actionHistory ? [] : undefined };
   }
 
-  return { begin, mark, release, undo, stop, adjust, reposition, moveCursor, reassignLast, restoreWordFrameTake, rewindToPhrase, restorePhraseStreamTake };
+  // Event capture deliberately stores only source-clock observations. Lexical
+  // ownership and syllable segmentation are a later, reviewable operation.
+  function beginEvents(units, { kind = 'syllable-entrance' } = {}) {
+    if (!Array.isArray(units) || !units.length || units.length > 5000) fail('INVALID_UNITS', 'Provide 1–5000 event units.');
+    if (typeof kind !== 'string' || !kind.trim()) fail('INVALID_KIND', 'Event kind must be a nonempty string.');
+    const ids = new Set();
+    const safeUnits = units.map(unit => {
+      if (!unit || typeof unit !== 'object' || typeof unit.id !== 'string' || !unit.id.trim() || ids.has(unit.id) ||
+          typeof unit.wordId !== 'string' || !unit.wordId.trim() || typeof unit.phraseId !== 'string' || !unit.phraseId.trim() ||
+          typeof unit.text !== 'string' || !integerTime(unit.minMs) || !integerTime(unit.maxMs) || unit.maxMs < unit.minMs ||
+          !(unit.expectedCount === null || unit.expectedCount === undefined || Number.isSafeInteger(unit.expectedCount) && unit.expectedCount > 0)) {
+        fail('INVALID_UNITS', 'Event units need unique ids, word/phrase ids, text, ordered bounds, and a positive or unknown expected count.');
+      }
+      ids.add(unit.id); return clone(unit);
+    });
+    return { status: 'armed', cadence: 'performance-events', mode: 'syllable', kind,
+      units: safeUnits, events: [], marks: [], index: 0, pendingStartMs: null, lastMs: null, actionHistory: [] };
+  }
+  function markEvent(take, scoreMs) {
+    if (!take || take.cadence !== 'performance-events') fail('CADENCE_UNSUPPORTED', 'Expected a performance-events take.');
+    if (take.status !== 'armed') fail('TAKE_CLOSED', 'Event take is not armed.');
+    if (!integerTime(scoreMs)) fail('INVALID_TIME', 'Event time must be a nonnegative integer number of milliseconds.');
+    if (take.lastMs !== null && scoreMs < take.lastMs) fail('NON_MONOTONIC_TIME', 'Events must follow source-time order.');
+    if (take.events.length >= 5000) fail('TAKE_LIMIT', 'An event take is limited to 5000 taps.');
+    const event = { id: `event-${take.events.length + 1}`, kind: take.kind, sourceMs: scoreMs };
+    const snapshot = { events: take.events, index: take.index, lastMs: take.lastMs };
+    return { ...take, events: [...take.events, event], lastMs: scoreMs,
+      actionHistory: [...take.actionHistory, snapshot].slice(-128) };
+  }
+  function stopEvents(take) {
+    if (!take || take.cadence !== 'performance-events') fail('CADENCE_UNSUPPORTED', 'Expected a performance-events take.');
+    return take.status === 'stopped' ? take : { ...take, status: 'stopped' };
+  }
+  function undoEvent(take) {
+    if (!take || take.cadence !== 'performance-events') fail('CADENCE_UNSUPPORTED', 'Expected a performance-events take.');
+    if (!take.actionHistory?.length) return take;
+    const previous = take.actionHistory.at(-1);
+    return { ...take, events: previous.events, index: previous.index, lastMs: previous.lastMs,
+      actionHistory: take.actionHistory.slice(0, -1) };
+  }
+  function rewindEvents(take, phraseId) {
+    if (!take || take.cadence !== 'performance-events') fail('CADENCE_UNSUPPORTED', 'Expected a performance-events take.');
+    if (take.status !== 'stopped') fail('TAKE_NOT_STOPPED', 'Event rewind requires a stopped take.');
+    const phraseUnits = take.units.filter(u => u.phraseId === phraseId);
+    if (!phraseUnits.length) fail('UNKNOWN_PHRASE', `Unknown phrase: ${phraseId}`);
+    const cutoff = Math.min(...phraseUnits.map(u => u.minMs));
+    const events = take.events.filter(e => e.sourceMs < cutoff);
+    const snapshot = { events: take.events, index: take.index, lastMs: take.lastMs };
+    return { ...take, events, index: take.units.findIndex(u => u.phraseId === phraseId),
+      lastMs: events.length ? events.at(-1).sourceMs : null,
+      actionHistory: [...(take.actionHistory || []), snapshot].slice(-128) };
+  }
+  function associateEvents(take, { counts = {}, gapRatio = 2.5, gapMinMs = 450 } = {}) {
+    if (!take || take.cadence !== 'performance-events') fail('CADENCE_UNSUPPORTED', 'Expected a performance-events take.');
+    if (!(gapRatio > 1) || !integerTime(gapMinMs)) fail('INVALID_GAP', 'Gap ratio must exceed 1 and the minimum gap must be whole milliseconds.');
+    const phrases = [...new Set(take.units.map(u => u.phraseId))].map(phraseId => {
+      const units = take.units.filter(u => u.phraseId === phraseId);
+      const start = Math.min(...units.map(u => u.minMs)), end = Math.max(...units.map(u => u.maxMs));
+      const candidates = take.events.filter(e => e.kind === 'syllable-entrance' && e.sourceMs >= start && e.sourceMs < end);
+      const ambiguous = candidates.filter(e => take.units.some(u => u.phraseId !== phraseId && e.sourceMs >= u.minMs && e.sourceMs < u.maxMs));
+      const assigned = candidates.filter(e => !ambiguous.includes(e));
+      const duplicateTimes = new Set(assigned.filter((e,i) => i > 0 && assigned[i-1].sourceMs === e.sourceMs).map(e=>e.sourceMs));
+      const incomplete = take.status === 'stopped' && Number.isSafeInteger(take.stoppedScoreMs) && take.stoppedScoreMs < end;
+      const expected = units.map(u => u.expectedCount);
+      const unknownCounts = units.some(u=>u.expectedCount == null && counts[u.wordId] === undefined);
+      const options = units.map(u => (u.countOptions || []).map(x => Number.isSafeInteger(x) ? x : x && x.count).filter(x => Number.isSafeInteger(x) && x > 0));
+      if (assigned.length === 0 && ambiguous.length === 0) return { phraseId, eventCount: 0,
+        expectedCount: expected.every(v=>v!=null)?expected.reduce((a,b)=>a+b,0):null,
+        counts: units.map(u=>({wordId:u.wordId,text:u.text,count:null,source:'none',changed:false,uncertain:true})),
+        marks:[], gaps:[], issues:[], ready:true };
+      let lexicalCounts = expected.map(n=>n || 1), ambiguousCounts = false;
+      const supplied = units.map(u => counts[u.wordId]);
+      const hasSupplied = supplied.some(v => v !== undefined);
+      if (hasSupplied && supplied.some(v => v !== undefined && (!Number.isSafeInteger(v) || v < 1))) fail('INVALID_COUNTS', 'Edited counts must be positive integers.');
+      const chosen = units.map((u,i)=>supplied[i] ?? expected[i] ?? 1);
+      if (!chosen.every(n=>Number.isSafeInteger(n)&&n>0) || chosen.reduce((a,b)=>a+b,0)!==assigned.length) {
+        const alternatives = units.map((u,i) => supplied[i] !== undefined ? [supplied[i]] : [...new Set([expected[i], ...options[i]].filter(n=>Number.isSafeInteger(n)&&n>0))]);
+        const states = new Map([[0, [[]]]]);
+        for (const choices of alternatives) {
+          const next = new Map();
+          for (const [sum, paths] of states) for (const n of choices) if (sum+n <= assigned.length) {
+            const list = next.get(sum+n) || [];
+            for (const path of paths) if (list.length < 2) list.push([...path,n]);
+            next.set(sum+n,list);
+          }
+          states.clear(); for (const [sum,paths] of next) states.set(sum,paths);
+        }
+        const solutions = states.get(assigned.length) || [];
+        if (solutions.length) { lexicalCounts = solutions[0]; ambiguousCounts = solutions.length > 1 && !hasSupplied; }
+        else lexicalCounts = chosen;
+      } else lexicalCounts = chosen;
+      const finalCounts = lexicalCounts;
+      const matched = finalCounts.every(v => Number.isSafeInteger(v) && v > 0) && finalCounts.reduce((a,b)=>a+b,0) === assigned.length;
+      const suggested = expected.map(n=>n || 1);
+      while (suggested.reduce((a,b)=>a+b,0) < assigned.length) {
+        const i = units.map((u,j)=>({j,weight:Number.isFinite(u.referenceEndMs-u.referenceStartMs)?Math.max(1,u.referenceEndMs-u.referenceStartMs):1})).sort((a,b)=>b.weight-a.weight)[0].j; suggested[i]++;
+      }
+      while (suggested.reduce((a,b)=>a+b,0) > assigned.length && suggested.some(n=>n>1)) {
+        const i = suggested.findIndex(n=>n>1); suggested[i]--;
+      }
+      const needsReview = !matched || ambiguous.length > 0 || duplicateTimes.size > 0 || incomplete || ambiguousCounts || unknownCounts;
+      const marks = [];
+      if (!needsReview) {
+        let cursor = 0;
+        units.forEach((u, i) => { for (let n=0;n<finalCounts[i];n++) {
+          const e = assigned[cursor++], next = assigned[cursor], last = n === finalCounts[i]-1;
+          // A word's first entrance is its onset. Its last entrance says nothing
+          // about where the word releases: the next tap only bounds it. A manual
+          // word end inside that window is kept; otherwise the end stays
+          // provisional for word-boundary cleanup.
+          let endMs = next ? next.sourceMs : end, endSource = next ? 'next-entrance' : 'phrase-end';
+          if (last) {
+            const manualEnd = u.referenceManual && Number.isSafeInteger(u.referenceEndMs) && u.referenceEndMs > e.sourceMs && u.referenceEndMs <= endMs;
+            if (manualEnd) { endMs = u.referenceEndMs; endSource = 'manual-word-boundary'; }
+            else endSource = next ? 'provisional-next-entrance' : 'provisional-phrase-end';
+          }
+          marks.push({ id: `${u.wordId}-syllable-${n+1}`, syllableId: `${u.wordId}-syllable-${n+1}`, wordId: u.wordId,
+            phraseId, startMs: e.sourceMs, endMs, endSource, eventId: e.id });
+        }});
+      }
+      // A long silence between entrances can be a held syllable or a rest. If
+      // it lands on a proposed word boundary, the entrance after it may belong
+      // to the current word; if it lands inside a word, the word may have
+      // ended before it. Either way the boundary is flagged, never fitted.
+      const gaps = [];
+      if (assigned.length > 2) {
+        const intervals = assigned.slice(1).map((e,i) => e.sourceMs - assigned[i].sourceMs).sort((a,b)=>a-b);
+        const median = intervals[Math.floor((intervals.length-1)/2)];
+        const threshold = Math.max(gapMinMs, Math.round(median * gapRatio));
+        for (let i = 1; i < assigned.length; i++) {
+          const gapMs = assigned[i].sourceMs - assigned[i-1].sourceMs;
+          if (gapMs < threshold) continue;
+          const before = marks.find(m => m.eventId === assigned[i-1].id), after = marks.find(m => m.eventId === assigned[i].id);
+          gaps.push({ afterEventId: assigned[i-1].id, beforeEventId: assigned[i].id, gapMs, thresholdMs: threshold,
+            previousWordId: before?.wordId ?? null, nextWordId: after?.wordId ?? null,
+            atWordBoundary: before && after ? before.wordId !== after.wordId : null });
+        }
+      }
+      const issues = [];
+      if (!matched) issues.push('count-mismatch');
+      if (ambiguous.length) issues.push('ambiguous-phrase');
+      if (duplicateTimes.size) issues.push('duplicate-time');
+      if (incomplete) issues.push('phrase-incomplete');
+      if (ambiguousCounts) issues.push('ambiguous-counts');
+      if (unknownCounts) issues.push('unknown-count');
+      if (gaps.length) issues.push('long-gap-boundary');
+      if (matched && units.some((u,i) => u.expectedCount != null && finalCounts[i] < u.expectedCount)) issues.push('count-squished');
+      if (matched && units.some((u,i) => u.expectedCount != null && finalCounts[i] !== u.expectedCount) && !issues.includes('count-squished')) issues.push('count-modified');
+      return { phraseId, eventCount: assigned.length, expectedCount: expected.every(v=>v!=null)?expected.reduce((a,b)=>a+b,0):null,
+        counts: units.map((u,i)=>({ wordId:u.wordId, text:u.text, count:matched?finalCounts[i]:null,
+          ...(needsReview ? { suggestedCount:suggested[i] } : {}), source:hasSupplied && supplied[i] !== undefined?'human':(options[i].includes(finalCounts[i])?'dictionary-alternative':'dictionary'),
+          changed: finalCounts[i] != null && finalCounts[i] !== u.expectedCount, uncertain: u.expectedCount == null || needsReview })),
+        marks, gaps, issues, ready: !needsReview };
+    });
+    const inFrames = new Set(phrases.flatMap(p => take.events.filter(e => e.kind === 'syllable-entrance' && e.sourceMs >= Math.min(...take.units.filter(u=>u.phraseId===p.phraseId).map(u=>u.minMs)) && e.sourceMs < Math.max(...take.units.filter(u=>u.phraseId===p.phraseId).map(u=>u.maxMs))).map(e=>e.id)));
+    const unassigned = take.events.filter(e => !inFrames.has(e.id));
+    const ready = phrases.every(p=>p.eventCount===0 || p.ready) && !unassigned.some(e=>e.kind==='syllable-entrance');
+    return { phrases, unassigned, ready };
+  }
+
+  // Word pass over an existing syllable-event recording. Holding a word claims
+  // the recorded syllable entrances from its press until the next word's
+  // press; its release is the end of its last syllable. Syllable entrance times
+  // stay authoritative and are never moved by the word pass.
+  function beginWordHolds(units, syllableEvents) {
+    if (!Array.isArray(units) || !units.length || units.length > 5000) fail('INVALID_UNITS', 'Provide 1–5000 word units.');
+    const ids = new Set();
+    const safeUnits = units.map(unit => {
+      if (!unit || typeof unit.wordId !== 'string' || !unit.wordId.trim() || ids.has(unit.wordId) || typeof unit.phraseId !== 'string' ||
+          typeof unit.text !== 'string' || !integerTime(unit.minMs) || !integerTime(unit.maxMs) || unit.maxMs < unit.minMs) {
+        fail('INVALID_UNITS', 'Word units need unique word ids, phrase ids, text and ordered phrase bounds.');
+      }
+      ids.add(unit.wordId); return clone(unit);
+    });
+    if (!Array.isArray(syllableEvents) || syllableEvents.length > 5000 ||
+        syllableEvents.some(e => !e || typeof e.id !== 'string' || !integerTime(e.sourceMs))) fail('INVALID_EVENTS', 'Syllable events need ids and whole-millisecond source times.');
+    const events = clone(syllableEvents).filter(e => (e.kind ?? 'syllable-entrance') === 'syllable-entrance').sort((a, b) => a.sourceMs - b.sourceMs);
+    return { status: 'armed', cadence: 'word-holds', mode: 'syllable', units: safeUnits, syllableEvents: events,
+      holds: [], marks: [], index: 0, pendingStartMs: null, lastMs: null, actionHistory: [] };
+  }
+  const holdSnapshot = take => ({ holds: take.holds, index: take.index, pendingStartMs: take.pendingStartMs, lastMs: take.lastMs, status: take.status, retime: take.retime ?? null });
+  function assertHoldTake(take) { if (!take || take.cadence !== 'word-holds') fail('CADENCE_UNSUPPORTED', 'Expected a word-holds take.'); }
+  function pressWord(take, scoreMs) {
+    assertHoldTake(take);
+    if (take.status !== 'armed') fail('TAKE_CLOSED', 'Word pass is not armed.');
+    if (!integerTime(scoreMs)) fail('INVALID_TIME', 'Press time must be whole milliseconds.');
+    if (take.pendingStartMs !== null) fail('PRESS_PENDING', 'Release the current word first.');
+    if (take.lastMs !== null && scoreMs < take.lastMs) fail('NON_MONOTONIC_TIME', 'Word presses must follow source-time order.');
+    if (take.index >= take.units.length) fail('TAKE_COMPLETE', 'Every word already has a hold.');
+    return { ...take, pendingStartMs: scoreMs, lastMs: scoreMs, actionHistory: [...take.actionHistory, holdSnapshot(take)].slice(-256) };
+  }
+  function releaseWord(take, scoreMs) {
+    assertHoldTake(take);
+    if (take.pendingStartMs === null) fail('NO_PRESS', 'Press before releasing.');
+    if (!integerTime(scoreMs) || scoreMs < take.pendingStartMs) fail('INVALID_TIME', 'Release must not precede its press.');
+    const unit = take.units[take.index];
+    const holds = [...take.holds.filter(h => h.wordId !== unit.wordId), { wordId: unit.wordId, phraseId: unit.phraseId, pressMs: take.pendingStartMs, releaseMs: scoreMs }];
+    const index = take.index + 1;
+    // Retiming one phrase stops after its last word and returns the cursor to where the pass was.
+    if (take.retime && (index >= take.units.length || take.units[index].phraseId !== take.retime.phraseId)) {
+      return { ...take, holds, index: take.retime.resumeIndex, pendingStartMs: null, retime: null, status: 'stopped',
+        lastMs: Math.max(...holds.map(h => h.releaseMs)) };
+    }
+    return { ...take, holds, index, pendingStartMs: null, lastMs: scoreMs, status: index >= take.units.length ? 'complete' : take.status };
+  }
+  // Replace only one phrase's holds; every other phrase is kept as recorded.
+  function retimePhraseHolds(take, phraseId) {
+    assertHoldTake(take);
+    if (take.status === 'armed') fail('TAKE_ARMED', 'Stop the pass before retiming a phrase.');
+    const at = take.units.findIndex(u => u.phraseId === phraseId);
+    if (at < 0) fail('UNKNOWN_PHRASE', `Unknown phrase: ${phraseId}`);
+    const holds = take.holds.filter(h => h.phraseId !== phraseId), earlier = new Set(take.units.slice(0, at).map(u => u.wordId));
+    const before = holds.filter(h => earlier.has(h.wordId));
+    return { ...take, holds, index: at, pendingStartMs: null, status: 'stopped',
+      retime: { phraseId, resumeIndex: take.retime?.resumeIndex ?? take.index, previousHolds: take.holds.filter(h => h.phraseId === phraseId) },
+      lastMs: before.length ? Math.max(...before.map(h => h.releaseMs)) : null,
+      actionHistory: [...take.actionHistory, holdSnapshot(take)].slice(-256) };
+  }
+  function skipWords(take, delta) {
+    assertHoldTake(take);
+    if (take.pendingStartMs !== null) fail('PRESS_PENDING', 'Release the current word first.');
+    const index = Math.max(0, Math.min(take.units.length - 1, take.index + delta));
+    // Moving back un-claims the words from the new cursor onward so they can be re-held.
+    const keep = new Set(take.units.slice(0, index).map(u => u.wordId));
+    const holds = delta < 0 ? take.holds.filter(h => keep.has(h.wordId)) : take.holds;
+    return { ...take, index, holds, lastMs: holds.length ? Math.max(...holds.map(h => h.releaseMs)) : null,
+      actionHistory: [...take.actionHistory, holdSnapshot(take)].slice(-256) };
+  }
+  function undoWordHold(take) {
+    assertHoldTake(take);
+    if (!take.actionHistory.length) return take;
+    const previous = take.actionHistory.at(-1);
+    return { ...take, ...previous, status: previous.status === 'complete' ? 'armed' : previous.status, actionHistory: take.actionHistory.slice(0, -1) };
+  }
+  function stopWordHolds(take) {
+    assertHoldTake(take);
+    // Stopping mid-retime restores that phrase's earlier holds for any word not yet re-held.
+    if (take.retime) {
+      const redone = new Set(take.holds.filter(h => h.phraseId === take.retime.phraseId).map(h => h.wordId));
+      const holds = [...take.holds, ...take.retime.previousHolds.filter(h => !redone.has(h.wordId))];
+      return { ...take, holds, index: take.retime.resumeIndex, retime: null, status: 'stopped', pendingStartMs: null,
+        lastMs: holds.length ? Math.max(...holds.map(h => h.releaseMs)) : null };
+    }
+    return { ...take, status: 'stopped', pendingStartMs: null };
+  }
+  function rewindWordHolds(take, phraseId) {
+    assertHoldTake(take);
+    const at = take.units.findIndex(u => u.phraseId === phraseId);
+    if (at < 0) fail('UNKNOWN_PHRASE', `Unknown phrase: ${phraseId}`);
+    const keep = new Set(take.units.slice(0, at).map(u => u.wordId)), holds = take.holds.filter(h => keep.has(h.wordId));
+    return { ...take, holds, index: at, pendingStartMs: null, lastMs: holds.length ? Math.max(...holds.map(h => h.releaseMs)) : null,
+      actionHistory: [...take.actionHistory, holdSnapshot(take)].slice(-256) };
+  }
+  // Tap-tempo: fit a beat grid (period and phase) to source-clock taps.
+  // Skipped beats are tolerated by rounding each tap to its nearest beat
+  // index before a least-squares fit; residual reports how steady the taps were.
+  function estimateTempo(taps, { minBpm = 40, maxBpm = 240 } = {}) {
+    if (!Array.isArray(taps) || taps.some(t => !integerTime(t))) fail('INVALID_TAPS', 'Tempo taps must be whole milliseconds.');
+    const times = [...taps].sort((a, b) => a - b);
+    if (times.length < 4) return null;
+    const intervals = times.slice(1).map((t, i) => t - times[i]).filter(d => d > 0).sort((a, b) => a - b);
+    if (!intervals.length) return null;
+    let period = intervals[Math.floor(intervals.length / 2)];
+    if (period < 60000 / maxBpm || period > 60000 / minBpm) return null;
+    let anchor = times[0], beats = [];
+    for (let pass = 0; pass < 3; pass++) {
+      beats = times.map(t => Math.round((t - anchor) / period));
+      const n = beats.length, mx = beats.reduce((a, b) => a + b, 0) / n, my = times.reduce((a, b) => a + b, 0) / n;
+      const sxx = beats.reduce((a, b) => a + (b - mx) ** 2, 0);
+      if (!sxx) return null;
+      period = beats.reduce((a, b, i) => a + (b - mx) * (times[i] - my), 0) / sxx;
+      anchor = my - period * mx;
+    }
+    const residualMs = Math.sqrt(times.reduce((a, t, i) => a + (t - (anchor + period * beats[i])) ** 2, 0) / times.length);
+    // Report the anchor as the earliest nonnegative beat so it is a valid source time.
+    const firstBeatMs = anchor - Math.floor(anchor / period) * period;
+    return { bpm: Math.round(60000 / period * 100) / 100, periodMs: Math.round(period * 100) / 100,
+      anchorMs: Math.round(firstBeatMs), residualMs: Math.round(residualMs), count: times.length };
+  }
+  // Reinterpret a Words-mode hold take (press/release pairs, score clock) as a
+  // word pass over recorded syllable taps (source clock). Hyphen parts of one
+  // word merge into a single hold from the first press to the last release.
+  function wordHoldsFromPairs(pairsTake, units, syllableEvents, offsetMs = 0) {
+    if (!pairsTake || pairsTake.cadence !== 'pairs' || !Array.isArray(pairsTake.marks)) fail('CADENCE_UNSUPPORTED', 'Expected a Words hold take.');
+    if (!Number.isSafeInteger(offsetMs)) fail('INVALID_OFFSET', 'Offset must be whole milliseconds.');
+    const byWord = new Map();
+    for (const mark of pairsTake.marks) {
+      if (!integerTime(mark.startMs) || !Number.isSafeInteger(mark.endMs) || mark.endMs < mark.startMs) continue;
+      const wordId = mark.wordId ?? mark.id, prior = byWord.get(wordId);
+      byWord.set(wordId, prior ? { pressMs: Math.min(prior.pressMs, mark.startMs), releaseMs: Math.max(prior.releaseMs, mark.endMs) } : { pressMs: mark.startMs, releaseMs: mark.endMs });
+    }
+    let take = beginWordHolds(units, syllableEvents);
+    const holds = take.units.filter(u => byWord.has(u.wordId)).map(u => {
+      const h = byWord.get(u.wordId);
+      return { wordId: u.wordId, phraseId: u.phraseId, pressMs: Math.max(0, h.pressMs + offsetMs), releaseMs: Math.max(0, h.releaseMs + offsetMs) };
+    });
+    const lastHeld = take.units.reduce((at, u, i) => byWord.has(u.wordId) ? i : at, -1);
+    return { ...take, holds, index: Math.min(take.units.length - 1, lastHeld + 1), status: 'stopped',
+      lastMs: holds.length ? Math.max(...holds.map(h => h.releaseMs)) : null, adoptedFrom: 'words-hold-take' };
+  }
+  function associateWordHolds(take, { leadMs = 150 } = {}) {
+    assertHoldTake(take);
+    if (!integerTime(leadMs) || leadMs > 1000) fail('INVALID_LEAD', 'Press lead must be 0–1000 whole milliseconds.');
+    const holdFor = new Map(take.holds.map(h => [h.wordId, h]));
+    // Presses in source order define claim windows across phrases; a reaction
+    // lead lets an entrance just before a press still belong to that word.
+    const pressOrder = take.units.filter(u => holdFor.has(u.wordId)).map(u => holdFor.get(u.wordId)).sort((a, b) => a.pressMs - b.pressMs);
+    const claimed = new Set();
+    // Each tap's owner: the word whose hold contains it; between holds, the
+    // next word when its press follows within the reaction lead, otherwise
+    // the previous word (flagged as a tap after its release).
+    const ownerOf = new Map();
+    for (const e of take.syllableEvents) {
+      let inside = null, previous = null, next = null;
+      for (const h of pressOrder) {
+        if (h.pressMs <= e.sourceMs && e.sourceMs <= h.releaseMs) inside = h;
+        if (h.pressMs <= e.sourceMs) previous = h;
+        else if (!next) next = h;
+      }
+      const owner = inside || (next && next.pressMs - e.sourceMs <= leadMs ? next : previous || next);
+      if (owner) ownerOf.set(e.id, owner.wordId);
+    }
+    const phrases = [...new Set(take.units.map(u => u.phraseId))].map(phraseId => {
+      const units = take.units.filter(u => u.phraseId === phraseId);
+      const end = Math.max(...units.map(u => u.maxMs));
+      const held = units.filter(u => holdFor.has(u.wordId));
+      if (!held.length) return { phraseId, heldCount: 0, words: [], marks: [], issues: [], ready: false };
+      const issues = new Set(), words = [], marks = [];
+      for (const u of units) {
+        const hold = holdFor.get(u.wordId);
+        if (!hold) { issues.add('word-not-held'); words.push({ wordId: u.wordId, text: u.text, held: false, count: 0, issues: ['word-not-held'] }); continue; }
+        const next = pressOrder[pressOrder.indexOf(hold) + 1];
+        const own = take.syllableEvents.filter(e => ownerOf.get(e.id) === u.wordId && !claimed.has(e.id));
+        own.forEach(e => claimed.add(e.id));
+        const wordIssues = [];
+        if (!own.length) wordIssues.push('no-syllable-claimed');
+        if (own.some(e => e.sourceMs > hold.releaseMs + leadMs)) wordIssues.push('syllable-after-release');
+        if (Number.isSafeInteger(u.expectedCount) && own.length && own.length !== u.expectedCount) wordIssues.push('count-differs');
+        const entrances = own.length ? own : [{ id: `press-${u.wordId}`, sourceMs: hold.pressMs, synthetic: true }];
+        entrances.forEach((e, i) => {
+          const last = i === entrances.length - 1;
+          let endMs = last ? hold.releaseMs : entrances[i + 1].sourceMs, endSource = last ? 'word-release' : 'next-entrance';
+          if (last && endMs <= e.sourceMs) {
+            // Release before the final entrance: keep the entrance and bound it by the next press.
+            wordIssues.push('release-before-last-syllable');
+            endMs = Math.min(end, next ? Math.max(e.sourceMs + 1, next.pressMs) : end); endSource = 'provisional-next-press';
+            if (endMs <= e.sourceMs) endMs = e.sourceMs + 1;
+          }
+          marks.push({ id: `${u.wordId}-syllable-${i + 1}`, syllableId: `${u.wordId}-syllable-${i + 1}`, wordId: u.wordId, phraseId,
+            startMs: e.sourceMs, endMs, endSource, eventId: e.synthetic ? null : e.id, startSource: e.synthetic ? 'word-press' : 'syllable-entrance' });
+        });
+        wordIssues.forEach(i => issues.add(i));
+        words.push({ wordId: u.wordId, text: u.text, held: true, pressMs: hold.pressMs, releaseMs: hold.releaseMs, count: own.length,
+          expectedCount: u.expectedCount ?? null, issues: wordIssues });
+      }
+      // A word must start after the previous word's last entrance.
+      for (let i = 1; i < marks.length; i++) if (marks[i].startMs <= marks[i - 1].startMs) issues.add('order-conflict');
+      // Legato releases often run into the next word; the next entrance wins and the trim is flagged.
+      for (let i = 0; i + 1 < marks.length; i++) {
+        if (marks[i].endMs <= marks[i + 1].startMs || marks[i + 1].startMs <= marks[i].startMs) continue;
+        marks[i].endMs = marks[i + 1].startMs;
+        if (marks[i].endSource === 'word-release') {
+          marks[i].endSource = 'word-release-trimmed';
+          const word = words.find(w => w.wordId === marks[i].wordId);
+          if (word && !word.issues.includes('release-overlaps-next')) word.issues.push('release-overlaps-next');
+          issues.add('release-overlaps-next');
+        }
+      }
+      const blocking = ['word-not-held', 'order-conflict'];
+      return { phraseId, heldCount: held.length, words, marks, issues: [...issues], ready: !blocking.some(b => issues.has(b)) };
+    });
+    const unclaimed = take.syllableEvents.filter(e => !claimed.has(e.id));
+    return { phrases, unclaimed, ready: phrases.every(p => p.heldCount === 0 || p.ready) };
+  }
+
+  return { begin, mark, release, undo, stop, adjust, reposition, moveCursor, reassignLast, restoreWordFrameTake, rewindToPhrase, restorePhraseStreamTake,
+    beginEvents, markEvent, stopEvents, undoEvent, rewindEvents, associateEvents,
+    beginWordHolds, pressWord, releaseWord, skipWords, undoWordHold, stopWordHolds, rewindWordHolds, retimePhraseHolds, associateWordHolds, wordHoldsFromPairs, estimateTempo };
 });

@@ -2296,3 +2296,18 @@
 #lvx-root .lvx-phrase-syllable-hint { color:#b6c4a9; font-size:11px; margin:5px 0; }
 #lvx-root .lvx-syllable-review { flex-wrap:wrap; }
 #lvx-root .lvx-pronunciation-options{display:flex;flex-wrap:wrap;gap:4px}#lvx-root .lvx-sync-panel .lvx-pronunciation-options button{font-size:10px;min-height:30px;padding:4px 6px}#lvx-root .lvx-pronunciation-options [aria-pressed=true]{background:#35452b;border-color:#a4ce7d}
+/* Stopped performance-event review: compact, wrapping word-count controls. */
+#lvx-root .lvx-event-review{border-top:1px solid var(--lvx-border,#58606a);padding-top:10px}
+#lvx-root .lvx-event-phrase{margin:8px 0;padding:8px;border:1px solid #58606a;border-radius:6px}
+#lvx-root .lvx-event-phrase[data-review="true"]{border-color:#d6a855}
+#lvx-root .lvx-event-counts{display:flex;flex-wrap:wrap;gap:8px}
+#lvx-root .lvx-event-counts label{display:flex;flex-direction:column;gap:3px;min-width:70px;max-width:150px}
+#lvx-root .lvx-event-counts input{width:70px;min-height:36px}
+#lvx-root .lvx-event-counts small{font-size:11px;max-width:140px}
+#lvx-root .lvx-event-counts label[data-review="true"]{color:#f2c879}
+#lvx-root .lvx-event-review .lvx-sync-hint{overflow-wrap:anywhere}
+/* Tap-tempo beat pulse: driven by the media clock, brightest on beat 1. */
+#lvx-root .lvx-perform-cue{position:relative}
+#lvx-root .lvx-beat-pulse{position:absolute;top:6px;right:8px;font-size:11px;padding:2px 7px;border-radius:999px;border:1px solid #58606a;color:#b6c4a9;transition:background-color 60ms,color 60ms}
+#lvx-root .lvx-beat-pulse[data-on="true"]{background:#35452b;color:#fff;border-color:#a4ce7d}
+#lvx-root .lvx-beat-pulse[data-on="true"][data-downbeat="true"]{background:#a4ce7d;color:#111}
