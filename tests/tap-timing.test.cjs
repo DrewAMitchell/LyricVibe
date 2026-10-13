@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const tap = require('../extension/tap-timing.js');
+const scoreCore = require('../extension/score-core.js');
+const timingVariant = require('../extension/timing-variant.js');
 
 const units = (count = 3, minMs = 0, maxMs = 10000) => Array.from({ length: count }, (_, i) => ({
   id: `u${i}`, wordId: `w${i}`, ...(i === 1 ? { syllableId: 's1' } : {}), text: `unit${i}`, minMs, maxMs
@@ -330,4 +332,158 @@ test('flow recovery clears an open start so a later mark cannot create a false i
   take = tap.mark(take, 500); // starts unit 1, rather than ending unit 0
   take = tap.mark(take, 600);
   assert.deepEqual(take.marks.map(({ id, startMs, endMs }) => [id, startMs, endMs]), [['u1', 500, 600]]);
+});
+
+test('entrances cadence acknowledges the fixed phrase start and completes one syllable on one press', () => {
+  let take = tap.begin(syllableUnits(2), { mode: 'syllable', cadence: 'entrances' });
+  take = tap.mark(take, 150);
+  assert.equal(take.index, 1);
+  assert.equal(take.entranceCount, 1);
+  assert.equal(take.pendingStartMs, 100);
+  assert.deepEqual(take.marks, []);
+  take = tap.mark(take, 300);
+  assert.equal(take.status, 'complete');
+  assert.equal(take.index, 2);
+  assert.deepEqual(take.marks.map(({ startMs, endMs }) => [startMs, endMs]), [[100, 300], [300, 500]]);
+
+  let single = tap.begin(syllableUnits(1), { mode: 'syllable', cadence: 'entrances' });
+  single = tap.mark(single, 150);
+  assert.equal(single.status, 'complete');
+  assert.equal(single.index, 1);
+  assert.deepEqual(single.marks.map(({ startMs, endMs }) => [startMs, endMs]), [[100, 500]]);
+});
+
+test('entrances cadence advances the cue by press count and auto-closes the final syllable', () => {
+  let take = tap.begin(syllableUnits(3), { mode: 'syllable', cadence: 'entrances' });
+  take = tap.mark(take, 150);
+  assert.equal(take.index, 1);
+  take = tap.mark(take, 230);
+  assert.equal(take.index, 2);
+  assert.equal(take.pendingStartMs, 230);
+  assert.deepEqual(take.marks.map(({ id }) => id), ['s0']);
+  take = tap.mark(take, 370);
+  assert.equal(take.index, 3);
+  assert.equal(take.status, 'complete');
+  assert.deepEqual(take.marks.map(({ startMs, endMs }) => [startMs, endMs]), [[100, 230], [230, 370], [370, 500]]);
+});
+
+test('entrances rejects invalid parent bounds and strict-bound taps without mutating the take', () => {
+  assert.throws(() => tap.begin(syllableUnits(2), { cadence: 'entrances' }), { code: 'INVALID_CADENCE' });
+  const mismatched = syllableUnits(2);
+  mismatched[1] = { ...mismatched[1], minMs: 120 };
+  assert.throws(() => tap.begin(mismatched, { mode: 'syllable', cadence: 'entrances' }), { code: 'INVALID_UNITS' });
+  assert.throws(() => tap.begin(syllableUnits(2, 100, 100), { mode: 'syllable', cadence: 'entrances' }), { code: 'INVALID_UNITS' });
+
+  let take = tap.begin(syllableUnits(2), { mode: 'syllable', cadence: 'entrances' });
+  assert.throws(() => tap.mark(take, 99), { code: 'OUT_OF_BOUNDS' });
+  take = tap.mark(take, 150);
+  const before = JSON.stringify(take);
+  assert.throws(() => tap.mark(take, 100), { code: 'OUT_OF_BOUNDS' });
+  assert.throws(() => tap.mark(take, 500), { code: 'OUT_OF_BOUNDS' });
+  assert.equal(JSON.stringify(take), before);
+});
+
+test('entrances repeats are ignored and undo reverses each press including completion', () => {
+  let take = tap.begin(syllableUnits(3), { mode: 'syllable', cadence: 'entrances' });
+  take = tap.mark(take, 150);
+  const first = take;
+  assert.equal(tap.mark(take, 200, { repeat: true }), first);
+  take = tap.mark(take, 230);
+  take = tap.mark(take, 370);
+  assert.equal(take.status, 'complete');
+  take = tap.undo(take);
+  assert.equal(take.status, 'armed');
+  assert.equal(take.index, 2);
+  assert.equal(take.entranceCount, 2);
+  assert.equal(take.pendingStartMs, 230);
+  assert.deepEqual(take.marks.map(({ id }) => id), ['s0']);
+
+  let single = tap.begin(syllableUnits(1), { mode: 'syllable', cadence: 'entrances' });
+  single = tap.mark(single, 150);
+  single = tap.undo(single);
+  assert.equal(single.status, 'armed');
+  assert.equal(single.index, 0);
+  assert.equal(single.entranceCount, 0);
+  assert.deepEqual(single.marks, []);
+});
+
+test('stopping entrances keeps closed syllables and continue starts from the next cue', () => {
+  let take = tap.begin(syllableUnits(3), { mode: 'syllable', cadence: 'entrances' });
+  take = tap.mark(take, 150);
+  take = tap.mark(take, 230);
+  const stopped = tap.stop(take);
+  assert.equal(stopped.status, 'stopped');
+  assert.equal(stopped.index, 1);
+  assert.equal(stopped.entranceCount, 1);
+  assert.equal(stopped.pendingStartMs, null);
+  assert.deepEqual(stopped.marks.map(({ id, startMs, endMs }) => [id, startMs, endMs]), [['s0', 100, 230]]);
+
+  take = { ...stopped, status: 'armed' };
+  const beforeContinue = JSON.stringify(take);
+  assert.throws(() => tap.mark(take, 200), { code: 'OVERLAP' });
+  assert.equal(JSON.stringify(take), beforeContinue);
+  take = tap.mark(take, 300); // Continue acknowledges the next syllable at the current source time.
+  assert.equal(take.index, 2);
+  assert.equal(take.pendingStartMs, 300);
+  take = tap.mark(take, 400);
+  assert.equal(take.status, 'complete');
+  assert.deepEqual(take.marks.map(({ startMs, endMs }) => [startMs, endMs]), [[100, 230], [300, 400], [400, 500]]);
+});
+
+test('entrance marks apply atomically to one phrase in a preview and preserve the other phrase', () => {
+  const source = { platform: 'youtube', videoId: 'FIXTURE0001', title: 'Song', artist: 'Artist', durationMs: 10000 };
+  const lyrics = '[00:01.00]sunshine melody\n[00:04.00]still refrain\n[00:06.00]';
+  const candidateLyrics = '[00:02.00]sunshine melody\n[00:05.00]still refrain\n[00:07.00]';
+  let saved = scoreCore.createScore(source, lyrics, { provider: 'test', contentHash: 'a'.repeat(64) });
+  const phraseId = saved.phrases[0].id;
+  const wordParts = { sunshine: ['sun', 'shine'], melody: ['mel', 'o', 'dy'] };
+  for (const word of saved.phrases[0].words) {
+    const parts = wordParts[word.text];
+    assert.ok(parts, `expected multi-syllable fixture word: ${word.text}`);
+    const span = word.endMs - word.startMs;
+    const syllables = parts.map((text, i) => ({
+      id: `sy-${word.id}-${i}`, text,
+      startMs: word.startMs + Math.floor(span * i / parts.length),
+      endMs: word.startMs + Math.floor(span * (i + 1) / parts.length),
+      provenance: 'estimated', locked: false,
+    }));
+    saved = scoreCore.applyOperation(saved, { type: 'setWordSyllables', wordId: word.id, syllables }, saved.revision);
+  }
+  const preview = timingVariant.merge(saved,
+    scoreCore.createScore(source, candidateLyrics, { provider: 'test', contentHash: 'b'.repeat(64) }));
+  const phrase = preview.score.phrases[0], untouchedPhrase = structuredClone(preview.score.phrases[1]);
+  const originalWords = phrase.words.map(({ id, text }) => [id, text]);
+  const originalSyllableIds = phrase.words.flatMap(word => word.syllables.map(syllable => syllable.id));
+  const units = phrase.words.flatMap(word => word.syllables.map(syllable => ({
+    id: syllable.id, syllableId: syllable.id, wordId: word.id, text: syllable.text,
+    minMs: phrase.startMs, maxMs: phrase.endMs,
+  })));
+  let take = tap.begin(units, { mode: 'syllable', cadence: 'entrances' });
+  const span = phrase.endMs - phrase.startMs;
+  take = tap.mark(take, phrase.startMs); // Acknowledge the fixed phrase start.
+  for (const fraction of [1, 2, 3, 4]) take = tap.mark(take, phrase.startMs + Math.floor(span * fraction / 5));
+  assert.equal(take.status, 'complete');
+  assert.equal(take.marks.length, units.length);
+
+  const operation = { type: 'setPhraseSyllableTimings', phraseId, marks: take.marks.map(({ syllableId, startMs, endMs }) => ({ syllableId, startMs, endMs })) };
+  const capturedPreview = timingVariant.operate(preview, operation);
+  const changed = capturedPreview.score.phrases[0];
+  assert.equal(changed.id, phraseId);
+  assert.deepEqual(changed.words.map(({ id, text }) => [id, text]), originalWords);
+  assert.deepEqual(changed.words.map(word => [word.startMs, word.endMs]), changed.words.map(word => [word.syllables[0].startMs, word.syllables.at(-1).endMs]));
+  assert.deepEqual(changed.words.flatMap(word => word.syllables.map(syllable => syllable.id)), originalSyllableIds);
+  assert.deepEqual(changed.words.flatMap(word => word.syllables.map(syllable => syllable.text)), ['sun', 'shine', 'mel', 'o', 'dy']);
+  assert.deepEqual([changed.startMs, changed.endMs], [phrase.startMs, phrase.endMs]);
+  assert.deepEqual(capturedPreview.score.phrases[1], untouchedPhrase);
+  assert.equal(scoreCore.validateScore(capturedPreview.score), capturedPreview.score);
+
+  const correctedTake = tap.adjust(take, { id: take.marks[2].syllableId, edge: 'start', deltaMs: 10 });
+  const correctedOperation = { ...operation, marks: correctedTake.marks.map(({ syllableId, startMs, endMs }) => ({ syllableId, startMs, endMs })) };
+  const correctedPreview = timingVariant.operate(capturedPreview, correctedOperation);
+  const applied = scoreCore.applyOperation(correctedPreview.score, correctedOperation, correctedPreview.score.revision);
+  assert.equal(applied.phrases[0].words[0].syllables[1].endMs, correctedTake.marks[1].endMs);
+  assert.equal(applied.phrases[0].words[1].syllables[0].startMs, correctedTake.marks[2].startMs);
+  assert.deepEqual(applied.phrases[1], untouchedPhrase);
+  assert.deepEqual(applied.phrases[0].words.map(({ id, text }) => [id, text]), originalWords);
+  assert.equal(scoreCore.validateScore(applied), applied);
 });

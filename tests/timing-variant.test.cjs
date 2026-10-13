@@ -28,6 +28,22 @@ test('replaceWords is whitelisted for preview edits and protects saved manual ti
   const changed = variant.operate(draft, op, true);
   assert.deepEqual(changed.score.phrases[0].words.map(item => item.text), ['get', 'down']);
 });
+
+test('phrase syllable capture requires override for a saved protected word', () => {
+  let base = make('[00:20.00]See that light');
+  const phrase = base.phrases[0];
+  for (const word of phrase.words) base = core.applyOperation(base, { type: 'setWordSyllables', wordId: word.id, syllables: [{ id: `sy-${word.id}`, text: word.text, startMs: word.startMs, endMs: word.endMs }] }, base.revision);
+  const draft = variant.merge(base, make('[00:23.19]See that light', 'b'));
+  const p = draft.score.phrases[0], middle = p.startMs + Math.floor((p.endMs - p.startMs) / 2), end1 = p.startMs + Math.floor((p.endMs - p.startMs) / 3), end2 = p.startMs + Math.floor(2 * (p.endMs - p.startMs) / 3);
+  const op = { type: 'setPhraseSyllableTimings', phraseId: p.id, marks: [
+    { syllableId: `sy-${p.words[0].id}`, startMs: p.startMs, endMs: end1 },
+    { syllableId: `sy-${p.words[1].id}`, startMs: end1, endMs: end2 },
+    { syllableId: `sy-${p.words[2].id}`, startMs: end2, endMs: p.endMs },
+  ] };
+  assert.throws(() => variant.operate(draft, op), { code: 'MANUAL_PROTECTED' });
+  const edited = variant.operate(draft, op, true);
+  assert.equal(edited.score.phrases[0].words[0].endMs, end1);
+});
 test('preview migrates catalog estimates and keeps ids, effects, offset and input immutable', () => {
   const base = make('[00:01.00]hello world\n[00:04.00]another line');
   base.offsetMs = 137; base.phrases[0].words[0].effects = [{type:'tilt',strength:.2}];

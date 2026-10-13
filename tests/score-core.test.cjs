@@ -81,6 +81,54 @@ test('replaceWords rejects missing, duplicate, noncontiguous, cross-phrase and i
   for (const text of ['', '  ', 42]) errorCode(() => score.applyOperation(base, { type: 'replaceWords', phraseId, wordIds: [first.id, second.id], text }, 0), 'INVALID_OPERATION');
 });
 
+test('phrase syllable capture spans visible words across former word bounds and leaves excluded words intact', () => {
+  let base = makeScore('[00:01.00]one skip two\n[00:04.00]');
+  const phrase = base.phrases[0];
+  for (const word of phrase.words) base = score.applyOperation(base, { type: 'setWordSyllables', wordId: word.id, syllables: [{ id: `sy-${word.id}`, text: word.text, startMs: word.startMs, endMs: word.endMs }] }, base.revision);
+  const skip = base.phrases[0].words[1];
+  base = score.applyOperation(base, { type: 'setWordExcluded', wordId: skip.id, excluded: true }, base.revision);
+  base.phrases[0].words[0].effects = [{ type: 'pulse', strength: 0.4 }];
+  base.phrases[0].words[0].syllables[0].effects = [{ type: 'tilt', strength: 0.2 }];
+  const beforeSkip = structuredClone(base.phrases[0].words[1]);
+  const p = base.phrases[0], midpoint = p.startMs + Math.floor((p.endMs - p.startMs) / 2);
+  const marks = [
+    { syllableId: `sy-${p.words[0].id}`, startMs: p.startMs, endMs: midpoint },
+    { syllableId: `sy-${p.words[2].id}`, startMs: midpoint, endMs: p.endMs },
+  ];
+  const next = score.applyOperation(base, { type: 'setPhraseSyllableTimings', phraseId: p.id, marks }, base.revision);
+  assert.deepEqual([next.phrases[0].words[0].startMs, next.phrases[0].words[0].endMs], [p.startMs, midpoint]);
+  assert.deepEqual([next.phrases[0].words[2].startMs, next.phrases[0].words[2].endMs], [midpoint, p.endMs]);
+  assert.deepEqual(next.phrases[0].words[1], beforeSkip);
+  for (const word of [next.phrases[0].words[0], next.phrases[0].words[2]]) {
+    assert.equal(word.provenance, 'manual'); assert.equal(word.locked, true);
+    assert.equal(word.syllables[0].provenance, 'manual'); assert.equal(word.syllables[0].locked, true);
+  }
+  assert.deepEqual(next.phrases[0].words[0].effects, [{ type: 'pulse', strength: 0.4 }]);
+  assert.deepEqual(next.phrases[0].words[0].syllables[0].effects, [{ type: 'tilt', strength: 0.2 }]);
+});
+
+test('phrase syllable capture rejects incomplete, extra, reordered, zero-length, gapped and out-of-parent marks atomically', () => {
+  let base = makeScore('[00:01.00]one two\n[00:04.00]');
+  const phrase = base.phrases[0];
+  for (const word of phrase.words) base = score.applyOperation(base, { type: 'setWordSyllables', wordId: word.id, syllables: [{ id: `sy-${word.id}`, text: word.text, startMs: word.startMs, endMs: word.endMs }] }, base.revision);
+  const p = base.phrases[0], midpoint = p.startMs + Math.floor((p.endMs - p.startMs) / 2);
+  const marks = [
+    { syllableId: `sy-${p.words[0].id}`, startMs: p.startMs, endMs: midpoint },
+    { syllableId: `sy-${p.words[1].id}`, startMs: midpoint, endMs: p.endMs },
+  ];
+  const invalid = [
+    marks.slice(0, 1), [...marks, { syllableId: 'extra', startMs: p.endMs, endMs: p.endMs + 1 }],
+    [...marks].reverse(), [{ ...marks[0], endMs: marks[0].startMs }, marks[1]],
+    [marks[0], { ...marks[1], startMs: midpoint + 1 }],
+    [{ ...marks[0], startMs: p.startMs - 1 }, marks[1]],
+  ];
+  for (const [i, badMarks] of invalid.entries()) {
+    const snapshot = structuredClone(base);
+    errorCode(() => score.applyOperation(base, { type: 'setPhraseSyllableTimings', phraseId: p.id, marks: badMarks }, base.revision), i < 3 ? 'INVALID_OPERATION' : 'INVALID_TIME');
+    assert.deepEqual(base, snapshot);
+  }
+});
+
 test('exports global and CommonJS APIs and resolves only exact YouTube video identities', () => {
   assert.equal(globalThis.LvScore, score);
   assert.equal(score.mediaKey({ url: 'https://www.youtube.com/watch?v=FIXTURE0001&t=3' }), 'youtube:FIXTURE0001');

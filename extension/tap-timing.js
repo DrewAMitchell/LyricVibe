@@ -14,8 +14,8 @@
     const mode = options.mode === undefined ? 'word' : options.mode;
     if (mode !== 'word' && mode !== 'phrase' && mode !== 'syllable') fail('INVALID_MODE', 'Mode must be word, phrase, or syllable.');
     const cadence = options.cadence === undefined ? 'pairs' : options.cadence;
-    if (cadence !== 'pairs' && cadence !== 'flow' && cadence !== 'subdivide') fail('INVALID_CADENCE', 'Cadence must be pairs, flow, or subdivide.');
-    if (cadence === 'subdivide' && mode !== 'syllable') fail('INVALID_CADENCE', 'Subdivide cadence requires syllable mode.');
+    if (cadence !== 'pairs' && cadence !== 'flow' && cadence !== 'subdivide' && cadence !== 'entrances') fail('INVALID_CADENCE', 'Cadence must be pairs, flow, subdivide, or entrances.');
+    if (['subdivide', 'entrances'].includes(cadence) && mode !== 'syllable') fail('INVALID_CADENCE', 'Subdivide and entrances cadences require syllable mode.');
     const bpm = options.bpm === undefined || options.bpm === null ? null : options.bpm;
     if (bpm !== null && !(typeof bpm === 'number' && Number.isFinite(bpm) && bpm >= 20 && bpm <= 400)) {
       fail('INVALID_BPM', 'BPM must be between 20 and 400.');
@@ -35,6 +35,10 @@
         safeUnits.some(unit => unit.minMs !== safeUnits[0].minMs || unit.maxMs !== safeUnits[0].maxMs))) {
       fail('INVALID_UNITS', 'Subdivide units must share a positive parent interval.');
     }
+    if (cadence === 'entrances' && (safeUnits[0].maxMs <= safeUnits[0].minMs ||
+        safeUnits.some(unit => unit.minMs !== safeUnits[0].minMs || unit.maxMs !== safeUnits[0].maxMs))) {
+      fail('INVALID_UNITS', 'Entrance units must share a positive parent interval.');
+    }
     if (cadence === 'subdivide' && safeUnits.length === 1) {
       return { status: 'complete', index: 1, pendingStartMs: null,
         marks: [markEntry(safeUnits[0], safeUnits[0].minMs, safeUnits[0].maxMs)],
@@ -45,20 +49,21 @@
       pendingStartMs: cadence === 'subdivide' ? safeUnits[0].minMs : null,
       marks: [], lastMs: cadence === 'subdivide' ? safeUnits[0].minMs : null,
       units: safeUnits, mode, cadence, bpm,
-      originMs: cadence === 'subdivide' ? safeUnits[0].minMs : null,
-      ...(['flow', 'subdivide'].includes(cadence) ? { actionHistory: [] } : {}),
+      originMs: ['subdivide', 'entrances'].includes(cadence) ? safeUnits[0].minMs : null,
+      ...(cadence === 'entrances' ? { entranceCount: 0 } : {}),
+      ...(['flow', 'subdivide', 'entrances'].includes(cadence) ? { actionHistory: [] } : {}),
     };
   }
 
-  // Flow/subdivide actions can close one unit and open the next with one
-  // keypress. Keep bounded, nonrecursive snapshots for one-action Undo.
+  // Flow/subdivide/entrance actions can close one unit and open the next with
+  // one keypress. Keep bounded, nonrecursive snapshots for one-action Undo.
   const FLOW_HISTORY_LIMIT = 128;
   function flowSnapshot(take) {
     const { actionHistory, ...snapshot } = take;
     return snapshot;
   }
   function withFlowHistory(previous, next) {
-    if (!['flow', 'subdivide'].includes(previous.cadence)) return next;
+    if (!['flow', 'subdivide', 'entrances'].includes(previous.cadence)) return next;
     const history = [...(previous.actionHistory || []), flowSnapshot(previous)].slice(-FLOW_HISTORY_LIMIT);
     return { ...next, actionHistory: history };
   }
@@ -84,6 +89,61 @@
       startMs, endMs };
   }
 
+  function markEntrance(take, scoreMs) {
+    const parentStart = take.units[0].minMs, parentEnd = take.units[0].maxMs;
+    const count = take.entranceCount || 0;
+    const record = next => withFlowHistory(take, next);
+
+    // The first press acknowledges the fixed phrase start; it is not itself a
+    // timing boundary. Continued takes use a null pending start to acknowledge
+    // the next syllable at the current source time instead.
+    if (count === 0 && take.pendingStartMs === null) {
+      if (scoreMs < parentStart || scoreMs > parentEnd || take.units.length > 1 && scoreMs === parentEnd) {
+        fail('OUT_OF_BOUNDS', 'Tap is outside the parent phrase bounds.');
+      }
+      if (take.units.length === 1) {
+        const next = { ...take, marks: [markEntry(take.units[0], parentStart, parentEnd)],
+          index: 1, entranceCount: 1, pendingStartMs: null, lastMs: parentEnd, status: 'complete' };
+        return record(next);
+      }
+      return record({ ...take, index: 1, entranceCount: 1, pendingStartMs: parentStart, lastMs: parentStart });
+    }
+
+    if (take.pendingStartMs === null) {
+      if (count >= take.units.length) fail('TAKE_CLOSED', 'Every timing unit is already complete.');
+      const unit = take.units[count];
+      const { acceptedMs } = acceptedTime(take, scoreMs, unit, false);
+      if (acceptedMs <= parentStart || acceptedMs >= parentEnd) fail('OUT_OF_BOUNDS', 'Syllable entrances must be strictly inside the parent phrase bounds.');
+      if (take.marks.length && acceptedMs < take.marks[take.marks.length - 1].endMs) {
+        fail('OVERLAP', 'A continued syllable cannot start before the previous syllable ends.');
+      }
+      const entranceCount = count + 1;
+      if (entranceCount === take.units.length) {
+        const marks = [...take.marks, markEntry(unit, acceptedMs, parentEnd)];
+        return record({ ...take, marks, index: entranceCount, entranceCount,
+          pendingStartMs: null, lastMs: parentEnd, status: 'complete' });
+      }
+      return record({ ...take, index: entranceCount, entranceCount,
+        pendingStartMs: acceptedMs, lastMs: acceptedMs });
+    }
+
+    const unitIndex = count - 1;
+    if (unitIndex < 0 || unitIndex >= take.units.length - 1) fail('TAKE_CLOSED', 'No later syllable entrance is available.');
+    const unit = take.units[unitIndex];
+    const { acceptedMs } = acceptedTime(take, scoreMs, unit, false);
+    if (acceptedMs <= parentStart || acceptedMs >= parentEnd) fail('OUT_OF_BOUNDS', 'Syllable entrances must be strictly inside the parent phrase bounds.');
+    if (acceptedMs <= take.pendingStartMs) fail('INVALID_INTERVAL', 'Syllable entrances must produce positive intervals.');
+    const marks = [...take.marks, markEntry(unit, take.pendingStartMs, acceptedMs)];
+    const entranceCount = count + 1;
+    if (entranceCount === take.units.length) {
+      const last = markEntry(take.units[entranceCount - 1], acceptedMs, parentEnd);
+      return record({ ...take, marks: [...marks, last], index: entranceCount, entranceCount,
+        pendingStartMs: null, lastMs: parentEnd, status: 'complete' });
+    }
+    return record({ ...take, marks, index: entranceCount, entranceCount,
+      pendingStartMs: acceptedMs, lastMs: acceptedMs });
+  }
+
   function mark(take, scoreMs, options = {}) {
     if (!take || !['armed', 'complete', 'stopped'].includes(take.status)) fail('INVALID_TAKE', 'Provide a take returned by begin.');
     if (!options || typeof options !== 'object' || Array.isArray(options)) fail('INVALID_OPTIONS', 'Mark options must be an object.');
@@ -91,6 +151,7 @@
     if (repeat) return take;
     if (!integerTime(scoreMs)) fail('INVALID_TIME', 'Tap time must be a nonnegative integer number of milliseconds.');
     if (take.status !== 'armed') fail('TAKE_CLOSED', 'This take is no longer accepting taps.');
+    if (take.cadence === 'entrances') return markEntrance(take, scoreMs);
     const unit = take.units[take.index];
     if (!unit) fail('TAKE_CLOSED', 'Every timing unit is already complete.');
     const firstStart = take.pendingStartMs === null;
@@ -146,7 +207,7 @@
     if (options.repeat === true) return take;
     if (!integerTime(scoreMs)) fail('INVALID_TIME', 'Release time must be a nonnegative integer number of milliseconds.');
     if (take.status !== 'armed') fail('TAKE_CLOSED', 'This take is no longer accepting taps.');
-    if (take.cadence === 'subdivide') fail('RELEASE_UNSUPPORTED', 'Subdivide cadence closes at internal taps and the parent end.');
+    if (['subdivide', 'entrances'].includes(take.cadence)) fail('RELEASE_UNSUPPORTED', 'This cadence closes at syllable entrances and the parent end.');
     if (take.pendingStartMs === null) fail('NO_PENDING_START', 'There is no open unit to release.');
     const unit = take.units[take.index];
     if (!unit) fail('TAKE_CLOSED', 'Every timing unit is already complete.');
@@ -161,12 +222,12 @@
 
   function undo(take) {
     if (!take || !['armed', 'complete', 'stopped'].includes(take.status)) fail('INVALID_TAKE', 'Provide a take returned by begin.');
-    if (['flow', 'subdivide'].includes(take.cadence) && take.actionHistory && take.actionHistory.length) {
+    if (['flow', 'subdivide', 'entrances'].includes(take.cadence) && take.actionHistory && take.actionHistory.length) {
       const previous = take.actionHistory[take.actionHistory.length - 1];
       return { ...previous, actionHistory: take.actionHistory.slice(0, -1) };
     }
     if (take.cadence === 'subdivide' && take.units.length === 1) return take;
-    if (take.cadence === 'subdivide') return take;
+    if (['subdivide', 'entrances'].includes(take.cadence)) return take;
     if (take.pendingStartMs !== null) {
       return { ...take, pendingStartMs: null, lastMs: take.marks.length ? take.marks[take.marks.length - 1].endMs : null,
         originMs: take.marks.length ? take.originMs : null, status: 'armed' };
@@ -201,6 +262,13 @@
   function stop(take) {
     if (!take || !['armed', 'complete', 'stopped'].includes(take.status)) fail('INVALID_TAKE', 'Provide a take returned by begin.');
     if (take.status === 'stopped' && take.pendingStartMs === null) return take;
+    if (take.cadence === 'entrances') {
+      const completedCount = take.marks.length;
+      return { ...take, index: completedCount, entranceCount: completedCount,
+        pendingStartMs: null, status: 'stopped',
+        lastMs: take.marks.length ? take.marks[take.marks.length - 1].endMs : null,
+        actionHistory: [] };
+    }
     return { ...take, pendingStartMs: null, status: 'stopped',
       lastMs: take.marks.length ? take.marks[take.marks.length - 1].endMs : null,
       originMs: take.marks.length ? take.originMs : null };
@@ -220,12 +288,13 @@
     const marks = take.marks.map(item => ({ ...item }));
     const current = marks[index];
     const delta = change.deltaMs;
-    if (take.cadence === 'subdivide' && delta !== 0 && (change.edge === 'start' && index === 0 || change.edge === 'end' && index === take.units.length - 1)) fail('OUT_OF_BOUNDS', 'The first syllable start and final release are fixed by the word.');
-    if (take.cadence === 'subdivide' && change.edge === 'move') fail('ADJUST_UNSUPPORTED', 'Move adjustment is not supported for subdivided syllables. Adjust a shared boundary instead.');
-    if (take.cadence === 'subdivide' && change.edge === 'start' && index > 0) {
+    const partitionedCadence = ['subdivide', 'entrances'].includes(take.cadence);
+    if (partitionedCadence && delta !== 0 && (change.edge === 'start' && index === 0 || change.edge === 'end' && index === take.units.length - 1)) fail('OUT_OF_BOUNDS', 'The first syllable start and final release are fixed by the parent interval.');
+    if (partitionedCadence && change.edge === 'move') fail('ADJUST_UNSUPPORTED', 'Move adjustment is not supported for partitioned syllables. Adjust a shared boundary instead.');
+    if (partitionedCadence && change.edge === 'start' && index > 0) {
       marks[index - 1].endMs += delta;
       current.startMs += delta;
-    } else if (take.cadence === 'subdivide' && change.edge === 'end' && index + 1 < marks.length) {
+    } else if (partitionedCadence && change.edge === 'end' && index + 1 < marks.length) {
       current.endMs += delta;
       marks[index + 1].startMs += delta;
     } else if (change.edge === 'start') current.startMs += delta;

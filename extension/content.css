@@ -2278,3 +2278,12 @@
 @media (prefers-reduced-motion:reduce) { #lvx-root .lvx-score-word, #lvx-root .lvx-score-syllable { animation:none !important; } }
 #lvx-root.lvx-ad-paused { opacity:0 !important; pointer-events:none !important; }
 #lvx-root .lvx-score-paused .lvx-score-word, #lvx-root .lvx-score-paused .lvx-score-syllable { animation-play-state:paused !important; }
+#lvx-root .lvx-sync-panel .lvx-toggle[aria-pressed=true] { background:#35452b; border-color:#a4ce7d; color:#e6ffd2; box-shadow:0 0 0 1px #8dbb5e35,0 0 12px #8dbb5e24; }
+#lvx-root .lvx-toggle-host { display:inline-flex; align-items:center; }
+#lvx-root .lvx-phrase-syllables[hidden], #lvx-root .lvx-syllable-review[hidden] { display:none!important; }
+#lvx-root .lvx-phrase-syllables details { margin:4px 0; padding-top:0; }
+#lvx-root .lvx-phrase-syllable-fields { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-bottom:10px; }
+#lvx-root .lvx-phrase-syllable-fields label { display:grid; gap:3px; min-width:0; color:#c0c7b8; font-size:11px; }
+#lvx-root .lvx-phrase-syllable-fields input { width:100%; min-width:0; padding:7px; color:#f3f3e9; background:#10130f; border:1px solid #4c5345; border-radius:4px; }
+#lvx-root .lvx-phrase-syllable-hint { color:#b6c4a9; font-size:11px; margin:5px 0; }
+#lvx-root .lvx-syllable-review { flex-wrap:wrap; }

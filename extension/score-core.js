@@ -415,6 +415,26 @@
       finiteNonnegative(op.startMs, "startMs"); finiteNonnegative(op.endMs, "endMs");
       if (op.endMs < op.startMs || op.startMs < word.startMs || op.endMs > word.endMs) fail("INVALID_TIME", "syllable timing must fit within its word");
       syllable.startMs = op.startMs; syllable.endMs = op.endMs; syllable.provenance = "manual"; syllable.locked = true;
+    } else if (op.type === "setPhraseSyllableTimings") {
+      const phrase = next.phrases.find(item => item.id === op.phraseId);
+      if (!phrase) fail("UNKNOWN_ID", `unknown phrase id: ${op.phraseId}`);
+      if (!Array.isArray(op.marks) || op.marks.length > 5000) fail("INVALID_OPERATION", "marks must be a bounded array");
+      const units = phrase.words.filter(word => word.excluded !== true).flatMap(word => (word.syllables || []).map(syllable => ({ word, syllable })));
+      if (!units.length || op.marks.length !== units.length) fail("INVALID_OPERATION", "marks must include every authored syllable in the phrase exactly once");
+      for (let i = 0; i < units.length; i++) {
+        const mark = op.marks[i], { word, syllable } = units[i];
+        if (!mark || mark.syllableId !== syllable.id) fail("INVALID_OPERATION", "marks must follow phrase syllable source order with each ID exactly once");
+        if (!Number.isSafeInteger(mark.startMs) || !Number.isSafeInteger(mark.endMs) || mark.startMs < phrase.startMs || mark.endMs > phrase.endMs || mark.endMs <= mark.startMs) fail("INVALID_TIME", "syllable marks must be positive whole-millisecond intervals inside the phrase");
+        if (i === 0 && mark.startMs !== phrase.startMs) fail("INVALID_TIME", "the first syllable must begin at the phrase boundary");
+        if (i > 0 && mark.startMs !== op.marks[i - 1].endMs) fail("INVALID_TIME", "consecutive syllable marks must be contiguous");
+        syllable.startMs = mark.startMs; syllable.endMs = mark.endMs; syllable.provenance = "manual"; syllable.locked = true;
+        const prior = units[i - 1];
+        const nextUnit = units[i + 1];
+        if (!prior || prior.word !== word) word.startMs = mark.startMs;
+        if (!nextUnit || nextUnit.word !== word) word.endMs = mark.endMs;
+        word.provenance = "manual"; word.locked = true;
+      }
+      if (op.marks.at(-1).endMs !== phrase.endMs) fail("INVALID_TIME", "the final syllable must end at the phrase boundary");
     } else if (op.type === "setSyllableLock") {
       const { syllable } = locateSyllable(next, op.syllableId);
       if (typeof op.locked !== "boolean") fail("INVALID_OPERATION", "locked must be boolean");

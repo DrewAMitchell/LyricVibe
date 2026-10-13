@@ -8,6 +8,19 @@
   const phrase = () => state.draft?.score.phrases[state.phrase];
   const word = () => phrase()?.words.find(w=>w.id===state.wordId) || phrase()?.words[0];
   const target = () => $('target').value === 'word' ? word() : word()?.syllables?.find(s=>s.id===$('target').value);
+  const stateToggles = new Map();
+  function syncToggle(id) {
+    const input=$(id),button=stateToggles.get(id);if(!input||!button)return;
+    button.disabled=input.disabled;button.setAttribute('aria-pressed',String(input.checked));button.classList.toggle('is-on',input.checked);
+  }
+  function installStateToggle(id) {
+    const input=$(id),label=input?.closest('label');if(!input||!label)return;
+    const caption=label.textContent.trim();label.classList.add('source-toggle');label.setAttribute('aria-hidden','true');input.tabIndex=-1;
+    const button=document.createElement('button');button.type='button';button.id=`toggle-${id}`;button.className='state-toggle';button.textContent=caption;button.setAttribute('aria-label',caption);button.setAttribute('aria-pressed',String(input.checked));
+    button.addEventListener('click',()=>{if(button.disabled)return;input.checked=!input.checked;input.dispatchEvent(new Event('change',{bubbles:true}));syncToggle(id);});
+    label.insertAdjacentElement('afterend',button);stateToggles.set(id,button);syncToggle(id);
+  }
+  ['loop','follow','excluded'].forEach(installStateToggle);
   async function request(type, extra={}) {
     const result = await chrome.runtime.sendMessage({type,tabId,mediaKey,expectedRevision:state.score?.revision,lyricsHash:state.score?.lyrics.contentHash,token:state.draft?.token,previewRevision:state.draft?.previewRevision,...extra});
     if (!result?.ok) throw Error(result?.error?.message || 'The video connection is unavailable.');
@@ -19,7 +32,8 @@
   }
   function buttons() {
     const ready=!!state.draft;
-    for(const id of ['play','pause','audition','use-times','earlier','later','excluded','target','start','end','replace-through','replacement','replace-words'])$(id).disabled=state.busy||!ready;
+    for(const id of ['play','pause','audition','use-times','earlier','later','excluded','loop','follow','target','start','end','replace-through','replacement','replace-words'])$(id).disabled=state.busy||!ready;
+    for(const id of stateToggles.keys())syncToggle(id);
     $('save').disabled=state.busy||!ready||!state.auditioned||state.dirty;
     $('undo').disabled=state.busy||!state.draft?.undoScores?.length;
     $('save-status').textContent=!ready?'Saved · reopen Sync to continue':state.dirty?'Use exact times first':state.auditioned?'Ready to save this iteration':'Audition preview before saving';

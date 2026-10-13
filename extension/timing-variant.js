@@ -99,11 +99,16 @@
     // Apply against a private copy so a failed batch cannot leave a partial preview.
     let score = clone(draft.score);
     for (const submitted of operations) {
-      if (!submitted || !['setPhraseTiming', 'setWordSyllables', 'setSyllableTiming', 'setWordEffect', 'setSyllableEffect', 'setWordExcluded', 'replaceWords'].includes(submitted.type)) fail('INVALID_OPERATION', 'Only phrase timing, syllable segmentation, timing, appearance effects, word exclusion, and contiguous text replacement may be changed in this preview.');
+      if (!submitted || !['setPhraseTiming', 'setWordSyllables', 'setSyllableTiming', 'setWordEffect', 'setSyllableEffect', 'setWordExcluded', 'replaceWords', 'setPhraseSyllableTimings'].includes(submitted.type)) fail('INVALID_OPERATION', 'Only phrase timing, syllable segmentation, timing, appearance effects, word exclusion, contiguous text replacement, and phrase syllable capture may be changed in this preview.');
       const op = clone(submitted);
       let wordId = op.wordId;
       const effectOnly = op.type === 'setWordEffect' || op.type === 'setSyllableEffect';
       if (op.type === 'replaceWords' && !allowProtected && Array.isArray(op.wordIds) && op.wordIds.some(id => draft.protectedIds.includes(id))) fail('MANUAL_PROTECTED', 'Enable editing saved timings before replacing words in this protected phrase.');
+      if (op.type === 'setPhraseSyllableTimings' && !allowProtected && Array.isArray(op.marks)) {
+        const syllableIds = new Set(op.marks.map(mark => mark?.syllableId));
+        const phrase = score.phrases.find(item => item.id === op.phraseId);
+        if (phrase?.words.some(word => draft.protectedIds.includes(word.id) && (word.syllables || []).some(syllable => syllableIds.has(syllable.id)))) fail('MANUAL_PROTECTED', 'Enable editing saved timings before changing syllables in this protected phrase.');
+      }
       if (op.type === 'setPhraseTiming') {
         const phrase=score.phrases.find(p=>p.id===op.phraseId);
         if (!phrase) fail('UNKNOWN_ID','Choose a phrase from this preview.');

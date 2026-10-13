@@ -3,3 +3,4 @@
 #replace-panel{margin-top:14px;border-top:1px solid #3b4534;padding-top:10px}summary{cursor:pointer;color:#d8e4cb}summary::marker{color:#c7dfa1}.replacement{display:grid}#replacement{width:100%}#replace-words{width:100%}@media(max-width:760px){#phrases{display:flex;overflow-x:auto}#phrases button{flex:0 0 150px}#phrases button:nth-child(n+4){display:block}}
 
 body>header,body>.transport,body>nav,body>main,body>footer{min-width:0}#phrases{flex:1 1 0%}nav{overflow:hidden}
+.source-toggle{display:none}.state-toggle{border-color:#607451;background:#222b1e;box-shadow:0 0 0 1px #9fbb6d22;min-height:38px;padding:7px 12px}.state-toggle:hover:not(:disabled){background:#34432a}.state-toggle[aria-pressed=true]{background:#324429;border-color:#a6c681;box-shadow:0 0 12px #a6c68144,inset 0 0 0 1px #a6c68155;color:#eff8df}.state-toggle#toggle-excluded[aria-pressed=true]{background:#453b27;border-color:#e8cf9c;box-shadow:0 0 12px #e8cf9c44,inset 0 0 0 1px #e8cf9c55;color:#f5e7c4}
