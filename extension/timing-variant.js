@@ -95,11 +95,11 @@
   }
   function operate(draft, operation, allowProtected = false) {
     const operations = Array.isArray(operation) ? operation : [operation];
-    if (!operations.length || operations.length > 128) fail('INVALID_OPERATION', 'Provide one to 128 syllable operations.');
+    if (!operations.length || operations.length > 5000) fail('INVALID_OPERATION', 'Provide one to 5000 score operations.');
     // Apply against a private copy so a failed batch cannot leave a partial preview.
     let score = clone(draft.score);
     for (const submitted of operations) {
-      if (!submitted || !['setPhraseTiming', 'setPhraseLane', 'setWordSyllables', 'setSyllableTiming', 'setSyllableLock', 'setWordEffect', 'setSyllableEffect', 'setWordExcluded', 'replaceWords', 'setPhraseSyllableTimings'].includes(submitted.type)) fail('INVALID_OPERATION', 'Only phrase timing and lane, syllable segmentation, timing and locks, appearance effects, word exclusion, contiguous text replacement, and phrase syllable capture may be changed in this preview.');
+      if (!submitted || !['setPhraseTiming', 'setPhraseLane', 'setWordSyllables', 'setSyllableTiming', 'setSyllableLock', 'setWordEffect', 'setSyllableEffect', 'setWordExcluded', 'replaceWords', 'setPhraseSyllableTimings', 'setPhraseSyllablePerformance'].includes(submitted.type)) fail('INVALID_OPERATION', 'Only phrase timing and lane, syllable segmentation and performance, timing and locks, appearance effects, word exclusion, contiguous text replacement, and phrase syllable capture may be changed in this preview.');
       const op = clone(submitted);
       let wordId = op.wordId;
       const effectOnly = op.type === 'setWordEffect' || op.type === 'setSyllableEffect' || op.type === 'setPhraseLane';
@@ -109,6 +109,7 @@
         const phrase = score.phrases.find(item => item.id === op.phraseId);
         if (phrase?.words.some(word => draft.protectedIds.includes(word.id) && (word.syllables || []).some(syllable => syllableIds.has(syllable.id)))) fail('MANUAL_PROTECTED', 'Enable editing saved timings before changing syllables in this protected phrase.');
       }
+      if (op.type === 'setPhraseSyllablePerformance' && !allowProtected && Array.isArray(op.words) && op.words.some(item => draft.protectedIds.includes(item?.wordId))) fail('MANUAL_PROTECTED', 'Enable editing saved timings before replacing performance timings in this protected phrase.');
       if (op.type === 'setPhraseTiming') {
         const phrase=score.phrases.find(p=>p.id===op.phraseId);
         if (!phrase) fail('UNKNOWN_ID','Choose a phrase from this preview.');

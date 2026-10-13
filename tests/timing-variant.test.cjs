@@ -3,6 +3,17 @@ const core = require('../extension/score-core.js'), variant = require('../extens
 const source = { videoId: 'FIXTURE0001', durationMs: 60000 };
 const make = (raw, hash = 'a') => core.createScore(source, raw, { contentHash: hash.repeat(64) });
 
+test('a full-song syllable pass exceeding 128 operations remains one atomic preview edit', () => {
+  const base=make('[00:01.00]'+Array.from({length:130},(_,i)=>'word'+i).join(' ')+'\n[00:50.00]');
+  const draft=variant.merge(base,base),before=JSON.stringify(draft);
+  const operations=base.phrases[0].words.map(w=>({type:'setWordSyllables',wordId:w.id,syllables:[{id:w.id+'-s1',text:w.text,startMs:w.startMs,endMs:w.endMs}]}));
+  const changed=variant.operate(draft,operations,true);
+  assert.equal(changed.score.phrases[0].words.filter(w=>w.syllables.length===1).length,130);
+  assert.throws(()=>variant.operate(draft,[...operations,{type:'setWordSyllables',wordId:'missing',syllables:[]}],true));
+  assert.equal(JSON.stringify(draft),before);
+  assert.throws(()=>variant.operate(draft,Array(5001).fill(operations[0]),true),{code:'INVALID_OPERATION'});
+});
+
 test('excluded-word migration preserves omission across changed timing and requires protected override to restore', () => {
   const base = make('[00:20.00]See that light');
   const word = base.phrases[0].words[1];
@@ -43,6 +54,22 @@ test('phrase syllable capture requires override for a saved protected word', () 
   assert.throws(() => variant.operate(draft, op), { code: 'MANUAL_PROTECTED' });
   const edited = variant.operate(draft, op, true);
   assert.equal(edited.score.phrases[0].words[0].endMs, end1);
+});
+
+test('phrase performance protects each targeted word and requires explicit unlock for old locked children', () => {
+  let base = make('[00:20.00]hour now');
+  const phrase = base.phrases[0], word = phrase.words[0];
+  word.syllables = [{ id: 'hour-old', text: word.text, startMs: word.startMs, endMs: word.endMs, provenance: 'manual', locked: true, effects: [{ type: 'pulse', strength: 0.3 }] }];
+  const draft = variant.merge(base, make('[00:23.00]hour now', 'b'));
+  const performance = { type: 'setPhraseSyllablePerformance', phraseId: phrase.id, words: [{ wordId: word.id, syllables: [{ id: 'hour-old', text: word.text, startMs: phrase.startMs, endMs: word.endMs }] }] };
+  assert.throws(() => variant.operate(draft, performance), { code: 'MANUAL_PROTECTED' });
+  assert.throws(() => variant.operate(draft, performance, true), { code: 'LOCKED' });
+  const edited = variant.operate(draft, [
+    { type: 'setSyllableLock', syllableId: 'hour-old', locked: false },
+    performance,
+  ], true);
+  assert.deepEqual(edited.score.phrases[0].words[0].syllables[0].effects, [{ type: 'pulse', strength: 0.3 }]);
+  assert.equal(edited.score.phrases[0].words[0].syllables[0].locked, true);
 });
 
 test('preview lane changes are allowed for a locked phrase and preserve all timing and word state', () => {

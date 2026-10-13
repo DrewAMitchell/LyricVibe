@@ -139,6 +139,53 @@ test('phrase syllable capture rejects incomplete, extra, reordered, zero-length,
   }
 });
 
+test('phrase syllable performance updates only observed words, keeps phrase bounds and derives word timing from taps', () => {
+  const base = makeScore('[00:01.00]one two skip tail\n[00:05.00]');
+  const phrase = base.phrases[0], [one, two, skip, tail] = phrase.words;
+  one.effects = [{ type: 'pulse', strength: 0.4 }];
+  one.syllables = [{ id: 'old-one', text: 'one', startMs: one.startMs, endMs: one.endMs, provenance: 'manual', locked: true, effects: [{ type: 'tilt', strength: 0.2 }] }];
+  two.syllables = [{ id: 'old-two', text: 'two', startMs: two.startMs, endMs: two.endMs, provenance: 'manual', locked: true, effects: [] }];
+  score.validateScore(base);
+  const untouched = structuredClone(skip), oldBounds = [phrase.startMs, phrase.endMs];
+  errorCode(() => score.applyOperation(base, { type: 'setPhraseSyllablePerformance', phraseId: phrase.id, words: [{ wordId: one.id, syllables: [{ id: 'old-one', text: 'one', startMs: phrase.startMs, endMs: phrase.startMs + 100 }] }] }, base.revision), 'LOCKED');
+  const unlockedOne = score.applyOperation(base, { type: 'setSyllableLock', syllableId: 'old-one', locked: false }, base.revision);
+  const unlocked = score.applyOperation(unlockedOne, { type: 'setSyllableLock', syllableId: 'old-two', locked: false }, unlockedOne.revision);
+  const next = score.applyOperation(unlocked, { type: 'setPhraseSyllablePerformance', phraseId: phrase.id, words: [
+    { wordId: one.id, syllables: [{ id: 'old-one', text: 'one', startMs: phrase.startMs, endMs: phrase.startMs + 400 }] },
+    { wordId: two.id, spokenText: 'tu', syllables: [{ id: 'two-t', text: 't', startMs: phrase.startMs + 400, endMs: phrase.startMs + 650 }, { id: 'two-u', text: 'u', startMs: phrase.startMs + 650, endMs: phrase.startMs + 900 }] },
+    { wordId: tail.id, syllables: [{ id: 'tail-all', text: 'tail', startMs: phrase.endMs - 700, endMs: phrase.endMs }] },
+  ] }, unlocked.revision);
+  const result = next.phrases[0];
+  assert.deepEqual([result.startMs, result.endMs], oldBounds);
+  assert.deepEqual(result.words[2], untouched);
+  assert.deepEqual([result.words[0].id, result.words[0].text, result.words[0].startMs, result.words[0].endMs, result.words[0].locked], [one.id, 'one', phrase.startMs, phrase.startMs + 400, true]);
+  assert.deepEqual(result.words[0].effects, one.effects);
+  assert.deepEqual(result.words[0].syllables[0].effects, [{ type: 'tilt', strength: 0.2 }]);
+  assert.deepEqual([result.words[1].text, result.words[1].spokenText, result.words[1].startMs, result.words[1].endMs], ['two', 'tu', phrase.startMs + 400, phrase.startMs + 900]);
+  assert.ok(result.words[0].syllables.concat(result.words[1].syllables, result.words[3].syllables).every(item => item.provenance === 'manual' && item.locked));
+  assert.equal(result.words[3].syllables.at(-1).endMs, phrase.endMs);
+});
+
+test('phrase syllable performance rejects invalid ownership and syllables atomically', () => {
+  const base = makeScore('[00:01.00]one two three\n[00:04.00]'), phrase = base.phrases[0], [one, two, three] = phrase.words;
+  const op = words => ({ type: 'setPhraseSyllablePerformance', phraseId: phrase.id, words });
+  const validOne = { wordId: one.id, syllables: [{ id: 'x', text: 'one', startMs: phrase.startMs, endMs: phrase.startMs + 100 }] };
+  const validTwo = { wordId: two.id, syllables: [{ id: 'y', text: 'two', startMs: phrase.startMs + 100, endMs: phrase.startMs + 200 }] };
+  const invalidBatches = [
+    [validTwo, validOne],
+    [validOne, { ...validTwo, wordId: one.id }],
+    [validOne, { ...validTwo, syllables: [{ id: 'x', text: 'two', startMs: phrase.startMs + 100, endMs: phrase.startMs + 200 }] }],
+    [validOne, { ...validTwo, syllables: [{ id: 'z', text: 'bad', startMs: phrase.startMs + 100, endMs: phrase.startMs + 200 }] }],
+    [validOne, { wordId: three.id, syllables: [{ id: 'z', text: 'three', startMs: phrase.endMs, endMs: phrase.endMs }] }],
+    [validOne, { wordId: three.id, syllables: [{ id: 'z', text: 'three', startMs: phrase.endMs, endMs: phrase.endMs + 1 }] }],
+  ];
+  for (const words of invalidBatches) {
+    const snapshot = structuredClone(base);
+    assert.throws(() => score.applyOperation(base, op(words), base.revision));
+    assert.deepEqual(base, snapshot);
+  }
+});
+
 test('exports global and CommonJS APIs and resolves only exact YouTube video identities', () => {
   assert.equal(globalThis.LvScore, score);
   assert.equal(score.mediaKey({ url: 'https://www.youtube.com/watch?v=FIXTURE0001&t=3' }), 'youtube:FIXTURE0001');

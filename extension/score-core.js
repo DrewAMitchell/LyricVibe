@@ -435,6 +435,48 @@
         word.provenance = "manual"; word.locked = true;
       }
       if (op.marks.at(-1).endMs !== phrase.endMs) fail("INVALID_TIME", "the final syllable must end at the phrase boundary");
+    } else if (op.type === "setPhraseSyllablePerformance") {
+      const phrase = next.phrases.find(item => item.id === op.phraseId);
+      if (!phrase) fail("UNKNOWN_ID", `unknown phrase id: ${op.phraseId}`);
+      if (!Array.isArray(op.words) || !op.words.length || op.words.length > phrase.words.length) fail("INVALID_OPERATION", "words must be a nonempty bounded list of observed phrase words");
+      const seenWords = new Set(), seenChildren = new Set();
+      const indices = new Map(phrase.words.map((word, index) => [word.id, index]));
+      let previousWordIndex = -1, previousEndMs = phrase.startMs;
+      const pending = [];
+      for (const submitted of op.words) {
+        if (!submitted || typeof submitted.wordId !== "string" || seenWords.has(submitted.wordId)) fail("INVALID_OPERATION", "each observed word must occur once");
+        const wordIndex = indices.get(submitted.wordId);
+        if (wordIndex === undefined) fail("UNKNOWN_ID", `unknown word id: ${submitted.wordId}`);
+        if (wordIndex <= previousWordIndex) fail("INVALID_OPERATION", "observed words must follow phrase source order");
+        const word = phrase.words[wordIndex];
+        if (word.excluded === true) fail("INVALID_OPERATION", "excluded words cannot receive phrase performance timings");
+        if ((word.syllables || []).some(syllable => syllable.locked)) fail("LOCKED", "unlock existing syllables before replacing their performance timings");
+        if (!Array.isArray(submitted.syllables) || !submitted.syllables.length || submitted.syllables.length > 128) fail("INVALID_SYLLABLES", "each observed word needs one to 128 syllables");
+        if (submitted.spokenText !== undefined && submitted.spokenText !== null && (typeof submitted.spokenText !== "string" || !submitted.spokenText.trim() || submitted.spokenText.length > 256 || submitted.spokenText.includes("|"))) fail("INVALID_SYLLABLES", "spokenText must be nonempty, at most 256 characters, and contain no | separator");
+        const spokenText = submitted.spokenText === undefined ? word.spokenText : submitted.spokenText;
+        if (submitted.syllables.map(item => typeof item?.text === "string" ? item.text : "").join("") !== (spokenText || word.text)) fail("INVALID_SYLLABLES", "syllable text must concatenate exactly to the spoken word");
+        const oldSyllables = new Map((word.syllables || []).map(syllable => [syllable.id, syllable]));
+        const syllables = [];
+        for (const item of submitted.syllables) {
+          if (!item || typeof item.id !== "string" || !item.id || seenChildren.has(item.id) || typeof item.text !== "string" || !item.text) fail("INVALID_SYLLABLES", "each new syllable needs a unique ID and nonempty text");
+          if (!Number.isSafeInteger(item.startMs) || !Number.isSafeInteger(item.endMs) || item.startMs < phrase.startMs || item.endMs > phrase.endMs || item.endMs <= item.startMs) fail("INVALID_TIME", "performance syllables must be positive whole-millisecond intervals inside the phrase");
+          if (item.startMs < previousEndMs) fail("INVALID_TIME", "performance timings must follow word and syllable source order without overlap");
+          const prior = oldSyllables.get(item.id);
+          const syllable = {
+            ...(prior ? clone(prior) : {}), id: item.id, text: item.text, startMs: item.startMs, endMs: item.endMs,
+            provenance: "manual", locked: true,
+            effects: item.effects === undefined ? clone(prior?.effects || []) : clone(item.effects),
+          };
+          syllables.push(syllable); seenChildren.add(item.id); previousEndMs = item.endMs;
+        }
+        pending.push({ word, syllables, spokenText: submitted.spokenText, startMs: syllables[0].startMs, endMs: syllables.at(-1).endMs });
+        seenWords.add(submitted.wordId); previousWordIndex = wordIndex;
+      }
+      for (const { word, syllables, spokenText, startMs, endMs } of pending) {
+        word.startMs = startMs; word.endMs = endMs; word.provenance = "manual"; word.locked = true; word.syllables = syllables;
+        if (spokenText === null) delete word.spokenText;
+        else if (spokenText !== undefined) word.spokenText = spokenText;
+      }
     } else if (op.type === "setSyllableLock") {
       const { syllable } = locateSyllable(next, op.syllableId);
       if (typeof op.locked !== "boolean") fail("INVALID_OPERATION", "locked must be boolean");

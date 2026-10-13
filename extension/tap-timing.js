@@ -14,8 +14,8 @@
     const mode = options.mode === undefined ? 'word' : options.mode;
     if (mode !== 'word' && mode !== 'phrase' && mode !== 'syllable') fail('INVALID_MODE', 'Mode must be word, phrase, or syllable.');
     const cadence = options.cadence === undefined ? 'pairs' : options.cadence;
-    if (cadence !== 'pairs' && cadence !== 'flow' && cadence !== 'subdivide' && cadence !== 'entrances' && cadence !== 'word-frames') fail('INVALID_CADENCE', 'Cadence must be pairs, flow, subdivide, entrances, or word-frames.');
-    if (['subdivide', 'entrances', 'word-frames'].includes(cadence) && mode !== 'syllable') fail('INVALID_CADENCE', 'Subdivide, entrances, and word-frames cadences require syllable mode.');
+    if (cadence !== 'pairs' && cadence !== 'flow' && cadence !== 'subdivide' && cadence !== 'entrances' && cadence !== 'word-frames' && cadence !== 'phrase-stream') fail('INVALID_CADENCE', 'Cadence must be pairs, flow, subdivide, entrances, word-frames, or phrase-stream.');
+    if (['subdivide', 'entrances', 'word-frames', 'phrase-stream'].includes(cadence) && mode !== 'syllable') fail('INVALID_CADENCE', 'Subdivide, entrances, word-frames, and phrase-stream cadences require syllable mode.');
     const bpm = options.bpm === undefined || options.bpm === null ? null : options.bpm;
     if (bpm !== null && !(typeof bpm === 'number' && Number.isFinite(bpm) && bpm >= 20 && bpm <= 400)) {
       fail('INVALID_BPM', 'BPM must be between 20 and 400.');
@@ -48,6 +48,31 @@
         wordIds.add(unit.wordId);
       }
     }
+    if (cadence === 'phrase-stream') {
+      const phraseFrames = new Map();
+      const wordIds = new Set();
+      let currentPhraseId = null;
+      const closedPhraseIds = new Set();
+      for (const unit of safeUnits) {
+        if (typeof unit.phraseId !== 'string' || !unit.phraseId.trim() ||
+            !Number.isSafeInteger(unit.expectedCount) || unit.expectedCount < 1 ||
+            unit.maxMs <= unit.minMs || wordIds.has(unit.wordId)) {
+          fail('INVALID_UNITS', 'Phrase-stream units need unique words, a phrase id, positive phrase bounds, and expectedCount >= 1.');
+        }
+        wordIds.add(unit.wordId);
+        if (currentPhraseId !== unit.phraseId) {
+          if (closedPhraseIds.has(unit.phraseId)) fail('INVALID_UNITS', 'Words from each phrase must be contiguous.');
+          if (currentPhraseId !== null) closedPhraseIds.add(currentPhraseId);
+          currentPhraseId = unit.phraseId;
+        }
+        const frame = phraseFrames.get(unit.phraseId);
+        if (frame && (frame.minMs !== unit.minMs || frame.maxMs !== unit.maxMs)) {
+          fail('INVALID_UNITS', 'Words in one phrase must share the same phrase frame.');
+        }
+        if (!frame) phraseFrames.set(unit.phraseId, { phraseId: unit.phraseId,
+          minMs: unit.minMs, maxMs: unit.maxMs });
+      }
+    }
     if (cadence === 'subdivide' && safeUnits.length === 1) {
       return { status: 'complete', index: 1, pendingStartMs: null,
         marks: [markEntry(safeUnits[0], safeUnits[0].minMs, safeUnits[0].maxMs)],
@@ -61,7 +86,8 @@
       originMs: ['subdivide', 'entrances'].includes(cadence) ? safeUnits[0].minMs : null,
       ...(cadence === 'entrances' ? { entranceCount: 0 } : {}),
       ...(cadence === 'word-frames' ? { wordFrameTapCounts: {} } : {}),
-      ...(['flow', 'subdivide', 'entrances', 'word-frames'].includes(cadence) ? { actionHistory: [] } : {}),
+      ...(cadence === 'phrase-stream' ? { activePhraseId: null, acknowledgedPhraseIds: [], wordTapCounts: {}, openTailId: null } : {}),
+      ...(['flow', 'subdivide', 'entrances', 'word-frames', 'phrase-stream'].includes(cadence) ? { actionHistory: [] } : {}),
     };
   }
 
@@ -73,7 +99,7 @@
     return snapshot;
   }
   function withFlowHistory(previous, next) {
-    if (!['flow', 'subdivide', 'entrances', 'word-frames'].includes(previous.cadence)) return next;
+    if (!['flow', 'subdivide', 'entrances', 'word-frames', 'phrase-stream'].includes(previous.cadence)) return next;
     const history = [...(previous.actionHistory || []), flowSnapshot(previous)].slice(-FLOW_HISTORY_LIMIT);
     return { ...next, actionHistory: history };
   }
@@ -190,6 +216,158 @@
     return withFlowHistory(take, next);
   }
 
+  function phraseStreamGroups(units) {
+    const groups = [];
+    for (let index = 0; index < units.length; index++) {
+      const unit = units[index];
+      let group = groups[groups.length - 1];
+      if (!group || group.phraseId !== unit.phraseId) {
+        group = { phraseId: unit.phraseId, minMs: unit.minMs, maxMs: unit.maxMs,
+          startIndex: index, endIndex: index };
+        groups.push(group);
+      } else group.endIndex = index;
+    }
+    return groups;
+  }
+
+  function phraseGroupById(take, phraseId) {
+    return phraseStreamGroups(take.units).find(group => group.phraseId === phraseId);
+  }
+
+  function markPhraseStream(take, scoreMs) {
+    const matches = phraseStreamGroups(take.units).filter(group => scoreMs >= group.minMs && scoreMs < group.maxMs);
+    if (matches.length !== 1) fail(matches.length ? 'AMBIGUOUS_PHRASE' : 'OUT_OF_BOUNDS', matches.length ?
+      'Tap belongs to overlapping phrase frames.' : 'Tap is outside every phrase frame or in a rest.');
+    if (take.lastMs !== null && scoreMs < take.lastMs) fail('NON_MONOTONIC_TIME', 'Phrase-stream taps must follow source-time order.');
+    const phrase = matches[0];
+    const previousTake = take;
+    const record = next => withFlowHistory(previousTake, next);
+
+    // The first press in each phrase acknowledges its fixed start and creates
+    // the first full-frame syllable tail in the same action.
+    const acknowledgedPhraseIds = take.acknowledgedPhraseIds || [];
+    const selectedIndex = take.activePhraseId === phrase.phraseId && take.index >= phrase.startIndex && take.index <= phrase.endIndex ?
+      take.index : phrase.startIndex;
+    if (take.activePhraseId !== phrase.phraseId) {
+      take = { ...take, activePhraseId: phrase.phraseId, index: selectedIndex,
+        pendingStartMs: phrase.minMs, openTailId: null,
+        acknowledgedPhraseIds: acknowledgedPhraseIds.includes(phrase.phraseId) ? acknowledgedPhraseIds :
+          [...acknowledgedPhraseIds, phrase.phraseId] };
+    } else if (!acknowledgedPhraseIds.includes(phrase.phraseId)) {
+      take = { ...take, acknowledgedPhraseIds: [...acknowledgedPhraseIds, phrase.phraseId] };
+    }
+
+    const unitIndex = take.index;
+    const unit = take.units[unitIndex];
+    if (!unit || unit.phraseId !== phrase.phraseId || unitIndex < phrase.startIndex || unitIndex > phrase.endIndex) {
+      fail('INVALID_CURSOR', 'Phrase-stream cursor must identify a word in the active phrase.');
+    }
+    const marks = take.marks.map(item => ({ ...item }));
+    const latestMark = marks.length ? marks[marks.length - 1] : null;
+    if (latestMark) {
+      const latestOwnerIndex = take.units.findIndex(item => item.wordId === latestMark.wordId);
+      if (unitIndex < latestOwnerIndex) fail('NON_MONOTONIC_OWNER', 'A tap cannot be assigned before the latest owner.');
+    }
+    let lastPhraseMark = -1;
+    for (let i = marks.length - 1; i >= 0; i--) {
+      if (marks[i].phraseId === phrase.phraseId) { lastPhraseMark = i; break; }
+    }
+    if (lastPhraseMark < 0) {
+      const actualCount = (take.wordTapCounts?.[unit.wordId] || 0) + 1;
+      const id = `${unit.wordId}-syllable-${actualCount}`;
+      marks.push({ id, syllableId: id,
+        wordId: unit.wordId, phraseId: unit.phraseId, startMs: phrase.minMs, endMs: phrase.maxMs });
+      const wordTapCounts = { ...(take.wordTapCounts || {}), [unit.wordId]: actualCount };
+      let nextIndex = unitIndex;
+      if (actualCount >= unit.expectedCount && unitIndex < phrase.endIndex) nextIndex++;
+      return record({ ...take, marks, wordTapCounts, index: nextIndex, openTailId: id,
+        pendingStartMs: phrase.minMs, lastMs: scoreMs, status: 'armed' });
+    } else {
+      const previous = marks[lastPhraseMark];
+      if (scoreMs <= previous.startMs || scoreMs >= previous.endMs) {
+        fail('INVALID_INTERVAL', 'Phrase-stream taps must split a positive trailing interval.');
+      }
+      previous.endMs = scoreMs;
+      let count = 0;
+      for (const item of marks) if (item.wordId === unit.wordId) count++;
+      const id = `${unit.wordId}-syllable-${count + 1}`;
+      marks.push({ id, syllableId: id, wordId: unit.wordId, phraseId: unit.phraseId,
+        startMs: scoreMs, endMs: phrase.maxMs });
+      const wordTapCounts = { ...(take.wordTapCounts || {}) };
+      const actualCount = (wordTapCounts[unit.wordId] || 0) + 1;
+      wordTapCounts[unit.wordId] = actualCount;
+      let nextIndex = unitIndex;
+      if (actualCount >= unit.expectedCount && unitIndex < phrase.endIndex) nextIndex++;
+      const next = { ...take, marks, wordTapCounts, index: nextIndex, openTailId: id,
+        pendingStartMs: scoreMs, lastMs: scoreMs, status: 'armed' };
+      return record(next);
+    }
+  }
+
+  function moveCursor(take, direction, scoreMs) {
+    if (!take || !['armed', 'complete', 'stopped'].includes(take.status)) fail('INVALID_TAKE', 'Provide a take returned by begin.');
+    if (take.cadence !== 'phrase-stream') fail('CURSOR_UNSUPPORTED', 'Live cursor movement is supported only for phrase-stream cadence.');
+    if (direction !== -1 && direction !== 1) fail('INVALID_DIRECTION', 'Cursor direction must be -1 or 1.');
+    let baseIndex = take.index;
+    let phrase = phraseGroupById(take, take.activePhraseId);
+    if (scoreMs !== undefined) {
+      if (!integerTime(scoreMs)) fail('INVALID_TIME', 'Cursor source time must be a nonnegative integer number of milliseconds.');
+      const matches = phraseStreamGroups(take.units).filter(group => scoreMs >= group.minMs && scoreMs < group.maxMs);
+      if (matches.length !== 1) fail(matches.length ? 'AMBIGUOUS_PHRASE' : 'OUT_OF_BOUNDS', matches.length ?
+        'Cursor time belongs to overlapping phrase frames.' : 'Cursor time is outside every phrase frame or in a rest.');
+      phrase = matches[0];
+      if (phrase.phraseId !== take.activePhraseId) baseIndex = phrase.startIndex;
+    }
+    if (!phrase) fail('NO_ACTIVE_PHRASE', 'A phrase must be active before moving its cursor.');
+    const nextIndex = baseIndex + direction;
+    if (nextIndex < phrase.startIndex || nextIndex > phrase.endIndex) fail('CURSOR_BOUNDS', 'Cursor cannot leave the active phrase.');
+    const lastMark = take.marks.length ? take.marks[take.marks.length - 1] : null;
+    if (lastMark) {
+      const lastOwnerIndex = take.units.findIndex(unit => unit.wordId === lastMark.wordId);
+      if (nextIndex < lastOwnerIndex) fail('NON_MONOTONIC_OWNER', 'Cursor cannot assign the next tap before the latest owner.');
+    }
+    const phraseChanged = phrase.phraseId !== take.activePhraseId;
+    return withFlowHistory(take, { ...take, activePhraseId: phrase.phraseId, index: nextIndex,
+      ...(phraseChanged ? { pendingStartMs: phrase.minMs, openTailId: null } : {}) });
+  }
+
+  function reassignLast(take, direction) {
+    if (!take || !['armed', 'complete', 'stopped'].includes(take.status)) fail('INVALID_TAKE', 'Provide a take returned by begin.');
+    if (take.cadence !== 'phrase-stream') fail('REASSIGN_UNSUPPORTED', 'Last-tap reassignment is supported only for phrase-stream cadence.');
+    if (direction !== -1 && direction !== 1) fail('INVALID_DIRECTION', 'Reassignment direction must be -1 or 1.');
+    const lastIndex = take.marks.length - 1;
+    const last = take.marks[lastIndex];
+    if (!last) fail('NO_RECENT_TAP', 'There is no syllable tap to reassign.');
+    const group = phraseGroupById(take, last.phraseId);
+    const ownerIndex = take.units.findIndex(unit => unit.wordId === last.wordId);
+    const targetIndex = ownerIndex + direction;
+    if (targetIndex < group.startIndex || targetIndex > group.endIndex) fail('CURSOR_BOUNDS', 'Reassignment cannot leave the active phrase.');
+    if (lastIndex > 0 && take.marks[lastIndex - 1].phraseId === last.phraseId) {
+      const previousOwnerIndex = take.units.findIndex(unit => unit.wordId === take.marks[lastIndex - 1].wordId);
+      if (targetIndex < previousOwnerIndex) fail('NON_MONOTONIC_OWNER', 'Reassignment would put a tap before the previous owner.');
+    }
+
+    const marks = take.marks.map(item => ({ ...item }));
+    marks[lastIndex].wordId = take.units[targetIndex].wordId;
+    const wordTapCounts = {};
+    const counters = {};
+    for (const item of marks) {
+      const count = (counters[item.wordId] || 0) + 1;
+      counters[item.wordId] = count;
+      item.id = `${item.wordId}-syllable-${count}`;
+      item.syllableId = item.id;
+      wordTapCounts[item.wordId] = count;
+    }
+    const newOwner = take.units[targetIndex];
+    let index = take.index;
+    if (last.phraseId === take.activePhraseId) {
+      index = targetIndex;
+      if ((wordTapCounts[newOwner.wordId] || 0) >= newOwner.expectedCount && targetIndex < group.endIndex) index++;
+    }
+    const openTailId = take.openTailId === last.id ? marks[lastIndex].id : take.openTailId;
+    return withFlowHistory(take, { ...take, marks, wordTapCounts, index, openTailId });
+  }
+
   function mark(take, scoreMs, options = {}) {
     if (!take || !['armed', 'complete', 'stopped'].includes(take.status)) fail('INVALID_TAKE', 'Provide a take returned by begin.');
     if (!options || typeof options !== 'object' || Array.isArray(options)) fail('INVALID_OPTIONS', 'Mark options must be an object.');
@@ -197,6 +375,7 @@
     if (repeat) return take;
     if (!integerTime(scoreMs)) fail('INVALID_TIME', 'Tap time must be a nonnegative integer number of milliseconds.');
     if (take.status !== 'armed') fail('TAKE_CLOSED', 'This take is no longer accepting taps.');
+    if (take.cadence === 'phrase-stream') return markPhraseStream(take, scoreMs);
     if (take.cadence === 'word-frames') return markWordFrame(take, scoreMs);
     if (take.cadence === 'entrances') return markEntrance(take, scoreMs);
     const unit = take.units[take.index];
@@ -254,7 +433,7 @@
     if (options.repeat === true) return take;
     if (!integerTime(scoreMs)) fail('INVALID_TIME', 'Release time must be a nonnegative integer number of milliseconds.');
     if (take.status !== 'armed') fail('TAKE_CLOSED', 'This take is no longer accepting taps.');
-    if (['subdivide', 'entrances'].includes(take.cadence)) fail('RELEASE_UNSUPPORTED', 'This cadence closes at syllable entrances and the parent end.');
+    if (['subdivide', 'entrances', 'phrase-stream'].includes(take.cadence)) fail('RELEASE_UNSUPPORTED', 'This cadence closes at syllable entrances and the parent end.');
     if (take.pendingStartMs === null) fail('NO_PENDING_START', 'There is no open unit to release.');
     const unit = take.units[take.index];
     if (!unit) fail('TAKE_CLOSED', 'Every timing unit is already complete.');
@@ -269,11 +448,11 @@
 
   function undo(take) {
     if (!take || !['armed', 'complete', 'stopped'].includes(take.status)) fail('INVALID_TAKE', 'Provide a take returned by begin.');
-    if (['flow', 'subdivide', 'entrances', 'word-frames'].includes(take.cadence) && take.actionHistory && take.actionHistory.length) {
+    if (['flow', 'subdivide', 'entrances', 'word-frames', 'phrase-stream'].includes(take.cadence) && take.actionHistory && take.actionHistory.length) {
       const previous = take.actionHistory[take.actionHistory.length - 1];
       return { ...previous, actionHistory: take.actionHistory.slice(0, -1) };
     }
-    if (take.cadence === 'word-frames') return take;
+    if (['word-frames', 'phrase-stream'].includes(take.cadence)) return take;
     if (take.cadence === 'subdivide' && take.units.length === 1) return take;
     if (['subdivide', 'entrances'].includes(take.cadence)) return take;
     if (take.pendingStartMs !== null) {
@@ -310,7 +489,7 @@
   function stop(take) {
     if (!take || !['armed', 'complete', 'stopped'].includes(take.status)) fail('INVALID_TAKE', 'Provide a take returned by begin.');
     if (take.status === 'stopped' && take.pendingStartMs === null) return take;
-    if (take.cadence === 'word-frames') {
+    if (['word-frames', 'phrase-stream'].includes(take.cadence)) {
       return { ...take, pendingStartMs: null, status: 'stopped' };
     }
     if (take.cadence === 'entrances') {
@@ -323,6 +502,141 @@
     return { ...take, pendingStartMs: null, status: 'stopped',
       lastMs: take.marks.length ? take.marks[take.marks.length - 1].endMs : null,
       originMs: take.marks.length ? take.originMs : null };
+  }
+
+  function restoreWordFrameTake(snapshot) {
+    const invalid = message => fail('INVALID_SNAPSHOT', message);
+    const plainObject = value => value && typeof value === 'object' && !Array.isArray(value) &&
+      (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+    const allowedKeys = new Set(['status', 'index', 'pendingStartMs', 'marks', 'lastMs', 'units',
+      'mode', 'cadence', 'bpm', 'originMs', 'wordFrameTapCounts', 'actionHistory', 'stoppedScoreMs']);
+    const requiredKeys = ['status', 'index', 'pendingStartMs', 'marks', 'lastMs', 'units',
+      'mode', 'cadence', 'bpm', 'originMs', 'wordFrameTapCounts'];
+    const sameJson = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+
+    if (!plainObject(snapshot) || snapshot.status !== 'stopped' || snapshot.mode !== 'syllable' ||
+        snapshot.cadence !== 'word-frames' || !Array.isArray(snapshot.units) || snapshot.units.length > 5000 ||
+        !Array.isArray(snapshot.marks) || snapshot.marks.length > 5000 ||
+        !Array.isArray(snapshot.actionHistory) || snapshot.actionHistory.length > FLOW_HISTORY_LIMIT) {
+      invalid('Only a bounded stopped word-frames syllable take can be restored.');
+    }
+
+    function validateState(state, allowedStatuses, includeHistory) {
+      if (!plainObject(state) || !allowedStatuses.includes(state.status)) invalid('Take status or snapshot shape is invalid.');
+      if (requiredKeys.some(key => !Object.prototype.hasOwnProperty.call(state, key)) ||
+          includeHistory && !Object.prototype.hasOwnProperty.call(state, 'actionHistory')) invalid('Take is missing required state metadata.');
+      for (const key of Object.keys(state)) {
+        if (!allowedKeys.has(key) || (!includeHistory && ['actionHistory', 'stoppedScoreMs'].includes(key))) invalid('Take contains unknown or nested state metadata.');
+      }
+      if (state.mode !== 'syllable' || state.cadence !== 'word-frames' || !Array.isArray(state.units) ||
+          state.units.length === 0 || state.units.length > 5000 || !Array.isArray(state.marks) || state.marks.length > 5000 ||
+          state.pendingStartMs !== null || state.originMs !== null ||
+          !(state.bpm === null || typeof state.bpm === 'number' && Number.isFinite(state.bpm) && state.bpm >= 20 && state.bpm <= 400) ||
+          !Array.isArray(state.actionHistory) && includeHistory) {
+        invalid('Word-frame take metadata is invalid.');
+      }
+      let initial;
+      try {
+        initial = begin(state.units, { mode: state.mode, cadence: state.cadence, bpm: state.bpm });
+      } catch (_) {
+        invalid('Word-frame units or BPM are invalid.');
+      }
+      if (!sameJson(initial.units, state.units)) invalid('Word-frame units must retain their validated source shape.');
+      if (!Number.isSafeInteger(state.index) || state.index < 0 || state.index >= state.units.length) invalid('Take cursor is invalid.');
+      if (!plainObject(state.wordFrameTapCounts)) invalid('Word-frame tap counts are invalid.');
+
+      const unitByWord = new Map(state.units.map((unit, index) => [unit.wordId, { unit, index }]));
+      const countByWord = Object.create(null);
+      const seenWordGroups = new Set();
+      let currentWordId = null;
+      let currentUnit = null;
+      let previousEndMs = null;
+      let previousUnitIndex = -1;
+      let previousUnitMinMs = null;
+      for (const mark of state.marks) {
+        if (!plainObject(mark)) invalid('Mark shape is invalid.');
+        const markKeys = Object.keys(mark);
+        if (markKeys.some(key => !['id', 'syllableId', 'wordId', 'phraseId', 'startMs', 'endMs'].includes(key)) ||
+            typeof mark.id !== 'string' || typeof mark.syllableId !== 'string' || mark.syllableId !== mark.id ||
+            typeof mark.wordId !== 'string' || !integerTime(mark.startMs) || !integerTime(mark.endMs) || mark.endMs <= mark.startMs) {
+          invalid('Mark identity or interval is invalid.');
+        }
+        const matched = unitByWord.get(mark.wordId);
+        if (!matched) invalid('Mark refers to an unknown word.');
+        const { unit, index } = matched;
+        if (Object.prototype.hasOwnProperty.call(unit, 'phraseId') ? mark.phraseId !== unit.phraseId :
+            Object.prototype.hasOwnProperty.call(mark, 'phraseId')) invalid('Mark phrase id does not match its word frame.');
+        if (mark.startMs < unit.minMs || mark.endMs > unit.maxMs) invalid('Mark is outside its word frame.');
+        const count = (countByWord[mark.wordId] || 0) + 1;
+        if (mark.id !== `${mark.wordId}-syllable-${count}`) invalid('Dynamic syllable ids are invalid.');
+        countByWord[mark.wordId] = count;
+
+        if (mark.wordId !== currentWordId) {
+          if (seenWordGroups.has(mark.wordId)) invalid('A word appears in multiple mark groups.');
+          if (currentUnit && previousEndMs !== currentUnit.maxMs) invalid('Word syllables do not partition the full word frame.');
+          if (index <= previousUnitIndex || previousUnitMinMs !== null &&
+              (unit.minMs < previousUnitMinMs || unit.maxMs < currentUnit.maxMs)) {
+            invalid('Word groups do not follow unit and source order.');
+          }
+          if (mark.startMs !== unit.minMs) invalid('The first syllable must start at the word-frame start.');
+          seenWordGroups.add(mark.wordId);
+          currentWordId = mark.wordId;
+          currentUnit = unit;
+          previousUnitIndex = index;
+          previousUnitMinMs = unit.minMs;
+        } else if (mark.startMs !== previousEndMs) invalid('Syllable marks must form a gapless word partition.');
+        previousEndMs = mark.endMs;
+      }
+      if (currentUnit && previousEndMs !== currentUnit.maxMs) invalid('Word syllables do not partition the full word frame.');
+
+      const countKeys = Object.keys(state.wordFrameTapCounts);
+      if (countKeys.length !== Object.keys(countByWord).length ||
+          countKeys.some(wordId => !Object.prototype.hasOwnProperty.call(countByWord, wordId) ||
+            state.wordFrameTapCounts[wordId] !== countByWord[wordId]) ||
+          Object.values(state.wordFrameTapCounts).some(count => !Number.isSafeInteger(count) || count < 1)) {
+        invalid('Word-frame tap counts do not match the mark partitions.');
+      }
+      if (state.marks.length === 0) {
+        if (state.index !== 0 || state.lastMs !== null) invalid('An empty take must have cursor zero and no last source time.');
+      } else {
+        const latest = state.marks[state.marks.length - 1];
+        const latestUnit = unitByWord.get(latest.wordId);
+        if (state.index !== latestUnit.index || !integerTime(state.lastMs) ||
+            state.lastMs < latestUnit.unit.minMs || state.lastMs >= latestUnit.unit.maxMs ||
+            state.lastMs < latest.startMs) invalid('Cursor or last source time does not match the latest word frame.');
+      }
+      if (includeHistory && (!Array.isArray(state.actionHistory) || state.actionHistory.length > FLOW_HISTORY_LIMIT)) {
+        invalid('Undo history is not a bounded array.');
+      }
+      return { unitShape: initial.units };
+    }
+
+    const main = validateState(snapshot, ['stopped'], true);
+    const history = snapshot.actionHistory;
+    let previousHistoryMarkCount = null;
+    let previousHistoryLastMs = null;
+    for (const entry of history) {
+      if (!plainObject(entry) || Object.prototype.hasOwnProperty.call(entry, 'actionHistory')) invalid('Undo entries must be nonrecursive snapshots.');
+      const validated = validateState(entry, ['armed', 'stopped'], false);
+      if (entry.mode !== snapshot.mode || entry.cadence !== snapshot.cadence || entry.bpm !== snapshot.bpm ||
+          !sameJson(entry.units, snapshot.units) || !sameJson(validated.unitShape, main.unitShape)) {
+        invalid('Undo entries must use the same take configuration and units.');
+      }
+      if (previousHistoryMarkCount !== null && entry.marks.length !== previousHistoryMarkCount + 1) {
+        invalid('Undo entries are not a consecutive tap history.');
+      }
+      if (previousHistoryLastMs !== null && entry.lastMs !== null && entry.lastMs < previousHistoryLastMs) {
+        invalid('Undo entries do not preserve source-time order.');
+      }
+      previousHistoryMarkCount = entry.marks.length;
+      previousHistoryLastMs = entry.lastMs;
+    }
+    if (history.length && (snapshot.marks.length !== history[history.length - 1].marks.length + 1 ||
+        history.length > snapshot.marks.length)) invalid('Undo history does not lead to the current take.');
+    if (history.length && history[history.length - 1].lastMs !== null &&
+        snapshot.lastMs < history[history.length - 1].lastMs) invalid('Current source time precedes its undo history.');
+    try { JSON.stringify(snapshot); } catch (_) { invalid('Snapshot must be JSON-serializable.'); }
+    return clone(snapshot);
   }
 
   // Late keyboard corrections operate on the immutable completed mark list.
@@ -365,6 +679,31 @@
       }
       return { ...take, marks, actionHistory: [] };
     }
+    if (take.cadence === 'phrase-stream') {
+      if (change.edge === 'move') fail('ADJUST_UNSUPPORTED', 'Phrase-stream syllables can only adjust a shared boundary.');
+      const samePhrase = item => item.phraseId === current.phraseId;
+      const phrase = phraseGroupById(take, current.phraseId);
+      const phraseMarks = marks.filter(samePhrase);
+      const phrasePosition = phraseMarks.findIndex(item => item.id === current.id);
+      const neighbor = change.edge === 'start' ? phraseMarks[phrasePosition - 1] : phraseMarks[phrasePosition + 1];
+      if (!neighbor) {
+        if (delta !== 0) fail('OUT_OF_BOUNDS', 'Phrase endpoints are fixed.');
+      } else if (change.edge === 'start') {
+        neighbor.endMs += delta;
+        current.startMs += delta;
+      } else {
+        current.endMs += delta;
+        neighbor.startMs += delta;
+      }
+      const updatedPhraseMarks = marks.filter(samePhrase);
+      for (let i = 0; i < updatedPhraseMarks.length; i++) {
+        const item = updatedPhraseMarks[i];
+        if (item.startMs < phrase.minMs || item.endMs > phrase.maxMs) fail('OUT_OF_BOUNDS', 'Adjusted mark is outside its phrase bounds.');
+        if (item.endMs <= item.startMs) fail('INVALID_INTERVAL', 'Adjusted mark must have a positive interval.');
+        if (i && item.startMs !== updatedPhraseMarks[i - 1].endMs) fail('INVALID_INTERVAL', 'Phrase-stream marks must remain contiguous.');
+      }
+      return { ...take, marks, actionHistory: [] };
+    }
     const partitionedCadence = ['subdivide', 'entrances'].includes(take.cadence);
     if (partitionedCadence && delta !== 0 && (change.edge === 'start' && index === 0 || change.edge === 'end' && index === take.units.length - 1)) fail('OUT_OF_BOUNDS', 'The first syllable start and final release are fixed by the parent interval.');
     if (partitionedCadence && change.edge === 'move') fail('ADJUST_UNSUPPORTED', 'Move adjustment is not supported for partitioned syllables. Adjust a shared boundary instead.');
@@ -389,5 +728,5 @@
       actionHistory: take.actionHistory ? [] : undefined };
   }
 
-  return { begin, mark, release, undo, stop, adjust, reposition };
+  return { begin, mark, release, undo, stop, adjust, reposition, moveCursor, reassignLast, restoreWordFrameTake };
 });

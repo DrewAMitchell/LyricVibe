@@ -556,3 +556,193 @@ test('word-frames adjustment moves only an internal same-word boundary', () => {
   assert.throws(() => tap.adjust(take, { id: 'w0-syllable-1', edge: 'start', deltaMs: 1 }), { code: 'OUT_OF_BOUNDS' });
   assert.throws(() => tap.adjust(take, { id: 'w0-syllable-1', edge: 'move', deltaMs: 1 }), { code: 'ADJUST_UNSUPPORTED' });
 });
+
+const phraseStreamUnits = ({
+  firstStart = 100, firstEnd = 500, secondStart = 600, secondEnd = 900,
+  hourExpected = 1, partyExpected = 1, nextExpected = 1,
+} = {}) => [
+  { id: 'word-hour', wordId: 'hour', phraseId: 'p1', text: 'hour', minMs: firstStart, maxMs: firstEnd, expectedCount: hourExpected },
+  { id: 'word-party', wordId: 'party', phraseId: 'p1', text: 'party', minMs: firstStart, maxMs: firstEnd, expectedCount: partyExpected },
+  { id: 'word-next', wordId: 'next', phraseId: 'p2', text: 'next', minMs: secondStart, maxMs: secondEnd, expectedCount: nextExpected },
+];
+
+test('phrase-stream acknowledges phrase starts, follows expected counts, and keeps the final word open', () => {
+  let take = tap.begin(phraseStreamUnits(), { mode: 'syllable', cadence: 'phrase-stream' });
+  take = tap.mark(take, 120); // phrase acknowledgement and first syllable on one press
+  assert.equal(take.activePhraseId, 'p1');
+  assert.equal(take.index, 1);
+  assert.deepEqual(take.marks.map(({ wordId, startMs, endMs }) => [wordId, startMs, endMs]), [['hour', 100, 500]]);
+  take = tap.mark(take, 250);
+  assert.deepEqual(take.marks.map(({ wordId, startMs, endMs }) => [wordId, startMs, endMs]), [
+    ['hour', 100, 250], ['party', 250, 500],
+  ]);
+  assert.equal(take.index, 1);
+  take = tap.mark(take, 350);
+  assert.deepEqual(take.marks.map(({ id, startMs, endMs }) => [id, startMs, endMs]), [
+    ['hour-syllable-1', 100, 250], ['party-syllable-1', 250, 350], ['party-syllable-2', 350, 500],
+  ]);
+  assert.equal(take.index, 1);
+  assert.equal(take.status, 'armed');
+  take = tap.mark(take, 650); // entering p2 always selects its first word
+  assert.equal(take.activePhraseId, 'p2');
+  assert.equal(take.index, 2);
+  assert.equal(take.marks.at(-1).wordId, 'next');
+});
+
+test('phrase-stream uses unique half-open phrase membership and rejects rests or overlaps atomically', () => {
+  const adjacent = tap.begin(phraseStreamUnits({ firstEnd: 500, secondStart: 500 }),
+    { mode: 'syllable', cadence: 'phrase-stream' });
+  const entered = tap.mark(adjacent, 500);
+  assert.equal(entered.activePhraseId, 'p2');
+
+  let take = tap.begin(phraseStreamUnits(), { mode: 'syllable', cadence: 'phrase-stream' });
+  const beforeRest = JSON.stringify(take);
+  assert.throws(() => tap.mark(take, 550), { code: 'OUT_OF_BOUNDS' });
+  assert.equal(JSON.stringify(take), beforeRest);
+  const overlap = tap.begin(phraseStreamUnits({ secondStart: 400 }), { mode: 'syllable', cadence: 'phrase-stream' });
+  const beforeOverlap = JSON.stringify(overlap);
+  assert.throws(() => tap.mark(overlap, 450), { code: 'AMBIGUOUS_PHRASE' });
+  assert.equal(JSON.stringify(overlap), beforeOverlap);
+  assert.throws(() => tap.begin(phraseStreamUnits({ partyExpected: 0 }),
+    { mode: 'syllable', cadence: 'phrase-stream' }), { code: 'INVALID_UNITS' });
+});
+
+test('phrase-stream reassignLast repairs over-count and under-count ownership without moving boundaries', () => {
+  let overCount = tap.begin(phraseStreamUnits(), { mode: 'syllable', cadence: 'phrase-stream' });
+  overCount = tap.mark(overCount, 110);
+  overCount = tap.mark(overCount, 220); // expected cursor says party; this tap was actually hour
+  const edges = overCount.marks.map(({ startMs, endMs }) => [startMs, endMs]);
+  overCount = tap.reassignLast(overCount, -1);
+  assert.deepEqual(overCount.marks.map(({ id, wordId }) => [id, wordId]), [
+    ['hour-syllable-1', 'hour'], ['hour-syllable-2', 'hour'],
+  ]);
+  assert.deepEqual(overCount.marks.map(({ startMs, endMs }) => [startMs, endMs]), edges);
+  assert.equal(overCount.wordTapCounts.hour, 2);
+  assert.equal(overCount.wordTapCounts.party, undefined);
+  assert.equal(overCount.index, 1);
+
+  let underCount = tap.begin(phraseStreamUnits({ hourExpected: 2 }), { mode: 'syllable', cadence: 'phrase-stream' });
+  underCount = tap.mark(underCount, 110);
+  underCount = tap.mark(underCount, 220); // expected cursor says hour; this tap was actually party
+  underCount = tap.reassignLast(underCount, 1);
+  assert.deepEqual(underCount.marks.map(({ id, wordId }) => [id, wordId]), [
+    ['hour-syllable-1', 'hour'], ['party-syllable-1', 'party'],
+  ]);
+  assert.equal(underCount.wordTapCounts.hour, 1);
+  assert.equal(underCount.wordTapCounts.party, 1);
+  assert.equal(underCount.index, 1);
+});
+
+test('phrase-stream rejects non-monotone ownership and cursor movement preserves marks', () => {
+  const units = phraseStreamUnits({ partyExpected: 3 });
+  units.splice(2, 0, { id: 'word-third', wordId: 'third', phraseId: 'p1', text: 'third',
+    minMs: 100, maxMs: 500, expectedCount: 1 });
+  let take = tap.begin(units, { mode: 'syllable', cadence: 'phrase-stream' });
+  take = tap.mark(take, 110); // hour
+  take = tap.mark(take, 220); // party, count 1 of 3
+  take = tap.mark(take, 320); // party, count 2 of 3
+  const before = JSON.stringify(take);
+  assert.throws(() => tap.reassignLast(take, -1), { code: 'NON_MONOTONIC_OWNER' });
+  assert.equal(JSON.stringify(take), before);
+
+  const markCount = take.marks.length;
+  take = tap.moveCursor(take, 1);
+  take = tap.moveCursor(take, -1); // back to the latest owner, still monotone
+  assert.equal(take.index, 1);
+  assert.equal(take.marks.length, markCount);
+  const beforeBackward = JSON.stringify(take);
+  assert.throws(() => tap.moveCursor(take, -1), { code: 'NON_MONOTONIC_OWNER' });
+  assert.equal(JSON.stringify(take), beforeBackward);
+});
+
+test('phrase-stream clock-aware cursor movement selects the new phrase before an arrow and reassignment can target the prior tap', () => {
+  const units = phraseStreamUnits();
+  units.push({ id: 'word-next-two', wordId: 'next-two', phraseId: 'p2', text: 'again',
+    minMs: 600, maxMs: 900, expectedCount: 1 });
+  let take = tap.begin(units, { mode: 'syllable', cadence: 'phrase-stream' });
+  take = tap.mark(take, 110);
+  take = tap.mark(take, 220);
+  const priorMarks = structuredClone(take.marks);
+  take = tap.moveCursor(take, 1, 650);
+  assert.equal(take.activePhraseId, 'p2');
+  assert.equal(take.index, 3);
+  assert.deepEqual(take.marks, priorMarks);
+  take = tap.reassignLast(take, -1); // latest syllable tap still belongs to p1
+  assert.equal(take.activePhraseId, 'p2');
+  assert.equal(take.index, 3);
+  assert.equal(take.marks.at(-1).wordId, 'hour');
+  take = tap.mark(take, 660);
+  assert.equal(take.marks.at(-1).wordId, 'next-two');
+});
+
+test('phrase-stream undo, stop, and adjustment retain partial marks and fixed phrase endpoints', () => {
+  let take = tap.begin(phraseStreamUnits(), { mode: 'syllable', cadence: 'phrase-stream' });
+  take = tap.mark(take, 110); take = tap.mark(take, 220);
+  take = tap.undo(take);
+  assert.deepEqual(take.marks.map(({ startMs, endMs }) => [startMs, endMs]), [[100, 500]]);
+  assert.equal(take.marks.length, 1);
+  const stopped = tap.stop(take);
+  assert.equal(stopped.status, 'stopped');
+  assert.equal(stopped.marks.length, 1);
+  const resumed = { ...stopped, status: 'armed' };
+  assert.throws(() => tap.adjust(tap.stop(resumed), { id: 'hour-syllable-1', edge: 'start', deltaMs: 1 }), { code: 'OUT_OF_BOUNDS' });
+
+  let split = tap.mark(resumed, 240);
+  const adjusted = tap.adjust(tap.stop(split), { id: 'party-syllable-1', edge: 'start', deltaMs: 10 });
+  assert.deepEqual(adjusted.marks.map(({ startMs, endMs }) => [startMs, endMs]), [[100, 250], [250, 500]]);
+  assert.throws(() => tap.adjust(adjusted, { id: 'hour-syllable-1', edge: 'move', deltaMs: 1 }), { code: 'ADJUST_UNSUPPORTED' });
+});
+
+test('restoreWordFrameTake preserves the exact stopped snapshot and one-tap undo history', () => {
+  let take = tap.begin(wordFrames(), { mode: 'syllable', cadence: 'word-frames' });
+  take = tap.mark(take, 120);
+  take = tap.mark(take, 180);
+  take = tap.mark(take, 350);
+  take = { ...tap.stop(take), stoppedScoreMs: -12 };
+  const snapshotJson = JSON.stringify(take);
+  const restored = tap.restoreWordFrameTake(JSON.parse(snapshotJson));
+  assert.notEqual(restored, take);
+  assert.equal(JSON.stringify(restored), snapshotJson);
+  assert.equal(restored.stoppedScoreMs, -12);
+  const undone = tap.undo(restored);
+  assert.deepEqual(undone.marks.map(({ id, startMs, endMs }) => [id, startMs, endMs]), [
+    ['w0-syllable-1', 100, 180], ['w0-syllable-2', 180, 300],
+  ]);
+  assert.equal(undone.lastMs, 180);
+  assert.equal(undone.wordFrameTapCounts.w0, 2);
+
+  const empty = tap.restoreWordFrameTake(tap.stop(tap.begin(wordFrames(),
+    { mode: 'syllable', cadence: 'word-frames' })));
+  assert.equal(empty.index, 0);
+  assert.equal(empty.lastMs, null);
+  assert.deepEqual(empty.marks, []);
+});
+
+test('restoreWordFrameTake rejects tampered frame partitions, counts, identities, and undo history atomically', () => {
+  let take = tap.begin(wordFrames(), { mode: 'syllable', cadence: 'word-frames' });
+  take = tap.mark(take, 120);
+  take = tap.mark(take, 180);
+  take = tap.mark(take, 350);
+  take = tap.stop(take);
+  const tampered = [
+    snapshot => { snapshot.marks[0].endMs += 1; },
+    snapshot => { snapshot.marks[0].id = 'wrong-id'; },
+    snapshot => { snapshot.wordFrameTapCounts.w0 = 99; },
+    snapshot => { snapshot.marks[0].phraseId = 'wrong-phrase'; },
+    snapshot => { snapshot.actionHistory[0].cadence = 'flow'; },
+    snapshot => { snapshot.actionHistory[0].actionHistory = []; },
+    snapshot => { snapshot.actionHistory[0].status = 'complete'; },
+    snapshot => { snapshot.pendingStartMs = 0; },
+  ];
+  for (const corrupt of tampered) {
+    const snapshot = structuredClone(take);
+    corrupt(snapshot);
+    const before = JSON.stringify(snapshot);
+    assert.throws(() => tap.restoreWordFrameTake(snapshot), { code: 'INVALID_SNAPSHOT' });
+    assert.equal(JSON.stringify(snapshot), before);
+  }
+  const wrongStatus = { ...take, status: 'armed' };
+  assert.throws(() => tap.restoreWordFrameTake(wrongStatus), { code: 'INVALID_SNAPSHOT' });
+  const oversized = { ...take, units: Array.from({ length: 5001 }, (_, i) => ({ ...wordFrames()[0], id: `u${i}`, wordId: `w${i}` })) };
+  assert.throws(() => tap.restoreWordFrameTake(oversized), { code: 'INVALID_SNAPSHOT' });
+});
