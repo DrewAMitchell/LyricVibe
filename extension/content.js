@@ -286,7 +286,7 @@
       <div class="lvx-tap-timeline" aria-label="Current phrase timing"><div class="lvx-tap-blocks"></div><i class="lvx-tap-playhead" hidden></i></div>
       <div class="lvx-tap-status" role="status" aria-live="polite">Choose a word to begin.</div>
       <div class="lvx-tap-actions"><button data-sync="tap-use">Use take in preview</button><button data-sync="tap-undo">↶ Undo mark</button><button data-sync="tap-discard">Discard take</button></div>
-      <section class="lvx-event-review" hidden aria-label="Assign recorded events"><p class="lvx-event-summary" role="status"></p><div class="lvx-event-phrases"></div><div class="lvx-tap-actions"><button data-sync="events-review">Use reviewed assignments</button><button data-sync="events-export">Export events</button></div><p class="lvx-sync-hint">Counts group your recorded entrances into words. Amber means uncertain or changed. Raw timestamps never move. A word starts at its first entrance; its end stays provisional until word-boundary cleanup. Long gaps are flagged because a held syllable can look like the next word. Unresolved phrases stay in the take.</p></section>
+      <details class="lvx-transcript-editor"><summary>Edit lyrics as text</summary><p class="lvx-sync-hint">One line per phrase. A <code>[backing]</code> prefix puts a line on the backing lane. Fixing a word keeps its timing and re-spells its syllables; changing word counts re-estimates only those words; deleting a word hides it (reversible). Keep the number of lines the same.</p><textarea data-sync="transcript-text" rows="12" spellcheck="true" aria-label="Lyrics, one phrase per line"></textarea><div class="lvx-tap-actions"><button data-sync="transcript-review">Review changes</button><button data-sync="transcript-apply">Apply to preview</button><button data-sync="transcript-reset">Reset text</button></div><ul class="lvx-transcript-changes" aria-live="polite"></ul></details><section class="lvx-event-review" hidden aria-label="Assign recorded events"><p class="lvx-event-summary" role="status"></p><div class="lvx-event-phrases"></div><div class="lvx-tap-actions"><button data-sync="events-review">Use reviewed assignments</button><button data-sync="events-export">Export events</button></div><p class="lvx-sync-hint">Counts group your recorded entrances into words. Amber means uncertain or changed. Raw timestamps never move. A word starts at its first entrance; its end stays provisional until word-boundary cleanup. Long gaps are flagged because a held syllable can look like the next word. Unresolved phrases stay in the take.</p></section>
       <section class="lvx-mark-correction" hidden aria-label="Correct recorded timing"><label>Recorded <select data-sync="correct-mark" aria-label="Recorded mark to correct"></select></label><div class="lvx-correction-times"><label>Start ms <input data-sync="correct-start" type="number" min="0" step="10"></label><label>End ms <input data-sync="correct-end" type="number" min="0" step="10"></label></div><div class="lvx-tap-actions"><button data-sync="correct-hear">▶ Hear this mark</button><button data-sync="correct-save">Use exact times</button></div><label>Adjust <select data-sync="correct-edge"><option value="move">Whole mark</option><option value="start">Start only</option><option value="end">End only</option></select></label><div class="lvx-tap-actions"><button data-sync="correct-earlier">← Earlier 10 ms</button><button data-sync="correct-later">Later 10 ms →</button><button data-sync="correct-undo">↶ Undo correction</button></div><p class="lvx-sync-hint">Alt + ← / → adjusts the selected edge by 10 ms; add Shift for 50 ms. Corrections use original song time. Hear this mark plays a short loop at practice speed.</p></section>
       <details class="lvx-perform-options"><summary>Performance options <span>units · grid · clicks</span></summary>
       <div class="lvx-tap-settings"><label>Word gesture <select data-sync="tap-cadence"><option value="hold">Hold for word duration</option><option value="flow">Space → next lyric</option><option value="pairs">Separate start / end</option></select></label><label>Word pass <select data-sync="tap-scope"><option value="lane">Continue through vocal track</option><option value="phrase">This phrase only</option></select></label></div>
@@ -373,6 +373,57 @@
     }catch(error){setSyncNotice(error.message);return false;}
     finally{timing.busy=false;state.scoreSignature='';refreshTimingPanel();syncPanel.querySelector('.lvx-event-review:not([hidden])')?.scrollIntoView({block:'nearest'});}
   }
+  // Whole-transcript text editing over the unsaved preview.
+  const transcript={dirty:false,shownFor:null};
+  function transcriptReview(){
+    const list=syncPanel.querySelector('.lvx-transcript-changes'),area=syncButton('transcript-text');list.replaceChildren();
+    if(!timing.draft)return null;
+    try{
+      const result=LvTranscriptText.diff(timing.draft.score,area.value);
+      const labels={respell:'fix',replace:'replace (re-estimated)',insert:'insert (re-estimated)',hide:'hide',lane:'lane'};
+      for(const c of result.changes){const li=document.createElement('li');li.textContent=`Line ${c.line} · ${labels[c.kind]}: ${c.from||'∅'} → ${c.to||'(hidden)'}`;if(c.kind!=='respell')li.dataset.review='true';list.append(li);}
+      if(!result.changes.length){const li=document.createElement('li');li.textContent='No changes.';list.append(li);}
+      return result;
+    }catch(error){const li=document.createElement('li');li.dataset.review='true';li.textContent=error.message;list.append(li);return null;}
+  }
+  function refreshTranscriptEditor(){
+    const area=syncButton('transcript-text');if(!area)return;
+    // An older worker may inject this overlay without the transcript module until the extension reloads.
+    const editor=syncPanel.querySelector('.lvx-transcript-editor');editor.hidden=typeof LvTranscriptText==='undefined';if(editor.hidden)return;
+    const draft=timing.draft,binding=draft?`${draft.token}:${draft.previewRevision}`:null;
+    if(!transcript.dirty&&draft&&transcript.shownFor!==binding){area.value=LvTranscriptText.toText(draft.score);transcript.shownFor=binding;}
+    for(const name of ['transcript-review','transcript-apply'])syncButton(name).disabled=timing.busy||!draft||!transcript.dirty;
+    syncButton('transcript-reset').disabled=timing.busy||!transcript.dirty;area.disabled=timing.busy||!draft;
+  }
+  // Keep a re-spelled word's syllable timings: split the new text into the same count.
+  async function respellSyllables(operations){
+    const words=new Map(timing.draft.score.phrases.flatMap(p=>p.words).map(w=>[w.id,w]));
+    const extra=[],notes=[];
+    for(const op of operations.filter(o=>o.type==='setWordText')){
+      const word=words.get(op.wordId);if(!word?.syllables?.length)continue;
+      const count=word.syllables.length;let parts=count===1?[op.text]:null;
+      if(!parts){try{const r=await chrome.runtime.sendMessage({type:'LV_PRONUNCIATION_COUNT',text:op.text,count});parts=r?.countSuggestion?.parts||null;}catch{parts=null;}}
+      if(!parts||parts.length!==count){notes.push(`${word.text} → ${op.text}: syllables cleared (could not split into ${count})`);continue;}
+      const spoken=parts.join('');
+      extra.push({type:'setWordSyllables',wordId:op.wordId,...(spoken!==op.text?{spokenText:spoken}:{}),syllables:word.syllables.map((syl,i)=>({id:syl.id,text:parts[i],startMs:syl.startMs,endMs:syl.endMs,provenance:syl.provenance,locked:syl.locked,effects:syl.effects||[]}))});
+    }
+    return {extra,notes};
+  }
+  async function applyTranscript(){
+    if(!timing.draft||timing.busy||!transcript.dirty)return;
+    const result=transcriptReview();if(!result)return;
+    if(!result.operations.length){transcript.dirty=false;transcript.shownFor=null;refreshTimingPanel();return;}
+    timing.busy=true;refreshTimingPanel();
+    try{
+      setSyncNotice(`Applying ${result.changes.length} lyric changes…`);
+      const {extra,notes}=await respellSyllables(result.operations);
+      const response=await timingRequest('LV_TIMING_TUNE',{operations:[...result.operations,...extra],allowProtected:true});
+      timing.draft=response.preview;timing.auditioned=false;state.scoreSignature='';
+      transcript.dirty=false;transcript.shownFor=null;
+      setSyncNotice(`${result.changes.length} lyric changes are in the preview${extra.length?` · ${extra.length} words kept their syllable timings`:''}${notes.length?' · '+notes.join('; '):''}. Undo preview reverts; Save timings keeps them.`);
+    }catch(error){setSyncNotice(error.message);}finally{timing.busy=false;refreshTimingPanel();}
+  }
+
   // Tap tempo: raw beat taps (source clock) fit to a beat grid, persisted per video.
   const tempo={mediaKey:null,taps:[],estimate:null};
   async function loadTempo(){
@@ -554,6 +605,7 @@
       syncPanel.querySelector('.lvx-tap-status').textContent=(wordTake(take)?(take.retime?`Retiming phrase ${phraseOrdinal(take.retime.phraseId)} · `:'')+`${take.holds.length} / ${take.units.length} words held · ${take.syllableEvents.length} syllable taps`:'Start, then hold Space for each word')+(retimeFlags.items.length?` · ⚑ ${retimeFlags.items.length} flagged`:'');
       syncButton('tap-use').hidden=true;
     }else syncButton('tap-use').hidden=false;
+    refreshTranscriptEditor();
     if(state.score&&retimeFlags.mediaKey!==LvScore.mediaKey(state.score.source))void loadRetimeFlags();
     if(state.score&&tempo.mediaKey!==LvScore.mediaKey(state.score.source))void loadTempo();
     renderEventReview();renderPerformPhrase(); renderTapTimeline(); refreshMarkCorrection(); refreshEffectPanel();
@@ -1220,6 +1272,10 @@
   syncButton('tap-release').addEventListener('click', () => markTapTime({release:true}));
   syncButton('tap-stop').addEventListener('click', () => { stopTapTake(); getMedia()?.pause(); });
   syncButton('retime-flag').addEventListener('click', () => void flagPhraseForRetime());
+  syncButton('transcript-text').addEventListener('input',()=>{transcript.dirty=true;syncPanel.querySelector('.lvx-transcript-changes').replaceChildren();refreshTranscriptEditor();});
+  syncButton('transcript-review').addEventListener('click',()=>void transcriptReview());
+  syncButton('transcript-apply').addEventListener('click',()=>void applyTranscript());
+  syncButton('transcript-reset').addEventListener('click',()=>{transcript.dirty=false;transcript.shownFor=null;syncPanel.querySelector('.lvx-transcript-changes').replaceChildren();refreshTranscriptEditor();});
   syncButton('tempo-tap').addEventListener('click', () => void tapTempo());
   syncButton('tap-undo').addEventListener('click', () => { if (tapping.take) { const live=streamTake(tapping.take)&&tapping.take.status==='armed';tapping.take = eventTake(tapping.take)?LvTapTiming.undoEvent(tapping.take):wordTake(tapping.take)?LvTapTiming.undoWordHold(tapping.take):live?LvTapTiming.undo(tapping.take):LvTapTiming.stop(LvTapTiming.undo(tapping.take)); tapping.followSeek=false;tapping.seekPhraseId=null;tapping.correctionUndo = []; if(!rawTake(tapping.take))followTapUnit();state.scoreSignature=''; } refreshTimingPanel(); });
   syncButton('tap-use').addEventListener('click', useTapTake);

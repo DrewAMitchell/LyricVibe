@@ -99,7 +99,7 @@
     // Apply against a private copy so a failed batch cannot leave a partial preview.
     let score = clone(draft.score);
     for (const submitted of operations) {
-      if (!submitted || !['setPhraseTiming', 'setPhraseLane', 'setWordSyllables', 'setSyllableTiming', 'setSyllableLock', 'setWordEffect', 'setSyllableEffect', 'setWordExcluded', 'replaceWords', 'setPhraseSyllableTimings', 'setPhraseSyllablePerformance'].includes(submitted.type)) fail('INVALID_OPERATION', 'Only phrase timing and lane, syllable segmentation and performance, timing and locks, appearance effects, word exclusion, contiguous text replacement, and phrase syllable capture may be changed in this preview.');
+      if (!submitted || !['setPhraseTiming', 'setPhraseLane', 'setWordText', 'setWordSyllables', 'setSyllableTiming', 'setSyllableLock', 'setWordEffect', 'setSyllableEffect', 'setWordExcluded', 'replaceWords', 'setPhraseSyllableTimings', 'setPhraseSyllablePerformance'].includes(submitted.type)) fail('INVALID_OPERATION', 'Only phrase timing and lane, syllable segmentation and performance, timing and locks, appearance effects, word exclusion, contiguous text replacement, and phrase syllable capture may be changed in this preview.');
       const op = clone(submitted);
       let wordId = op.wordId;
       const effectOnly = op.type === 'setWordEffect' || op.type === 'setSyllableEffect' || op.type === 'setPhraseLane';

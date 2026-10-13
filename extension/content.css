@@ -2311,3 +2311,8 @@
 #lvx-root .lvx-beat-pulse{position:absolute;top:6px;right:8px;font-size:11px;padding:2px 7px;border-radius:999px;border:1px solid #58606a;color:#b6c4a9;transition:background-color 60ms,color 60ms}
 #lvx-root .lvx-beat-pulse[data-on="true"]{background:#35452b;color:#fff;border-color:#a4ce7d}
 #lvx-root .lvx-beat-pulse[data-on="true"][data-downbeat="true"]{background:#a4ce7d;color:#111}
+/* Whole-transcript text editor. */
+#lvx-root .lvx-transcript-editor{margin:8px 0}
+#lvx-root .lvx-transcript-editor textarea{width:100%;min-height:180px;font:12px/1.5 ui-monospace,Consolas,monospace;box-sizing:border-box;white-space:pre;overflow-wrap:normal;overflow-x:auto}
+#lvx-root .lvx-transcript-changes{margin:6px 0;padding-left:18px;font-size:11px;max-height:160px;overflow:auto}
+#lvx-root .lvx-transcript-changes li[data-review="true"]{color:#f2c879}
