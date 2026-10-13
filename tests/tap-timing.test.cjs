@@ -487,3 +487,72 @@ test('entrance marks apply atomically to one phrase in a preview and preserve th
   assert.deepEqual(applied.phrases[0].words.map(({ id, text }) => [id, text]), originalWords);
   assert.equal(scoreCore.validateScore(applied), applied);
 });
+
+const wordFrames = () => [
+  { id: 'frame-w0', wordId: 'w0', phraseId: 'p0', text: 'hello', minMs: 100, maxMs: 300 },
+  { id: 'frame-w1', wordId: 'w1', phraseId: 'p0', text: 'world', minMs: 300, maxMs: 500 },
+  { id: 'frame-w2', wordId: 'w2', phraseId: 'p0', text: 'again', minMs: 600, maxMs: 800 },
+];
+
+test('word-frames resolve one half-open source frame, rejecting gaps and ambiguous overlaps', () => {
+  let take = tap.begin(wordFrames(), { mode: 'syllable', cadence: 'word-frames' });
+  take = tap.mark(take, 299);
+  assert.equal(take.marks[0].startMs, 100);
+  assert.equal(take.marks[0].endMs, 300);
+  assert.throws(() => tap.mark(take, 550), { code: 'OUT_OF_BOUNDS' });
+  // The shared half-open edge belongs to w1, not w0.
+  take = tap.mark(take, 300);
+  assert.equal(take.marks[1].wordId, 'w1');
+
+  const overlap = wordFrames();
+  overlap[1] = { ...overlap[1], minMs: 250 };
+  const ambiguous = tap.begin(overlap, { mode: 'syllable', cadence: 'word-frames' });
+  assert.throws(() => tap.mark(ambiguous, 275), { code: 'OUT_OF_BOUNDS' });
+  assert.throws(() => tap.begin(wordFrames().map((unit, i) => ({ ...unit, wordId: i ? 'w0' : unit.wordId })),
+    { mode: 'syllable', cadence: 'word-frames' }), { code: 'INVALID_UNITS' });
+});
+
+test('word-frames split a word on later taps and keep dynamic syllable identities', () => {
+  let take = tap.begin(wordFrames(), { mode: 'syllable', cadence: 'word-frames', bpm: 120 });
+  take = tap.mark(take, 120);
+  take = tap.mark(take, 180);
+  take = tap.mark(take, 240);
+  assert.deepEqual(take.marks.map(({ id, syllableId, wordId, phraseId, startMs, endMs }) =>
+    ({ id, syllableId, wordId, phraseId, startMs, endMs })), [
+    { id: 'w0-syllable-1', syllableId: 'w0-syllable-1', wordId: 'w0', phraseId: 'p0', startMs: 100, endMs: 180 },
+    { id: 'w0-syllable-2', syllableId: 'w0-syllable-2', wordId: 'w0', phraseId: 'p0', startMs: 180, endMs: 240 },
+    { id: 'w0-syllable-3', syllableId: 'w0-syllable-3', wordId: 'w0', phraseId: 'p0', startMs: 240, endMs: 300 },
+  ]);
+  assert.throws(() => tap.mark(take, 230), { code: 'NON_MONOTONIC_TIME' });
+});
+
+test('word-frames preserve untapped words, allow gaps, undo one tap, and continue after stop', () => {
+  let take = tap.begin(wordFrames(), { mode: 'syllable', cadence: 'word-frames' });
+  take = tap.mark(take, 120);
+  take = tap.mark(take, 180);
+  take = tap.mark(take, 350); // Skips w1's remaining interpretation; w2 is still untouched.
+  assert.deepEqual(take.marks.map(({ wordId }) => wordId), ['w0', 'w0', 'w1']);
+  assert.equal(take.marks.find(mark => mark.wordId === 'w2'), undefined);
+  const stopped = tap.stop(take);
+  assert.equal(stopped.status, 'stopped');
+  assert.equal(stopped.lastMs, 350);
+  take = { ...stopped, status: 'armed' };
+  take = tap.mark(take, 650);
+  assert.deepEqual(take.marks.map(({ wordId }) => wordId), ['w0', 'w0', 'w1', 'w2']);
+  take = tap.undo(take);
+  assert.deepEqual(take.marks.map(({ wordId }) => wordId), ['w0', 'w0', 'w1']);
+  assert.equal(take.lastMs, 350);
+  assert.equal(take.wordFrameTapCounts.w2, undefined);
+});
+
+test('word-frames adjustment moves only an internal same-word boundary', () => {
+  let take = tap.begin(wordFrames(), { mode: 'syllable', cadence: 'word-frames' });
+  take = tap.mark(take, 120);
+  take = tap.mark(take, 180);
+  take = tap.mark(take, 350);
+  take = tap.stop(take);
+  const changed = tap.adjust(take, { id: 'w0-syllable-2', edge: 'start', deltaMs: 10 });
+  assert.deepEqual(changed.marks.slice(0, 2).map(({ startMs, endMs }) => [startMs, endMs]), [[100, 190], [190, 300]]);
+  assert.throws(() => tap.adjust(take, { id: 'w0-syllable-1', edge: 'start', deltaMs: 1 }), { code: 'OUT_OF_BOUNDS' });
+  assert.throws(() => tap.adjust(take, { id: 'w0-syllable-1', edge: 'move', deltaMs: 1 }), { code: 'ADJUST_UNSUPPORTED' });
+});

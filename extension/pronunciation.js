@@ -107,6 +107,53 @@
     return alternatives;
   }
 
+  function graphemes(text) {
+    if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+      try { return [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)].map(part => part.segment); } catch {}
+    }
+    return Array.from(text);
+  }
+
+  function fallbackParts(text, count) {
+    const units = graphemes(text);
+    if (count > units.length) return [];
+    const result = [];
+    let offset = 0;
+    for (let i = 0; i < count; i++) {
+      const size = Math.floor(units.length / count) + (i < units.length % count ? 1 : 0);
+      result.push(units.slice(offset, offset + size).join(''));
+      offset += size;
+    }
+    return result;
+  }
+
+  function partsForCount(text, count, options = {}) {
+    if (typeof text !== 'string' || !text.trim()) return { parts: [], method: 'none', estimated: true, reason: 'empty-or-invalid-text' };
+    if (!Number.isSafeInteger(count) || count < 1 || count > 64) return { parts: [], method: 'none', estimated: true, reason: 'invalid-count' };
+    const { spokenText, existingParts, countsIndex } = options && typeof options === 'object' ? options : {};
+    let segmentationText = typeof spokenText === 'string' && spokenText.trim() ? spokenText : text;
+    if(!spokenText && countsIndex && /^[^A-Za-z0-9]*\d{1,2}[^A-Za-z0-9]*$/.test(text)){
+      const numeric=suggest(text,countsIndex);
+      if(numeric.status==='suggested')segmentationText=numeric.spokenText;
+    }
+    if (Array.isArray(existingParts) && existingParts.length === count && existingParts.every(part => typeof part === 'string' && part.trim()) && existingParts.join('') === segmentationText) {
+      return { parts: [...existingParts], method: 'existing', estimated: false };
+    }
+    if (countsIndex) {
+      const candidates = [];
+      for (const lookupText of new Set([text, segmentationText])) {
+        const suggestion = suggest(lookupText, countsIndex);
+        if (suggestion.status === 'suggested') candidates.push({ count: suggestion.syllableCounts[0], parts: suggestion.parts, method: suggestion.method });
+        for (const alternative of suggestion.alternatives || []) candidates.push(alternative);
+      }
+      const candidate = candidates.find(item => item.count === count && Array.isArray(item.parts) && item.parts.length === count && item.parts.every(part => typeof part === 'string' && part.length) && item.parts.join('') === segmentationText);
+      if (candidate) return { parts: [...candidate.parts], method: candidate.method, estimated: true };
+    }
+    const parts = fallbackParts(segmentationText, count);
+    if (!parts.length) return { parts: [], method: 'orthographic-count-fallback', estimated: true, reason: 'count-exceeds-graphemes' };
+    return { parts, method: 'orthographic-count-fallback', estimated: true };
+  }
+
   function suggest(text, countsIndex, spokenOverride) {
     if (typeof text !== 'string' || !text.length) {
       return failure('invalid', '', [], 'none', 'empty-or-invalid-text');
@@ -169,5 +216,5 @@
     return { status: 'suggested', spokenText: punctuatedParts.join(''), syllableCounts, parts: punctuatedParts, method, reason: null };
   }
 
-  return { suggest };
+  return { suggest, partsForCount };
 });

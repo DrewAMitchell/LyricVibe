@@ -38,6 +38,12 @@ test('build compiles pinned CMUdict variants into sorted unique positive vowel c
   const punctuated = pronunciation.suggest('Hour!', saved.entries);
   assert.deepEqual(punctuated.alternatives.find(item => item.count === 2).parts, ['Hou', 'r!']);
   assert.equal(punctuated.alternatives.find(item => item.count === 2).parts.join(''), 'Hour!');
+  const about = pronunciation.partsForCount('about', 2, { countsIndex: saved.entries });
+  assert.deepEqual(about.parts, ['a', 'bout']);
+  assert.equal(about.estimated, true);
+  const alias = pronunciation.partsForCount('24', 3, { spokenText: 'twentyfour', countsIndex: saved.entries });
+  assert.deepEqual(alias.parts, ['twen', 'ty', 'four']);
+  assert.equal(alias.parts.join(''), 'twentyfour');
   assert.ok(Object.values(saved.entries).every((values) => values.length &&
     values.every((value, index) => Number.isSafeInteger(value) && value > 0 && (!index || values[index - 1] < value))));
   assert.match(fs.readFileSync(path.join(outDir, 'pronunciation-LICENSE.txt'), 'utf8'), /Carnegie Mellon University/);
@@ -101,4 +107,37 @@ test('a dictionary count does not force a spelling split when the heuristic cann
   assert.equal(result.status, 'unavailable');
   assert.deepEqual(result.parts, []);
   assert.equal(result.reason, 'orthographic-split-unavailable');
+});
+
+test('partsForCount preserves valid existing cuts and falls back to grapheme-safe display or spoken cuts', () => {
+  const existing = pronunciation.partsForCount('hour', 2, { existingParts: ['ho', 'ur'] });
+  assert.deepEqual(existing, { parts: ['ho', 'ur'], method: 'existing', estimated: false });
+
+  const unicode = 'a\u0301bc';
+  const accented = pronunciation.partsForCount(unicode, 2);
+  assert.equal(accented.parts.join(''), unicode);
+  assert.equal(accented.parts[0], 'a\u0301b');
+  assert.equal(accented.method, 'orthographic-count-fallback');
+  assert.equal(accented.estimated, true);
+
+  const emoji = '🧑‍🚀abc';
+  const emojiParts = pronunciation.partsForCount(emoji, 3);
+  assert.equal(emojiParts.parts.join(''), emoji);
+  assert.equal(emojiParts.parts[0], '🧑‍🚀a');
+  const multilingual = pronunciation.partsForCount('猫犬鳥', 2);
+  assert.equal(multilingual.parts.join(''), '猫犬鳥');
+  assert.deepEqual(multilingual.parts, ['猫犬', '鳥']);
+});
+
+test('partsForCount uses fallback for an unindexed observed count and rejects grapheme overflow', () => {
+  const numeric=pronunciation.partsForCount('24',3,{countsIndex:{twenty:[2],four:[1]}});
+  assert.equal(numeric.parts.length,3);
+  assert.equal(numeric.parts.join(''),'twentyfour');
+  const unexpected = pronunciation.partsForCount('hour', 3, { countsIndex: { entries: { hour: [1, 2] } } });
+  assert.deepEqual(unexpected.parts, ['ho', 'u', 'r']);
+  assert.equal(unexpected.method, 'orthographic-count-fallback');
+  assert.equal(unexpected.estimated, true);
+  const overflow = pronunciation.partsForCount('é', 2);
+  assert.deepEqual(overflow.parts, []);
+  assert.equal(overflow.reason, 'count-exceeds-graphemes');
 });

@@ -3,7 +3,7 @@ const LRCLIB_BASE = 'https://lrclib.net/api';
 const sessions = new Map();
 let pronunciationIndexPromise;
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
-  if(message?.type!=='LV_PRONUNCIATION_SUGGEST')return;
+  if(!['LV_PRONUNCIATION_SUGGEST','LV_PRONUNCIATION_COUNT'].includes(message?.type))return;
   if(typeof message.text!=='string'||!message.text.trim()||message.text.length>256||
     message.spokenText!==undefined&&(typeof message.spokenText!=='string'||message.spokenText.length>256)){
     respond({ok:false,error:{code:'INVALID_TEXT',message:'Use a word or spoken form of at most256characters.'}});return;
@@ -13,7 +13,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       if(!response.ok)throw Error('Packaged pronunciation dictionary could not load.');return response.json();
     }).catch(error=>{pronunciationIndexPromise=null;throw error;});
     const index=await pronunciationIndexPromise;
-    return {ok:true,suggestion:LvPronunciation.suggest(message.text,index.entries,message.spokenText),source:index.metadata};
+    return {ok:true,suggestion:LvPronunciation.suggest(message.text,index.entries,message.spokenText),
+      ...(message.count===undefined?{}:{countSuggestion:LvPronunciation.partsForCount(message.text,message.count,{spokenText:message.spokenText,existingParts:message.existingParts,countsIndex:index.entries})}),source:index.metadata};
   })().then(respond,error=>respond({ok:false,error:{code:'DICTIONARY_UNAVAILABLE',message:error.message}}));
   return true;
 });
