@@ -351,6 +351,22 @@
         provenance: "estimated", locked: false, effects: [],
       }));
       phrase.words.splice(firstIndex, selected.length, ...replacements);
+    } else if (op.type === "insertPhrase") {
+      // A transcript line with no existing phrase: estimated timing, placed in source order after afterPhraseId.
+      if (!next.lanes.some(lane => lane.id === op.laneId)) fail("UNKNOWN_ID", `unknown lane id: ${op.laneId}`);
+      if (typeof op.text !== "string" || !op.text.trim() || op.text.length > 10000) fail("INVALID_OPERATION", "phrase text must be nonempty and at most 10000 characters");
+      if (!Number.isSafeInteger(op.startMs) || !Number.isSafeInteger(op.endMs) || op.startMs < 0 || op.endMs <= op.startMs) fail("INVALID_TIME", "an inserted phrase needs a positive whole-millisecond interval");
+      const after = op.afterPhraseId == null ? -1 : next.phrases.findIndex(item => item.id === op.afterPhraseId);
+      if (op.afterPhraseId != null && after < 0) fail("UNKNOWN_ID", `unknown phrase id: ${op.afterPhraseId}`);
+      const usedIds = new Set(next.lanes.map(item => item.id));
+      for (const item of next.phrases) { usedIds.add(item.id); for (const word of item.words) usedIds.add(word.id); }
+      let n = 1;
+      while (usedIds.has(`phrase-added-${n}`)) n++;
+      const id = `phrase-added-${n}`;
+      const phrase = { id, laneId: op.laneId, startMs: op.startMs, endMs: op.endMs, endEstimated: true, fadeOutMs: 120,
+        words: op.text.trim().split(/\s+/).map((text, i) => ({ id: `${id}-word-${i + 1}`, text, startMs: op.startMs, endMs: op.startMs, provenance: "estimated", locked: false, effects: [] })) };
+      estimateWordTimes(phrase);
+      next.phrases.splice(after + 1, 0, phrase);
     } else if (op.type === "setWordLock") {
       const { word } = locateWord(next, op.wordId);
       if (typeof op.locked !== "boolean") fail("INVALID_OPERATION", "locked must be boolean");

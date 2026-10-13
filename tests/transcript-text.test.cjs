@@ -61,9 +61,23 @@ test('lane markers move phrases between lanes; unknown brackets stay lyric text'
   assert.deepEqual(bracket.operations, [{ type: 'replaceWords', phraseId: 'p1', wordIds: ['a'], text: "[Chorus] It's" }]);
 });
 
-test('changing the number of lines is refused with the first differing line', () => {
+test('added lines become estimated phrases in the gap; removed lines hide their words', () => {
   const score = fixture();
-  assert.throws(() => transcript.diff(score, "It's an ice- breaker\nnew line\n[backing] out"), /expected 2, found 3\. The first difference is at line 2/);
+  const added = transcript.diff(score, "It's an ice- breaker\nnew line here\n[backing] out");
+  assert.deepEqual(added.operations, [{ type: 'insertPhrase', afterPhraseId: 'p1', laneId: 'lead', text: 'new line here', startMs: 2000, endMs: 3500 }]);
+  const removed = transcript.diff(score, '[backing] out');
+  assert.deepEqual(removed.operations.map(o => [o.type, o.wordId]), [['setWordExcluded', 'a'], ['setWordExcluded', 'b'], ['setWordExcluded', 'c'], ['setWordExcluded', 'd']]);
+  assert.equal(removed.changes[0].kind, 'delete-line');
+});
+
+test('pasting a transcript with extra and missing lines applies through score-core and round-trips', () => {
+  let score = core.createScore({ platform: 'youtube', videoId: 'proof123456', title: 'T', artist: 'A', durationMs: 20000 }, '[00:01.00]tokens on the desk\n[00:05.00]we check each token\n[00:09.00]extra verse words\n[00:14.00]last line\n[00:18.00]', { provider: 'proof', entryId: 'p', contentHash: 'c'.repeat(64) });
+  const pasted = 'tokens on the desk\nwe check each token fast\nbrand new line\nlast line';
+  const { operations, changes } = transcript.diff(score, pasted);
+  for (const op of operations) score = core.applyOperation(score, op, score.revision);
+  assert.equal(transcript.toText(score), pasted);
+  assert.deepEqual(changes.map(c => c.kind).sort(), ['insert', 'respell', 'respell', 'respell']);
+  assert.deepEqual(transcript.diff(score, pasted).operations, []);
 });
 
 test('diff operations apply cleanly through score-core in emitted order', () => {
@@ -89,4 +103,16 @@ test('preview accepts a respell with carried-over syllable timings and a replace
   assert.equal(word.text, "stayin'"); assert.equal(word.spokenText, 'staying');
   assert.deepEqual(word.syllables.map(s => [s.id, s.text, s.startMs]), [['s1', 'stay', w.startMs], ['s2', 'ing', w.startMs + 100]]);
   assert.equal(transcript.toText(next), "stayin' awake all night");
+});
+
+test('a pasted transcript that drops a line and adds a new one in different places', () => {
+  let score = core.createScore({ platform: 'youtube', videoId: 'proof123456', title: 'T', artist: 'A', durationMs: 30000 }, '[00:01.00]one two three\n[00:05.00]four five six\n[00:09.00]seven eight nine\n[00:14.00]ten eleven twelve\n[00:20.00]', { provider: 'proof', entryId: 'p', contentHash: 'd'.repeat(64) });
+  const pasted = 'one two three\nseven eight nine\nten eleven twelve\nthirteen fourteen';
+  const { operations, changes } = transcript.diff(score, pasted);
+  assert.deepEqual(changes.map(c => c.kind), ['delete-line', 'add-line']);
+  for (const op of operations) score = core.applyOperation(score, op, score.revision);
+  assert.equal(transcript.toText(score), pasted);
+  const added = score.phrases.at(-1);
+  assert.equal(added.words.map(w => w.text).join(' '), 'thirteen fourteen');
+  assert.ok(added.startMs >= score.phrases.at(-2).endMs);
 });
