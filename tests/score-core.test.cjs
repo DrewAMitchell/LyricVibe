@@ -13,6 +13,16 @@ function makeScore(lrc = '[00:01.00]We rise, again!\n[00:04.00]') {
 function allWords(s) { return s.phrases.flatMap(p => p.words.map(word => ({ phrase: p, word }))); }
 function errorCode(fn, code) { assert.throws(fn, error => error.code === code); }
 
+test('per-occurrence Unicode spoken syllables roundtrip independently of the display script', () => {
+  const base=makeScore('[00:01.00]今夜\n[00:04.00]'),word=base.phrases[0].words[0];
+  const next=score.applyOperation(base,{type:'setWordSyllables',wordId:word.id,spokenText:'こんや',syllables:[{id:'unicode-1',text:'こん',startMs:word.startMs,endMs:2000},{id:'unicode-2',text:'や',startMs:2000,endMs:word.endMs}]},base.revision);
+  const roundtrip=score.validateScore(JSON.parse(JSON.stringify(next))).phrases[0].words[0];
+  assert.equal(roundtrip.text,'今夜');assert.equal(roundtrip.spokenText,'こんや');
+  assert.deepEqual(roundtrip.syllables.map(s=>s.text),['こん','や']);
+  assert.deepEqual([roundtrip.id,roundtrip.startMs,roundtrip.endMs],[word.id,word.startMs,word.endMs]);
+  assert.equal(base.phrases[0].words[0].syllables,undefined);
+});
+
 test('word exclusion toggles presentation without changing source text, identity, timing, or the input score', () => {
   const original = makeScore('[00:01.00]See that light\n[00:04.00]');
   const [see, that, light] = original.phrases[0].words;

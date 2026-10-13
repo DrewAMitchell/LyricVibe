@@ -24,6 +24,20 @@ test('build compiles pinned CMUdict variants into sorted unique positive vowel c
   // The real dictionary contains the word "entries"; it is not a wrapper.
   assert.deepEqual(pronunciation.suggest('about', saved.entries).parts, ['a', 'bout']);
   assert.deepEqual(pronunciation.suggest('24', saved.entries).parts, ['twen', 'ty', 'four']);
+  for (const word of ['hour', 'hours', 'our', 'fire']) assert.deepEqual(saved.entries[word], [1, 2]);
+  const curated = new Map([['hour', ['hou', 'r']], ['hours', ['hou', 'rs']], ['our', ['ou', 'r']], ['fire', ['fi', 're']]]);
+  for (const [word, expected] of curated) {
+    const result = pronunciation.suggest(word, saved.entries);
+    assert.equal(result.status, 'ambiguous');
+    assert.deepEqual(result.parts, []);
+    const candidate = result.alternatives.find(item => item.count === 2);
+    assert.deepEqual(candidate.parts, expected);
+    assert.equal(candidate.method, 'dictionary-count+curated-spelling');
+    assert.equal(candidate.parts.join(''), word);
+  }
+  const punctuated = pronunciation.suggest('Hour!', saved.entries);
+  assert.deepEqual(punctuated.alternatives.find(item => item.count === 2).parts, ['Hou', 'r!']);
+  assert.equal(punctuated.alternatives.find(item => item.count === 2).parts.join(''), 'Hour!');
   assert.ok(Object.values(saved.entries).every((values) => values.length &&
     values.every((value, index) => Number.isSafeInteger(value) && value > 0 && (!index || values[index - 1] < value))));
   assert.match(fs.readFileSync(path.join(outDir, 'pronunciation-LICENSE.txt'), 'utf8'), /Carnegie Mellon University/);
@@ -56,6 +70,9 @@ test('unknown and multiple-count dictionary entries produce no guessed parts', (
   assert.equal(ambiguous.status, 'ambiguous');
   assert.deepEqual(ambiguous.syllableCounts, [2, 3]);
   assert.deepEqual(ambiguous.parts, []);
+  assert.ok(Array.isArray(ambiguous.alternatives));
+  assert.ok(ambiguous.alternatives.every(item => [2, 3].includes(item.count) && item.parts.join('') === ambiguous.spokenText));
+  assert.equal(pronunciation.suggest('unknownword', counts).alternatives, undefined);
 });
 
 test('numbers zero through ninety-nine use component pronunciations, retain display token, and attach punctuation last', () => {

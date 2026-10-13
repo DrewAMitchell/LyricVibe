@@ -99,7 +99,7 @@
     // Apply against a private copy so a failed batch cannot leave a partial preview.
     let score = clone(draft.score);
     for (const submitted of operations) {
-      if (!submitted || !['setPhraseTiming', 'setPhraseLane', 'setWordSyllables', 'setSyllableTiming', 'setWordEffect', 'setSyllableEffect', 'setWordExcluded', 'replaceWords', 'setPhraseSyllableTimings'].includes(submitted.type)) fail('INVALID_OPERATION', 'Only phrase timing and lane, syllable segmentation, timing, appearance effects, word exclusion, contiguous text replacement, and phrase syllable capture may be changed in this preview.');
+      if (!submitted || !['setPhraseTiming', 'setPhraseLane', 'setWordSyllables', 'setSyllableTiming', 'setSyllableLock', 'setWordEffect', 'setSyllableEffect', 'setWordExcluded', 'replaceWords', 'setPhraseSyllableTimings'].includes(submitted.type)) fail('INVALID_OPERATION', 'Only phrase timing and lane, syllable segmentation, timing and locks, appearance effects, word exclusion, contiguous text replacement, and phrase syllable capture may be changed in this preview.');
       const op = clone(submitted);
       let wordId = op.wordId;
       const effectOnly = op.type === 'setWordEffect' || op.type === 'setSyllableEffect' || op.type === 'setPhraseLane';
@@ -115,7 +115,7 @@
         if (!Number.isSafeInteger(op.startMs)||!Number.isSafeInteger(op.endMs)||op.endMs<=op.startMs) fail('INVALID_TIME','Use whole milliseconds with a positive phrase interval.');
         if (!allowProtected && phrase.words.some(w=>draft.protectedIds.includes(w.id))) fail('MANUAL_PROTECTED','Enable editing saved timings before changing this protected phrase.');
       }
-      if (op.type === 'setSyllableTiming' || op.type === 'setSyllableEffect') {
+      if (op.type === 'setSyllableTiming' || op.type === 'setSyllableLock' || op.type === 'setSyllableEffect') {
         wordId = score.phrases.flatMap(p => p.words).find(w => (w.syllables || []).some(s => s.id === op.syllableId))?.id;
         if (!wordId) fail('UNKNOWN_ID', 'Choose a syllable from this preview.');
         if (op.type === 'setSyllableTiming' && (!Number.isSafeInteger(op.startMs) || !Number.isSafeInteger(op.endMs) || op.endMs <= op.startMs)) fail('INVALID_TIME', 'Use whole milliseconds with a positive syllable interval.');

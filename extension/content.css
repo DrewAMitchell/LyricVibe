@@ -2287,3 +2287,4 @@
 #lvx-root .lvx-phrase-syllable-fields input { width:100%; min-width:0; padding:7px; color:#f3f3e9; background:#10130f; border:1px solid #4c5345; border-radius:4px; }
 #lvx-root .lvx-phrase-syllable-hint { color:#b6c4a9; font-size:11px; margin:5px 0; }
 #lvx-root .lvx-syllable-review { flex-wrap:wrap; }
+#lvx-root .lvx-pronunciation-options{display:flex;flex-wrap:wrap;gap:4px}#lvx-root .lvx-sync-panel .lvx-pronunciation-options button{font-size:10px;min-height:30px;padding:4px 6px}#lvx-root .lvx-pronunciation-options [aria-pressed=true]{background:#35452b;border-color:#a4ce7d}

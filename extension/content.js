@@ -420,10 +420,11 @@
         const label=document.createElement('label'),input=document.createElement('input');label.textContent=word.text;
         input.type='text';input.dataset.word=word.id;input.setAttribute('aria-label',`Syllables for ${word.text}, separate with vertical bars`);input.value=entries.get(word.id).value;
         input.addEventListener('input',()=>{entries.set(word.id,{value:input.value,edited:true,checked:true});timing.auditioned=false;});
-        label.append(input);fields.append(label);
+        const choices=document.createElement('div');choices.className='lvx-pronunciation-options';choices.setAttribute('role','group');choices.setAttribute('aria-label',`Pronunciations for ${word.text}`);
+        label.append(input,choices);fields.append(label);
       }
     }
-    for(const input of fields.querySelectorAll('input')){input.disabled=timing.busy||!!tapping.take;if(document.activeElement!==input)input.value=entries.get(input.dataset.word)?.value||'';}
+    for(const input of fields.querySelectorAll('input')){const entry=entries.get(input.dataset.word);input.disabled=timing.busy||!!tapping.take;if(document.activeElement!==input)input.value=entry?.value||'';const choices=input.parentElement.querySelector('.lvx-pronunciation-options');choices.replaceChildren();for(const alternative of entry?.alternatives||[]){if(!alternative.parts?.length)continue;const b=document.createElement('button');b.type='button';b.textContent=`${alternative.count} ${alternative.count===1?'syllable':'syllables'}`;b.setAttribute('aria-label',`${alternative.count} syllables: ${alternative.parts.join('|')}`);b.setAttribute('aria-pressed',String(entry.value===alternative.parts.join('|')&&!entry.requiresChoice));b.disabled=timing.busy||!!tapping.take;b.onclick=()=>{entry.value=alternative.parts.join('|');entry.edited=true;entry.checked=true;entry.requiresChoice=false;input.value=entry.value;timing.auditioned=false;refreshTapPanel();input.focus();};choices.append(b);}}
     syncButton('phrase-suggest').disabled=timing.busy||!!tapping.take;
     section.querySelector('.lvx-phrase-syllable-hint').textContent=tapping.take?'Spelling is fixed for this take. Retake to record again.':'Start prepares dictionary suggestions for this phrase. Use | to change the sung syllables; unknown words stay unsplit.';
   }
@@ -431,17 +432,20 @@
     const binding=tapBinding(),phrase=timingPhrase(),entries=phraseSpellingState(),operations=[];
     for(const word of phrase.words.filter(w=>!w.excluded)){
       const entry=entries.get(word.id);
-      if(!entry.edited&&!word.syllables?.length&&!entry.checked){
+      if(!entry.pronunciationChecked){
         const response=await chrome.runtime.sendMessage({type:'LV_PRONUNCIATION_SUGGEST',text:word.text});
         if(tapBinding()!==binding||timingPhrase()?.id!==phrase.id)throw Error('The phrase changed while preparing syllables.');
-        if(response?.ok&&response.suggestion.parts?.length)entry.value=response.suggestion.parts.join('|');
+        if(response?.ok){entry.alternatives=response.suggestion.alternatives||[];entry.requiresChoice=response.suggestion.status==='ambiguous'&&!entry.edited&&!word.syllables?.length;if(!entry.edited&&!word.syllables?.length&&response.suggestion.parts?.length)entry.value=response.suggestion.parts.join('|');}
+        entry.pronunciationChecked=true;
         entry.checked=true;
       }
+      if(entry.requiresChoice)continue;
       const parts=entry.value.split('|'),spoken=parts.join('');
       if(!spoken.trim()||spoken.length>256||parts.some(p=>!p.trim()))throw Error(`Enter nonempty syllables for “${word.text}”, separated with |.`);
       if(word.syllables?.length&&word.syllables.map(s=>s.text).join('|')===entry.value)continue;
       const span=word.endMs-word.startMs;
       if(span<parts.length)throw Error(`The interval for “${word.text}” is too short. Adjust its phrase first.`);
+      for(const child of word.syllables||[])if(child.locked)operations.push({type:'setSyllableLock',syllableId:child.id,locked:false});
       operations.push({type:'setWordSyllables',wordId:word.id,spokenText:spoken===word.text?null:spoken,startTapping:true,syllables:parts.map((text,i)=>({id:`${word.id}-syllable-${i+1}`,text,startMs:word.startMs+Math.round(span*i/parts.length),endMs:word.startMs+Math.round(span*(i+1)/parts.length)}))});
     }
     if(operations.length){const result=await timingRequest('LV_TIMING_TUNE',{operations,allowProtected:true});timing.draft=result.preview;timing.auditioned=false;}
@@ -595,7 +599,7 @@
     if (!word || !media || isAdvertisement() || youtubeMediaState()?.clockUsable === false || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source)) { setSyncNotice('Wait for this video’s main audio before starting a take.'); return; }
     try {
       timing.busy=true;refreshTimingPanel();
-      if(mode==='syllable'){discardTapTake();await preparePhraseSyllables();phrase=timingPhrase();word=phrase.words.find(w=>!w.excluded);tapping.wordId=word?.id;}
+      if(mode==='syllable'){discardTapTake();await preparePhraseSyllables();phrase=timingPhrase();word=phrase.words.find(w=>!w.excluded);tapping.wordId=word?.id;const unresolved=[...phraseSpellingState()].filter(([,e])=>e.requiresChoice);if(unresolved.length){syncPanel.querySelector('.lvx-phrase-syllables details').open=true;throw Error('Choose the sung syllable count in Syllable spelling for: '+unresolved.map(([id])=>phrase.words.find(w=>w.id===id)?.text).join(', ')+'. Then Start phrase take.');}}
       const laneWords = (syncButton('tap-scope').value === 'lane' ? timing.draft.score.phrases.slice(timing.phraseIndex).filter(p => p.laneId === phrase.laneId).flatMap(p => p.words) : phrase.words).filter(w=>!w.excluded);
       const selected = mode === 'word' ? laneWords.slice(laneWords.findIndex(w => w.id === word.id)) : phraseSyllableUnits(phrase);
       const phrases=(syncButton('tap-scope').value === 'lane' ? timing.draft.score.phrases.slice(timing.phraseIndex).filter(p=>p.laneId===phrase.laneId) : [phrase]).filter(p=>p.words.some(w=>!w.excluded));

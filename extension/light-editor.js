@@ -3,7 +3,7 @@
   const $ = id => document.getElementById(id), params = new URLSearchParams(location.search);
   const tabId = Number(params.get('sourceTab')), mediaKey = params.get('mediaKey');
   const state = {score:null, draft:null, phrase:0, wordId:null, trackId:'lead', busy:false, auditioned:false, dirty:false, editRevision:null, closed:false};
-  let range = {start:0,end:1000}, polling, replacementWordId=null, deferredPreview=null;
+  let range = {start:0,end:1000}, polling, replacementWordId=null, deferredPreview=null, pronunciationKey=null, pronunciationSuggestion=null;
   const notice = text => { $('notice').textContent = text; };
   const phrase = () => state.draft?.score.phrases[state.phrase];
   const word = () => phrase()?.words.find(w=>w.id===state.wordId) || phrase()?.words[0];
@@ -36,6 +36,7 @@
     const ready=!!state.draft;
     for(const id of ['play','pause','audition','use-times','earlier','later','excluded','loop','follow','target','start','end','replace-through','replacement','replace-words','phrase-track'])$(id).disabled=state.busy||!ready;
     for(const b of $('tracks').querySelectorAll('button'))b.disabled=state.busy||state.dirty||b.dataset.empty==='true';
+    for(const b of $('pronunciation-choices').querySelectorAll('button'))b.disabled=state.busy||state.dirty||b.getAttribute('aria-pressed')==='true';
     const indices=phraseIndices(),position=indices.indexOf(state.phrase);
     $('previous').disabled=state.busy||state.dirty||position<=0;$('next').disabled=state.busy||state.dirty||position>=indices.length-1;
     for(const id of stateToggles.keys())syncToggle(id);
@@ -112,9 +113,30 @@
     for(const item of p.words.slice(p.words.findIndex(x=>x.id===w.id)))replacementEnd.add(new Option(item.text,item.id));
     if(keepReplacement&&[...replacementEnd.options].some(o=>o.value===oldEnd))replacementEnd.value=oldEnd;
     $('replacement').value=keepReplacement?oldText:'';replacementWordId=w.id;
+    renderPronunciation();
     fields();buttons();
     phrases.querySelector('[aria-current=true]')?.scrollIntoView({block:'nearest',inline:'nearest'});
   }
+  function renderPronunciation(){
+    const w=word(),key=`${state.draft.token}:${w.id}:${w.text}:${w.spokenText||''}`,choices=$('pronunciation-choices');
+    choices.replaceChildren();
+    if(pronunciationKey!==key){
+      pronunciationKey=key;pronunciationSuggestion=null;$('pronunciation-hint').textContent='Checking the packaged pronunciation dictionary…';
+      chrome.runtime.sendMessage({type:'LV_PRONUNCIATION_SUGGEST',text:w.text,...(w.spokenText?{spokenText:w.spokenText}:{})}).then(r=>{if(pronunciationKey!==key)return;pronunciationSuggestion=r?.ok?r.suggestion:{status:'unavailable',parts:[]};renderPronunciation();buttons();},()=>{if(pronunciationKey===key){pronunciationSuggestion={status:'unavailable',parts:[]};renderPronunciation();buttons();}});
+      return;
+    }
+    if(!pronunciationSuggestion)return;
+    const suggestion=pronunciationSuggestion,alternatives=suggestion.alternatives|| (suggestion.parts?.length?[{count:suggestion.parts.length,parts:suggestion.parts}]:[]),current=w.syllables?.length?w.syllables.map(s=>s.text).join('|'):suggestion.status==='ambiguous'?null:w.spokenText||w.text;
+    for(const alternative of alternatives){if(!alternative.parts?.length)continue;const b=document.createElement('button');b.type='button';b.dataset.count=alternative.count;b.textContent=`${alternative.count} ${alternative.count===1?'syllable':'syllables'} · ${alternative.parts.join('|')}`;b.setAttribute('aria-pressed',String(current===alternative.parts.join('|')));b.onclick=()=>usePronunciation(alternative.parts);choices.append(b);}
+    $('pronunciation-hint').textContent=suggestion.status==='ambiguous'?`Sung as ${suggestion.syllableCounts.join(' or ')} syllables. Choose this occurrence’s pronunciation; word timing and display text stay fixed. Its syllable boundaries restart as estimates. Undo is available.`:alternatives.length?'Spelling suggestions are not audio alignment. Choosing one resets this word’s syllable boundaries to estimates.':'No usable dictionary split. Custom | spelling remains available in Sync by ear → Syllable spelling.';
+  }
+  function usePronunciation(parts){return run(async()=>{
+    if(state.dirty)throw Error('Use exact times before changing syllables.');const w=word(),span=w.endMs-w.startMs,spoken=parts.join('');
+    if(span<parts.length)throw Error('This word needs a longer interval before splitting it.');
+    const operations=(w.syllables||[]).filter(s=>s.locked).map(s=>({type:'setSyllableLock',syllableId:s.id,locked:false}));
+    operations.push({type:'setWordSyllables',wordId:w.id,spokenText:spoken===w.text?null:spoken,startTapping:true,syllables:parts.map((text,i)=>({id:`${w.id}-syllable-${i+1}`,text,startMs:w.startMs+Math.round(span*i/parts.length),endMs:w.startMs+Math.round(span*(i+1)/parts.length)}))});
+    await tune({operations});notice(`This occurrence now has ${parts.length} syllables. Word timing and displayed lyric are unchanged; adjust its estimated child boundaries and audition before saving.`);
+  });}
   function position(b,item) {b.style.left=((item.startMs-range.start)/(range.end-range.start)*100)+'%';b.style.width=Math.max(.5,(item.endMs-item.startMs)/(range.end-range.start)*100)+'%';}
   function renderLane(container,items,isSyllable) {
     container.replaceChildren();

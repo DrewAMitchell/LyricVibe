@@ -197,6 +197,47 @@ test('syllable operations preserve the preview revision and support tapping plus
   assert.equal(JSON.stringify(base),before);
 });
 
+test('explicitly unlocking protected syllables permits a tapping split while preserving the locked word', () => {
+  const base = make('[00:20.00]singing night');
+  const phrase = base.phrases[0], word = phrase.words[0];
+  const middle = word.startMs + Math.floor((word.endMs - word.startMs) / 2);
+  word.provenance = 'manual'; word.locked = true;
+  word.syllables = [
+    { id: 'old-sing', text: 'sing', startMs: word.startMs, endMs: middle, provenance: 'manual', locked: true, effects: [] },
+    { id: 'old-ing', text: 'ing', startMs: middle, endMs: word.endMs, provenance: 'manual', locked: true, effects: [] },
+  ];
+  const draft = variant.merge(base, make('[00:22.00]singing night', 'b'));
+  const protectedWord = draft.score.phrases[0].words[0];
+  const untouchedWord = structuredClone(draft.score.phrases[0].words[1]);
+  const before = JSON.stringify(draft);
+  const replacementStart = protectedWord.startMs + Math.floor((protectedWord.endMs - protectedWord.startMs) * 2 / 5);
+  const unlockAndReplace = [
+    { type: 'setSyllableLock', syllableId: 'old-sing', locked: false },
+    { type: 'setSyllableLock', syllableId: 'old-ing', locked: false },
+    { type: 'setWordSyllables', wordId: protectedWord.id, startTapping: true, syllables: [
+      { id: 'new-sing', text: 'sing', startMs: protectedWord.startMs, endMs: replacementStart },
+      { id: 'new-ing', text: 'ing', startMs: replacementStart, endMs: protectedWord.endMs },
+    ] },
+  ];
+
+  assert.throws(() => variant.operate(draft, unlockAndReplace), { code: 'MANUAL_PROTECTED' });
+  assert.equal(JSON.stringify(draft), before);
+  const invalidBatch = structuredClone(unlockAndReplace);
+  invalidBatch[2].syllables[1].text = 'wrong';
+  assert.throws(() => variant.operate(draft, invalidBatch, true), { code: 'INVALID_SYLLABLES' });
+  assert.equal(JSON.stringify(draft), before);
+
+  const updated = variant.operate(draft, unlockAndReplace, true);
+  const result = updated.score.phrases[0].words[0];
+  assert.deepEqual([result.text, result.startMs, result.endMs, result.locked, result.provenance],
+    [protectedWord.text, protectedWord.startMs, protectedWord.endMs, true, 'manual']);
+  assert.deepEqual(result.syllables.map(({ id, text, startMs, endMs, provenance, locked }) => [id, text, startMs, endMs, provenance, locked]), [
+    ['new-sing', 'sing', protectedWord.startMs, replacementStart, 'estimated', false],
+    ['new-ing', 'ing', replacementStart, protectedWord.endMs, 'estimated', false],
+  ]);
+  assert.deepEqual(updated.score.phrases[0].words[1], untouchedWord);
+});
+
 test('syllable operation batches are atomic, whitelisted and protect preserved phrase syllables', () => {
   const base=make('[00:01.00]hello world\n[00:04.00]another line');
   const protectedWord=base.phrases[0].words[0];

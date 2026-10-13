@@ -17,6 +17,7 @@
     'seventeen', 'eighteen', 'nineteen',
   ];
   const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+  const CURATED_TWO_PARTS = Object.freeze({ hour: 'hou', hours: 'hou', our: 'ou', fire: 'fi' });
 
   function failure(status, spokenText, syllableCounts, method, reason) {
     return { status, spokenText, syllableCounts, parts: [], method, reason };
@@ -91,6 +92,21 @@
     return result;
   }
 
+  function alternativesFor(word, counts, prefix, suffix) {
+    const alternatives = [];
+    for (const count of counts) {
+      const curatedPrefix = count === 2 ? CURATED_TWO_PARTS[word.toLowerCase()] : null;
+      const parts = curatedPrefix ? [word.slice(0, curatedPrefix.length), word.slice(curatedPrefix.length)] : spellingParts(word, count);
+      if (!parts) continue;
+      alternatives.push({
+        count,
+        parts: withPunctuation(parts, prefix, suffix),
+        method: curatedPrefix ? 'dictionary-count+curated-spelling' : 'orthographic-heuristic',
+      });
+    }
+    return alternatives;
+  }
+
   function suggest(text, countsIndex, spokenOverride) {
     if (typeof text !== 'string' || !text.length) {
       return failure('invalid', '', [], 'none', 'empty-or-invalid-text');
@@ -130,7 +146,9 @@
       ? componentCounts[0]
       : [componentCounts.reduce((sum, counts) => sum + (counts.length === 1 ? counts[0] : 0), 0)];
     if (componentCounts.some(counts => counts.length !== 1)) {
-      return failure('ambiguous', spokenText, syllableCounts, method, 'multiple-dictionary-syllable-counts');
+      const result = failure('ambiguous', spokenText, syllableCounts, method, 'multiple-dictionary-syllable-counts');
+      if (lookupWords.length === 1) result.alternatives = alternativesFor(spokenText, componentCounts[0], prefix, suffix);
+      return result;
     }
 
     if (lookupWords.length > 1) {
