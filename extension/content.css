@@ -131,6 +131,8 @@
 }
 
 /* Compact ear-sync controls; the lyric cue and input behavior stay unchanged. */
+#lvx-root .lvx-light-editor-open { width:100%; margin-top:10px; }
+#lvx-root .lvx-sync-save-status { font-size:11px; line-height:1.4; margin:8px 0; color:#bdcba9; }
 #lvx-root .lvx-sync-panel:has(.lvx-tap-panel[open]) .lvx-sync-phrase { display:none; }
 #lvx-root .lvx-sync-panel:has(.lvx-tap-panel[open]) .lvx-sync-nav { margin-top:10px; }
 #lvx-root .lvx-sync-panel:has(.lvx-tap-panel[open]) .lvx-sync-range { margin-top:4px; }

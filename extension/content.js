@@ -29,7 +29,7 @@
        replace it instead of returning early. */
     const lvxOld = window.__lyricVibeOverlay;
     var lvxOldAlive = false; // var: hoisted so it's visible after this block
-    try { lvxOldAlive = typeof lvxOld.ping === 'function' ? lvxOld.ping() : false; } catch (_) {}
+    try { lvxOldAlive = lvxOld.interfaceVersion === 2 && typeof lvxOld.ping === 'function' ? lvxOld.ping() : false; } catch (_) {}
     if (!lvxOldAlive) {
       try { if (typeof lvxOld.hide === 'function') lvxOld.hide(); } catch (_) {}
       try { const lvxEl = document.getElementById('lvx-root'); if (lvxEl) lvxEl.remove(); } catch (_) {}
@@ -265,6 +265,8 @@
   syncPanel.className = 'lvx-sync-panel'; syncPanel.hidden = true; syncPanel.tabIndex = -1;
   syncPanel.setAttribute('aria-label', 'Sync this video');
   syncPanel.innerHTML = `<header><div><span class="lvx-sync-eyebrow">TIMING REVIEW</span><h2>Sync this video</h2></div><button data-sync="close" aria-label="Close timing preview">✕</button></header>
+    <button data-sync="light-editor" class="lvx-light-editor-open">↗ Open lightweight editor</button>
+    <p class="lvx-sync-save-status" role="status"></p>
     <p class="lvx-sync-notice" role="status" aria-live="polite">Load a timing preview to begin.</p>
     <div class="lvx-sync-tabs" role="group" aria-label="Timing to audition"><button data-sync="saved" aria-pressed="false">Saved</button><button data-sync="proposed" aria-pressed="true">Proposed · unsaved</button></div>
     <div class="lvx-sync-nav"><button data-sync="previous" aria-label="Previous lyric phrase">‹</button><span class="lvx-sync-position"></span><button data-sync="next" aria-label="Next lyric phrase">›</button></div>
@@ -351,7 +353,7 @@
     syncButton('tap-snap').disabled = timing.busy || tapPending();
     syncButton('tap-bpm').disabled = timing.busy || tapPending() || !syncButton('tap-snap').checked;
     syncButton('tap-speed').disabled = timing.busy || take?.status === 'armed' || performanceTake.armed;
-    syncButton('tap-arm').disabled = timing.busy || !word || timing.dirty || tapping.splitDirty || effectPending() || tapping.take?.status === 'armed' || tapping.take?.status === 'complete';
+    syncButton('tap-arm').disabled = timing.busy || !word || word.excluded || timing.dirty || tapping.splitDirty || effectPending() || tapping.take?.status === 'armed' || tapping.take?.status === 'complete';
     syncButton('tap-arm').textContent = tapping.take?.status === 'stopped' ? '▶ Continue take' : '▶ Start take';
     syncButton('tap-mark').disabled = timing.busy || take?.status !== 'armed';
     syncButton('tap-mark').textContent = (take?.cadence || syncButton('tap-cadence').value) === 'flow' ? (take?.index === take?.units.length - 1 && take?.pendingStartMs !== null ? 'Finish lyric · Space' : 'Next lyric · Space') : take?.pendingStartMs !== null && take ? 'Mark end · Space' : 'Mark start · Space';
@@ -388,7 +390,7 @@
     if (index >= 0) { timing.phraseIndex = index; tapping.wordId = unit.wordId; }
   }
   function wordTimingUnits(words) {
-    return words.flatMap(word => {
+    return words.filter(word=>!word.excluded).flatMap(word => {
       const parts = LvScore.hyphenWordParts(word.text), count = parts.length;
       return parts.map((spelling,index) => ({id:count > 1 ? `${word.id}__take-part-${index+1}` : word.id,wordId:word.id,
         text:count > 1 ? spelling.replace(/[-\u2010\u2011]+$/u,'') : spelling,spelling,partIndex:index,partCount:count,
@@ -509,10 +511,10 @@
     if (!word || !media || isAdvertisement() || youtubeMediaState()?.clockUsable === false || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source)) { setSyncNotice('Wait for this video’s main audio before starting a take.'); return; }
     try {
       if (mode === 'syllable' && !word.syllables?.length) throw Error('Set the syllable spelling first, then start the take.');
-      const laneWords = syncButton('tap-scope').value === 'lane' ? timing.draft.score.phrases.slice(timing.phraseIndex).filter(p => p.laneId === phrase.laneId).flatMap(p => p.words) : phrase.words;
+      const laneWords = (syncButton('tap-scope').value === 'lane' ? timing.draft.score.phrases.slice(timing.phraseIndex).filter(p => p.laneId === phrase.laneId).flatMap(p => p.words) : phrase.words).filter(w=>!w.excluded);
       const selected = mode === 'word' ? laneWords.slice(laneWords.findIndex(w => w.id === word.id)) : word.syllables;
-      const phrases=syncButton('tap-scope').value === 'lane' ? timing.draft.score.phrases.slice(timing.phraseIndex).filter(p=>p.laneId===phrase.laneId) : [phrase];
-      const units = mode === 'phrase' ? phrases.map(p=>({id:p.id,phraseId:p.id,wordId:p.words[0].id,text:p.words.map(w=>w.text).join(' '),estimatedStartMs:p.startMs,minMs:0,maxMs:timing.draft.score.source.durationMs})) : mode === 'word' ? wordTimingUnits(selected) : selected.map(item => ({ id: item.id, wordId: word.id,
+      const phrases=(syncButton('tap-scope').value === 'lane' ? timing.draft.score.phrases.slice(timing.phraseIndex).filter(p=>p.laneId===phrase.laneId) : [phrase]).filter(p=>p.words.some(w=>!w.excluded));
+      const units = mode === 'phrase' ? phrases.map(p=>({id:p.id,phraseId:p.id,wordId:p.words.find(w=>!w.excluded).id,text:p.words.filter(w=>!w.excluded).map(w=>w.text).join(' '),estimatedStartMs:p.startMs,minMs:0,maxMs:timing.draft.score.source.durationMs})) : mode === 'word' ? wordTimingUnits(selected) : selected.map(item => ({ id: item.id, wordId: word.id,
         ...(mode === 'syllable' ? { syllableId: item.id } : {}), text: item.text,
         minMs: mode === 'word' ? 0 : word.startMs, maxMs: mode === 'word' ? timing.draft.score.source.durationMs : word.endMs }));
       if (tapping.take && tapping.binding !== tapBinding()) throw Error('This take belongs to an older preview. Discard it before continuing.');
@@ -750,7 +752,10 @@
     syncButton('next').disabled = timing.busy || !draft || timing.phraseIndex >= draft.score.phrases.length - 1;
     for (const name of ['audition', 'tune', 'reset']) syncButton(name).disabled = timing.busy || !draft;
     syncButton('apply').disabled = timing.busy || !draft || timing.dirty || tapping.splitDirty || tapPending() || !timing.auditioned || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source);
-    syncButton('apply').setAttribute('aria-description', !timing.auditioned ? 'Audition the proposed timing before saving' : 'Save one undoable timing revision for this video');
+    const saveReason = timing.busy ? 'Updating preview…' : !draft ? 'Open a preview to refine this recording.' : timing.dirty || tapping.splitDirty ? 'Use your typed changes first.' : tapPending() ? (tapping.take?.status==='armed' ? 'Stop the take, then Use take in preview. Partial passes are welcome.' : 'Use take in preview first. Unmarked lyrics keep their existing timing.') : !timing.auditioned ? 'Audition at 1×, then Save timings. You can save a partial pass.' : 'Ready to save this iteration. Keep refining whenever you like.';
+    syncButton('apply').setAttribute('aria-description', saveReason);
+    syncPanel.querySelector('.lvx-sync-save-status').textContent=saveReason;
+    syncButton('light-editor').disabled=timing.busy||!draft||timing.dirty||tapping.splitDirty||effectPending();
     syncButton('export').disabled = timing.busy || !draft || timing.dirty || tapping.splitDirty || tapPending();
     syncButton('undo').disabled = timing.busy || Boolean(draft);
     syncPanel.querySelector('.lvx-sync-position').textContent = draft ? `Phrase ${timing.phraseIndex + 1} / ${draft.score.phrases.length}` : 'No preview';
@@ -769,7 +774,8 @@
     timing.priorLoop = state.auditionLoop; syncPanel.hidden = false; timing.busy = true; refreshTimingPanel();
     setSyncNotice('Finding the timing source for this exact video…');
     try {
-      const result = await timingRequest('LV_TIMING_PREPARE');
+      const current=await timingRequest('LV_TIMING_CURRENT');
+      const result = current.preview ? current : await timingRequest('LV_TIMING_PREPARE');
       timing.draft = result.preview; timing.phraseIndex = 0; timing.view = 'proposed'; timing.dirty = false; timing.auditioned = false;
       setSyncNotice(`Unsaved preview · ${result.preview.changedWords} words retimed · ${result.preview.preservedPhraseIds.length} phrases with saved edits preserved. Audition, then apply.`);
     } catch (error) { setSyncNotice(error.message); }
@@ -849,6 +855,17 @@
   syncButton('tune').addEventListener('click', tuneTimingText);
   syncButton('reset').addEventListener('click', () => { timing.dirty = false; refreshTimingPanel(); });
   syncButton('apply').addEventListener('click', applyTimingReview);
+  syncButton('light-editor').addEventListener('click', async()=>{
+    if(timing.busy||!timing.draft||timing.dirty||tapping.splitDirty||effectPending())return;
+    if(tapping.take){
+      getMedia()?.pause();stopTapTake();
+      if(tapping.take.marks.length)await useTapTake();else discardTapTake();
+      if(timingTapPending())return;
+    }
+    try{await timingRequest('LV_LIGHT_EDITOR_OPEN');setSyncNotice('Lightweight editor opened. It shares this preview and controls this YouTube video.');}
+    catch(error){setSyncNotice(error.message);}
+    refreshTimingPanel();
+  });
   syncButton('export').addEventListener('click', () => {
     if (!timing.draft || timing.busy || timing.dirty || tapping.splitDirty || tapPending()) return;
     const score = LvScore.validateScore(timing.draft.score), url = URL.createObjectURL(new Blob([JSON.stringify(score)],{type:'application/json'}));
@@ -876,10 +893,11 @@
   document.addEventListener('fullscreenchange', () => { if (root.isConnected) mountRoot(); });
 
   window.__lyricVibeOverlay = {
+    interfaceVersion: 2,
     // Health check: returns false once this script's extension context dies
     // (extension reloaded/updated), so the next injection knows to replace us.
     ping() {
-      try { return Boolean(chrome && chrome.runtime && chrome.runtime.id); }
+      try { return Boolean(chrome?.runtime?.id && chrome.runtime.getManifest()); }
       catch (_) { return false; }
     },
     show,
@@ -925,6 +943,23 @@
   if (typeof chrome === 'undefined' || !chrome.runtime?.onMessage) return; // extension context invalidated
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || !message.type) return;
+
+    if(message.type==='LV_TIMING_PREVIEW_UPDATED'){
+      if(message.mediaKey!==LvScore.mediaKey({url:location.href})||timing.busy)return;
+      if(!timing.draft){
+        if(tapPending()||timing.dirty||tapping.splitDirty)return;
+        if(message.preview?.baseRevision!==state.score?.revision||message.preview?.baseHash!==state.score?.lyrics.contentHash)return;
+        try{LvScore.validateScore(message.preview.score);timing.draft=message.preview;timing.phraseIndex=Math.min(timing.phraseIndex,timing.draft.score.phrases.length-1);timing.auditioned=false;state.scoreSignature='';refreshTimingPanel();}catch(error){setSyncNotice(error.message);}return;
+      }
+      if(timing.draft.token!==message.preview?.token)return;
+      if(message.preview.previewRevision<=timing.draft.previewRevision)return;
+      if(tapPending()||timing.dirty||tapping.splitDirty){setSyncNotice('The preview changed in the lightweight editor. Your input is retained; finish or discard it before reopening Sync.');return;}
+      try{LvScore.validateScore(message.preview.score);timing.draft=message.preview;timing.auditioned=false;state.scoreSignature='';refreshTimingPanel();setSyncNotice('Preview updated in the lightweight editor. Saved timings remain unchanged.');}catch(error){setSyncNotice(error.message);}
+      return;
+    }
+    if(message.type==='LV_TIMING_PREVIEW_CLOSED'){
+      if(message.mediaKey===LvScore.mediaKey({url:location.href})&&!timing.busy&&!tapPending()&&!timing.dirty){discardTimingLocal();setSyncNotice('Preview closed. Saved timings remain available.');}return;
+    }
 
     if (message.type === 'LV_ANALYSIS_CLOCK') {
       const media = getMedia();
@@ -974,6 +1009,9 @@
       else if (message.action === 'play') {
         media.play().then(() => sendResponse({ ok: true }), error => sendResponse({ ok: false, error: { code: 'PLAY_DENIED', message: error.message } }));
         return true;
+      } else if (message.action === 'setRate') {
+        if(![.25,.5,.75,1].includes(message.rate)){sendResponse({ok:false,error:{code:'RATE_INVALID',message:'Choose quarter, half, slower or normal speed.'}});return;}
+        media.preservesPitch=true;media.playbackRate=message.rate;
       } else if (message.action === 'clearLoop') state.auditionLoop = null;
       else if (message.action === 'setLoop') {
         const loop = message.loop;

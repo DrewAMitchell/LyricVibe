@@ -256,6 +256,7 @@
         if (!word || typeof word.id !== "string" || !word.id || ids.has(word.id) || typeof word.text !== "string" || !word.text.trim()) bad("invalid or duplicate word");
         ids.add(word.id);
         if (typeof word.startMs !== "number" || !Number.isFinite(word.startMs) || word.startMs < 0 || typeof word.endMs !== "number" || !Number.isFinite(word.endMs) || word.endMs < 0 || word.endMs < word.startMs || word.startMs < phrase.startMs || word.endMs > phrase.endMs || !["estimated", "manual", "aligned"].includes(word.provenance) || typeof word.locked !== "boolean" || !Array.isArray(word.effects)) bad("invalid word timing or fields");
+        if (word.excluded !== undefined && typeof word.excluded !== "boolean") bad("word excluded must be boolean when present");
         if (word.spokenText !== undefined && (typeof word.spokenText !== "string" || !word.spokenText.trim() || word.spokenText.length > 256 || word.spokenText.includes("|"))) bad("invalid spokenText");
         for (const effect of word.effects) if (!effect || !EFFECTS.has(effect.type) || typeof effect.strength !== "number" || !Number.isFinite(effect.strength) || effect.strength < 0 || effect.strength > 1) bad("invalid effect");
         if (word.reveal !== undefined && !validReveal(word.reveal)) bad("invalid word reveal");
@@ -319,11 +320,46 @@
       if (typeof op.text !== "string" || !op.text.trim()) fail("INVALID_OPERATION", "text must be nonempty");
       if (op.text !== word.text) { delete word.spokenText; if (word.syllables) delete word.syllables; }
       word.text = op.text;
+    } else if (op.type === "replaceWords") {
+      const phrase = next.phrases.find(item => item.id === op.phraseId);
+      if (!phrase) fail("UNKNOWN_ID", `unknown phrase id: ${op.phraseId}`);
+      if (!Array.isArray(op.wordIds) || !op.wordIds.length || op.wordIds.length > 5000 || op.wordIds.some(id => typeof id !== "string") || new Set(op.wordIds).size !== op.wordIds.length) fail("INVALID_OPERATION", "wordIds must be a bounded nonempty list of distinct word IDs");
+      if (typeof op.text !== "string" || !op.text.trim() || op.text.length > 10000) fail("INVALID_OPERATION", "replacement text must be nonempty and at most 10000 characters");
+      const tokens = op.text.trim().split(/\s+/);
+      const firstIndex = phrase.words.findIndex(word => word.id === op.wordIds[0]);
+      if (firstIndex < 0) fail("UNKNOWN_ID", "selected words must belong to the specified phrase");
+      const selected = phrase.words.slice(firstIndex, firstIndex + op.wordIds.length);
+      if (selected.length !== op.wordIds.length || selected.some((word, i) => word.id !== op.wordIds[i])) fail("INVALID_OPERATION", "selected word IDs must be one contiguous phrase interval in source order");
+      const startMs = Math.min(...selected.map(word => word.startMs));
+      const endMs = Math.max(...selected.map(word => word.endMs));
+      const prefix = `${phrase.id}-replace-${selected[0].id}-${selected.at(-1).id}`;
+      const usedIds = new Set(next.lanes.map(item => item.id));
+      for (const item of next.phrases) {
+        usedIds.add(item.id);
+        for (const word of item.words) {
+          if (!selected.some(chosen => chosen.id === word.id)) usedIds.add(word.id);
+          for (const syllable of word.syllables || []) usedIds.add(syllable.id);
+        }
+      }
+      let suffix = 1;
+      while (tokens.some((_, i) => usedIds.has(`${prefix}-${suffix}-${i + 1}`))) suffix++;
+      const span = endMs - startMs;
+      const replacements = tokens.map((text, i) => ({
+        id: `${prefix}-${suffix}-${i + 1}`, text,
+        startMs: startMs + Math.round(span * i / tokens.length),
+        endMs: startMs + Math.round(span * (i + 1) / tokens.length),
+        provenance: "estimated", locked: false, effects: [],
+      }));
+      phrase.words.splice(firstIndex, selected.length, ...replacements);
     } else if (op.type === "setWordLock") {
       const { word } = locateWord(next, op.wordId);
       if (typeof op.locked !== "boolean") fail("INVALID_OPERATION", "locked must be boolean");
       word.locked = op.locked;
       if (op.locked) word.provenance = "manual";
+    } else if (op.type === "setWordExcluded") {
+      const { word } = locateWord(next, op.wordId);
+      if (typeof op.excluded !== "boolean") fail("INVALID_OPERATION", "excluded must be boolean");
+      word.excluded = op.excluded;
     } else if (op.type === "setPhraseLane") {
       const phrase = next.phrases.find(p => p.id === op.phraseId);
       if (!phrase) fail("UNKNOWN_ID", `unknown phrase id: ${op.phraseId}`);
@@ -453,8 +489,10 @@
       if (at < start || at > end) continue;
       const fade = Math.min(phrase.fadeOutMs, Math.max(0, end - start));
       const opacity = fade > 0 && at > end - fade ? Math.max(0, (end - at) / fade) : 1;
-      const activeWords = phrase.words.filter(w => at >= w.startMs && at <= w.endMs);
-      phrases.push({ ...clone(phrase), activeWords: activeWords.map(w => w.id), activeSyllables: activeWords.flatMap(w => (w.syllables || []).filter(syllable => at >= syllable.startMs && at <= syllable.endMs).map(syllable => syllable.id)), opacity });
+      const visibleWords = phrase.words.filter(w => !w.excluded);
+      if (!visibleWords.length) continue;
+      const activeWords = visibleWords.filter(w => at >= w.startMs && at <= w.endMs);
+      phrases.push({ ...clone(phrase), words: clone(visibleWords), activeWords: activeWords.map(w => w.id), activeSyllables: activeWords.flatMap(w => (w.syllables || []).filter(syllable => at >= syllable.startMs && at <= syllable.endMs).map(syllable => syllable.id)), opacity });
     }
     return { phrases };
   }

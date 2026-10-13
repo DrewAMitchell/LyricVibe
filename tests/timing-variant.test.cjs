@@ -2,6 +2,32 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const core = require('../extension/score-core.js'), variant = require('../extension/timing-variant.js');
 const source = { videoId: 'FIXTURE0001', durationMs: 60000 };
 const make = (raw, hash = 'a') => core.createScore(source, raw, { contentHash: hash.repeat(64) });
+
+test('excluded-word migration preserves omission across changed timing and requires protected override to restore', () => {
+  const base = make('[00:20.00]See that light');
+  const word = base.phrases[0].words[1];
+  const hidden = core.applyOperation(base, { type: 'setWordExcluded', wordId: word.id, excluded: true }, base.revision);
+  const draft = variant.merge(hidden, make('[00:23.19]See that light', 'b'));
+  assert.equal(draft.score.phrases[0].words[1].excluded, true);
+  assert.ok(draft.protectedIds.includes(word.id));
+  assert.equal(draft.score.phrases[0].words[1].startMs, word.startMs);
+  assert.throws(() => variant.operate(draft, { type: 'setWordExcluded', wordId: word.id, excluded: false }), { code: 'MANUAL_PROTECTED' });
+  const restored = variant.operate(draft, { type: 'setWordExcluded', wordId: word.id, excluded: false }, true);
+  assert.equal(restored.score.phrases[0].words[1].excluded, false);
+  assert.equal(restored.score.phrases[0].words[1].text, word.text);
+});
+
+test('replaceWords is whitelisted for preview edits and protects saved manual timing', () => {
+  const base = make('[00:20.00]See that light');
+  const phrase = base.phrases[0], selected = phrase.words.slice(0, 3);
+  const word = selected[0];
+  const manuallyTimed = core.applyOperation(base, { type: 'setWordTiming', wordId: word.id, startMs: word.startMs + 5, endMs: word.endMs - 5 }, base.revision);
+  const draft = variant.merge(manuallyTimed, make('[00:23.19]See that light', 'b'));
+  const op = { type: 'replaceWords', phraseId: phrase.id, wordIds: selected.map(item => item.id), text: 'get down' };
+  assert.throws(() => variant.operate(draft, op), { code: 'MANUAL_PROTECTED' });
+  const changed = variant.operate(draft, op, true);
+  assert.deepEqual(changed.score.phrases[0].words.map(item => item.text), ['get', 'down']);
+});
 test('preview migrates catalog estimates and keeps ids, effects, offset and input immutable', () => {
   const base = make('[00:01.00]hello world\n[00:04.00]another line');
   base.offsetMs = 137; base.phrases[0].words[0].effects = [{type:'tilt',strength:.2}];

@@ -16,8 +16,11 @@ const ID_B = 'FIXTURE0003';
 
 function makeHarness() {
   const values = Object.create(null);
+  const sessionValues = Object.create(null);
   const tabs = new Map([[1, { url: `https://www.youtube.com/watch?v=${ID_A}`, duration: 10, mediaReady: true, isAd: false }], [2, { url: `https://music.youtube.com/watch?v=${ID_B}`, duration: 20, mediaReady: true, isAd: false }]]);
   const tabMessages = [];
+  const runtimeMessages = [];
+  const popupWindows = [];
   let listener;
   const analysisCalls = [];
   let analysisStatus = { state: 'capturing', tabId: 1, mediaKey: `youtube:${ID_A}`, sessionId: 'session-1' };
@@ -25,12 +28,16 @@ function makeHarness() {
     runtime: {
       id: 'test-extension',
       onMessage: { addListener(fn) { listener = fn; } },
-      async sendMessage(message) { return message; },
+      async sendMessage(message) { runtimeMessages.push(structuredClone(message)); return message; },
       getURL(file) { return `chrome-extension://test/${file}`; },
     },
     storage: { local: {
       async get(key) { return { [key]: structuredClone(values[key]) }; },
       async set(items) { for (const [key, value] of Object.entries(items)) values[key] = structuredClone(value); },
+    }, session: {
+      async get(key) { return { [key]: structuredClone(sessionValues[key]) }; },
+      async set(items) { for (const [key, value] of Object.entries(items)) sessionValues[key] = structuredClone(value); },
+      async remove(key) { delete sessionValues[key]; },
     } },
     tabs: {
       async sendMessage(tabId, message) {
@@ -40,6 +47,7 @@ function makeHarness() {
       },
       async create() { return {}; },
     },
+    windows: { async create(options) { popupWindows.push(structuredClone(options)); return { id: popupWindows.length }; } },
   };
   const context = vm.createContext({ chrome, crypto: webcrypto, TextEncoder, URL, AbortSignal, setTimeout, clearTimeout, console,
     LvAnalysis: { async analysisStatus() { return analysisStatus; }, async startAnalysis(args) { analysisCalls.push(args); return { state: 'capturing', engine: args.engine }; }, async stopAnalysis(scope) { analysisCalls.push({ stopScope: scope }); return { state: 'stopped' }; } },
@@ -74,7 +82,9 @@ function makeHarness() {
       ...overrides,
     });
   }
-  return { context, values, tabs, tabMessages, analysisCalls, dispatch, ensure, setAnalysisStatus(value) { analysisStatus = value; } };
+  return { context, values, sessionValues, tabs, tabMessages, runtimeMessages, popupWindows, analysisCalls, dispatch, ensure,
+    restartWorker() { vm.runInContext(hostSource, context, { filename: 'score-host.js' }); },
+    setAnalysisStatus(value) { analysisStatus = value; } };
 }
 
 function recordFor(h, id = ID_A) { return h.values[`lvScore:youtube:${id}`]; }
@@ -99,6 +109,169 @@ test('catalog preview, exact tuning, cancellation and application preserve histo
   assert.deepEqual(JSON.parse(JSON.stringify({...undone.score,revision:0})),JSON.parse(JSON.stringify(score)));
   const again=await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:prepared.preview.token},sender);
   assert.equal(again.ok,false);assert.equal(again.error.code,'REVISION_CONFLICT');
+});
+
+test('timing preview recovers after worker restart and remains valid beyond thirty minutes', async () => {
+  const h=makeHarness(), score=await h.ensure();
+  h.context.recognize=async()=>({ok:true,lyrics:{synced:'[00:05.00]hello world\n[00:07.00]'},match:{id:2}});
+  const sender={id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`};
+  const envelope={mediaKey:`youtube:${ID_A}`,expectedRevision:score.revision,lyricsHash:score.lyrics.contentHash};
+  const prepared=await h.dispatch({type:'LV_TIMING_PREPARE',...envelope},sender);
+  const word=score.phrases[0].words[0];
+  const tuned=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:prepared.preview.token,previewRevision:0,
+    changes:[{wordId:word.id,startMs:word.startMs+55,endMs:word.endMs+55}]},sender);
+  assert.ok(h.sessionValues[`lvTimingPreview:1:${envelope.mediaKey}`]);
+  const afterThirtyOneMinutes=Date.now()+31*60*1000;
+  vm.runInContext(`Date.now = () => ${afterThirtyOneMinutes}`,h.context);
+  h.restartWorker();
+  // Session storage is scoped to this browser session and survives service-worker suspension.
+  const recovered=await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:prepared.preview.token,
+    previewRevision:tuned.preview.previewRevision},sender);
+  assert.equal(recovered.ok,true);
+  assert.equal(recovered.score.phrases[0].words[0].startMs,word.startMs+55);
+  assert.equal(recordFor(h).history.length,1);
+  const undone=await h.dispatch({type:'LV_SCORE_UNDO',...envelope,expectedRevision:1},sender);
+  assert.equal(undone.ok,true);
+  assert.equal(undone.score.phrases[0].words[0].startMs,word.startMs);
+  assert.equal(h.sessionValues[`lvTimingPreview:1:${envelope.mediaKey}`],undefined);
+});
+
+test('light editor opens only from the bound source overlay and current returns the saved draft without preparing one', async () => {
+  const h=makeHarness(), score=await h.ensure();
+  const overlay={id:'test-extension',tab:{id:1,url:`https://www.youtube.com/watch?v=${ID_A}`},url:`https://www.youtube.com/watch?v=${ID_A}`};
+  const opened=await h.dispatch({type:'LV_LIGHT_EDITOR_OPEN',tabId:1,mediaKey:`youtube:${ID_A}`},overlay);
+  assert.equal(opened.ok,true);
+  assert.deepEqual(h.popupWindows[0],{type:'popup',url:`chrome-extension://test/light-editor.html?sourceTab=1&mediaKey=youtube%3A${ID_A}`,width:1100,height:650});
+  const denied=await h.dispatch({type:'LV_LIGHT_EDITOR_OPEN',tabId:1,mediaKey:`youtube:${ID_A}`},
+    {id:'test-extension',tab:{id:1,url:overlay.tab.url},url:'chrome-extension://test/options.html'});
+  assert.equal(denied.error.code,'SOURCE_REQUIRED');
+  assert.equal(h.popupWindows.length,1);
+
+  const lightEditor={id:'test-extension',url:`chrome-extension://test/light-editor.html?sourceTab=1&mediaKey=youtube%3A${ID_A}`};
+  const request={type:'LV_TIMING_CURRENT',tabId:1,mediaKey:`youtube:${ID_A}`,expectedRevision:score.revision,lyricsHash:score.lyrics.contentHash};
+  h.context.recognize=async()=>{throw new Error('current must not prepare catalog timing');};
+  let current=await h.dispatch(request,lightEditor);
+  assert.equal(current.ok,true);
+  assert.deepEqual(JSON.parse(JSON.stringify(current.score)),JSON.parse(JSON.stringify(score)));
+  assert.equal(current.preview,null);
+  assert.equal(h.sessionValues[`lvTimingPreview:1:youtube:${ID_A}`],undefined);
+
+  h.context.recognize=async()=>({ok:true,lyrics:{synced:'[00:05.00]hello world\n[00:07.00]'},match:{id:2}});
+  const envelope={mediaKey:`youtube:${ID_A}`,expectedRevision:score.revision,lyricsHash:score.lyrics.contentHash};
+  const prepared=await h.dispatch({type:'LV_TIMING_PREPARE',...envelope},overlay);
+  const word=prepared.preview.score.phrases[0].words[0];
+  const tuned=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:prepared.preview.token,previewRevision:0,
+    changes:[{wordId:word.id,startMs:word.startMs+25,endMs:word.endMs+25}]},overlay);
+  assert.equal(tuned.ok,true);
+  const tabEvent=h.tabMessages.findLast(item=>item.message.type==='LV_TIMING_PREVIEW_UPDATED');
+  const runtimeEvent=h.runtimeMessages.findLast(item=>item.type==='LV_TIMING_PREVIEW_UPDATED');
+  assert.equal(tabEvent.tabId,1);
+  assert.equal(tabEvent.message.mediaKey,envelope.mediaKey);
+  assert.equal(runtimeEvent.tabId,1);
+  assert.equal(runtimeEvent.mediaKey,envelope.mediaKey);
+  assert.equal(runtimeEvent.preview.previewRevision,1);
+  current=await h.dispatch(request,lightEditor);
+  assert.equal(current.preview.previewRevision,1);
+  assert.equal(current.preview.token,prepared.preview.token);
+});
+
+test('timing preview undo restores the full prior draft monotonically without touching saved score history', async () => {
+  const h=makeHarness(), initial=await h.ensure(), word=firstWord(initial);
+  const syllable={id:'preview-undo-syllable',text:word.text,startMs:word.startMs,endMs:word.endMs};
+  const segmented=await h.dispatch({type:'LV_SCORE_OPERATION',mediaKey:`youtube:${ID_A}`,expectedRevision:0,
+    operation:{type:'setWordSyllables',wordId:word.id,syllables:[syllable]}});
+  const excluded=await h.dispatch({type:'LV_SCORE_OPERATION',mediaKey:`youtube:${ID_A}`,expectedRevision:1,
+    operation:{type:'setWordExcluded',wordId:word.id,excluded:true}});
+  assert.equal(segmented.ok,true); assert.equal(excluded.ok,true);
+  const savedBefore=JSON.stringify(recordFor(h));
+  h.context.recognize=async()=>({ok:true,lyrics:{synced:'[00:05.00]hello world\n[00:07.00]'},match:{id:2}});
+  const sender={id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`};
+  const envelope={mediaKey:`youtube:${ID_A}`,expectedRevision:excluded.score.revision,lyricsHash:excluded.score.lyrics.contentHash};
+  const prepared=await h.dispatch({type:'LV_TIMING_PREPARE',...envelope},sender);
+  const before=JSON.stringify(prepared.preview.score);
+  const tuned=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:prepared.preview.token,previewRevision:0,allowProtected:true,operations:[
+    {type:'setWordExcluded',wordId:word.id,excluded:false},
+    {type:'setSyllableTiming',syllableId:syllable.id,startMs:syllable.startMs+10,endMs:syllable.endMs},
+  ]},sender);
+  assert.equal(tuned.ok,true);
+  assert.equal(tuned.preview.previewRevision,1);
+  assert.notDeepEqual(JSON.parse(JSON.stringify(tuned.preview.score)),JSON.parse(before));
+  assert.equal(JSON.stringify(recordFor(h)),savedBefore);
+  const undone=await h.dispatch({type:'LV_TIMING_UNDO',...envelope,token:prepared.preview.token,previewRevision:1},sender);
+  assert.equal(undone.ok,true);
+  assert.equal(undone.preview.previewRevision,2);
+  assert.deepEqual(JSON.parse(JSON.stringify(undone.preview.score)),JSON.parse(before));
+  assert.equal(undone.preview.score.phrases[0].words[0].excluded,true);
+  assert.deepEqual(JSON.parse(JSON.stringify(undone.preview.score.phrases[0].words[0].syllables)),[
+    {...syllable,provenance:'manual',locked:true,effects:[]},
+  ]);
+  assert.equal(JSON.stringify(recordFor(h)),savedBefore);
+  assert.equal(recordFor(h).history.length,2);
+});
+
+test('from-saved timing preview avoids catalog lookup and supports a second undoable save', async () => {
+  const h=makeHarness(), initial=await h.ensure(), word=firstWord(initial);
+  const timed=await h.dispatch({type:'LV_SCORE_OPERATION',mediaKey:`youtube:${ID_A}`,expectedRevision:0,
+    operation:{type:'setWordTiming',wordId:word.id,startMs:word.startMs+10,endMs:word.endMs+10}});
+  const excluded=await h.dispatch({type:'LV_SCORE_OPERATION',mediaKey:`youtube:${ID_A}`,expectedRevision:1,
+    operation:{type:'setWordExcluded',wordId:word.id,excluded:true}});
+  assert.equal(timed.ok,true); assert.equal(excluded.ok,true);
+  const sender={id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`};
+  const envelope={mediaKey:`youtube:${ID_A}`,expectedRevision:excluded.score.revision,lyricsHash:excluded.score.lyrics.contentHash};
+  h.context.recognize=async()=>{throw new Error('from-saved prepare must not call catalog lookup');};
+  const saved=await h.dispatch({type:'LV_TIMING_PREPARE',...envelope,fromSaved:true},sender);
+  assert.equal(saved.ok,true);
+  assert.equal(h.runtimeMessages.findLast(item=>item.type==='LV_TIMING_PREVIEW_UPDATED').preview.token,saved.preview.token);
+  const savedWord=saved.preview.score.phrases[0].words.find(w=>w.id===word.id);
+  assert.equal(savedWord.startMs,excluded.score.phrases[0].words[0].startMs);
+  assert.equal(savedWord.endMs,excluded.score.phrases[0].words[0].endMs);
+  assert.equal(savedWord.excluded,true);
+
+  const firstTune=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:saved.preview.token,previewRevision:0,allowProtected:true,
+    changes:[{wordId:word.id,startMs:savedWord.startMs+10,endMs:savedWord.endMs+10}]},sender);
+  assert.equal(firstTune.ok,true);
+  const firstApply=await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:saved.preview.token,previewRevision:1},sender);
+  assert.equal(firstApply.ok,true);
+  assert.equal(firstApply.score.phrases[0].words[0].excluded,true);
+  assert.equal(recordFor(h).history.length,3);
+
+  const secondEnvelope={...envelope,expectedRevision:firstApply.score.revision};
+  const second=await h.dispatch({type:'LV_TIMING_PREPARE',...secondEnvelope,fromSaved:true},sender);
+  assert.equal(second.ok,true);
+  const nextWord=second.preview.score.phrases[0].words[1];
+  const secondTune=await h.dispatch({type:'LV_TIMING_TUNE',...secondEnvelope,token:second.preview.token,previewRevision:0,allowProtected:true,
+    changes:[{wordId:nextWord.id,startMs:nextWord.startMs+10,endMs:nextWord.endMs+10}]},sender);
+  assert.equal(secondTune.ok,true);
+  const secondApply=await h.dispatch({type:'LV_TIMING_APPLY',...secondEnvelope,token:second.preview.token,previewRevision:1},sender);
+  assert.equal(secondApply.ok,true);
+  assert.equal(secondApply.score.revision,firstApply.score.revision+1);
+  assert.equal(recordFor(h).history.length,4);
+  assert.deepEqual(JSON.parse(JSON.stringify({...recordFor(h).history.at(-1),revision:firstApply.score.revision})),
+    JSON.parse(JSON.stringify(firstApply.score)));
+});
+
+test('partial timing preview changes preserve unmarked words and stale source revisions invalidate previews', async () => {
+  const h=makeHarness(), score=await h.ensure();
+  h.context.recognize=async()=>({ok:true,lyrics:{synced:'[00:05.00]hello world\n[00:07.00]'},match:{id:2}});
+  const sender={id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`};
+  const envelope={mediaKey:`youtube:${ID_A}`,expectedRevision:score.revision,lyricsHash:score.lyrics.contentHash};
+  const before=JSON.stringify(recordFor(h));
+  const prepared=await h.dispatch({type:'LV_TIMING_PREPARE',...envelope},sender);
+  const [hello,world]=prepared.preview.score.phrases[0].words;
+  const tuned=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:prepared.preview.token,previewRevision:0,
+    changes:[{wordId:hello.id,startMs:hello.startMs+100,endMs:hello.endMs+100}]},sender);
+  assert.equal(tuned.ok,true);
+  assert.deepEqual([tuned.preview.score.phrases[0].words[1].startMs,tuned.preview.score.phrases[0].words[1].endMs],[world.startMs,world.endMs]);
+  assert.equal(JSON.stringify(recordFor(h)),before);
+  const edited=await h.dispatch({type:'LV_SCORE_OPERATION',...envelope,operation:{type:'setOffset',offsetMs:25}},sender);
+  assert.equal(edited.ok,true);
+  const stale=await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:prepared.preview.token,previewRevision:1},sender);
+  assert.equal(stale.error.code,'REVISION_CONFLICT');
+  // With the current score envelope, the old preview is rejected by its bound revision.
+  const currentEnvelope={...envelope,expectedRevision:edited.score.revision};
+  const staleBound=await h.dispatch({type:'LV_TIMING_APPLY',...currentEnvelope,token:prepared.preview.token,previewRevision:1},sender);
+  assert.equal(staleBound.error.code,'PREVIEW_EXPIRED');
+  assert.equal((await h.dispatch({type:'LV_TIMING_CURRENT',...currentEnvelope,lyricsHash:'f'.repeat(64)},sender)).error.code,'LYRIC_REVISION_MISMATCH');
 });
 
 test('hyphen word capture stages atomically and saved application can undo the structural split', async () => {
@@ -137,6 +310,9 @@ test('catalog preview rejects wrong sender, hash, source changes and stale token
   assert.equal((await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:preview.preview.token,previewRevision:0},sender)).ok,false);
   h.tabs.get(1).url=sender.url;
   assert.equal((await h.dispatch({type:'LV_TIMING_CANCEL',...envelope,token:preview.preview.token,previewRevision:0},sender)).ok,true);
+  assert.equal(h.sessionValues[`lvTimingPreview:1:${envelope.mediaKey}`],undefined);
+  assert.ok(h.tabMessages.some(item=>item.message.type==='LV_TIMING_PREVIEW_CLOSED'&&item.message.mediaKey===envelope.mediaKey));
+  assert.ok(h.runtimeMessages.some(item=>item.type==='LV_TIMING_PREVIEW_CLOSED'&&item.mediaKey===envelope.mediaKey));
   assert.equal((await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:preview.preview.token},sender)).error.code,'PREVIEW_EXPIRED');
   assert.equal(JSON.stringify(recordFor(h)),before);
 });

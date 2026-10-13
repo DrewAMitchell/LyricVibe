@@ -6,7 +6,7 @@
 })(globalThis, function(core) {
   const clone = value => JSON.parse(JSON.stringify(value));
   const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
-  const protectedWord = w => w.locked || w.provenance !== 'estimated' || (w.syllables || []).some(s => s.locked || s.provenance !== 'estimated');
+  const protectedWord = w => w.excluded === true || w.locked || w.provenance !== 'estimated' || (w.syllables || []).some(s => s.locked || s.provenance !== 'estimated');
   function merge(base, candidate) {
     core.validateScore(base); core.validateScore(candidate);
     if (core.mediaKey(base.source) !== core.mediaKey(candidate.source)) fail('SOURCE_MISMATCH', 'Timing source belongs to another video.');
@@ -99,10 +99,11 @@
     // Apply against a private copy so a failed batch cannot leave a partial preview.
     let score = clone(draft.score);
     for (const submitted of operations) {
-      if (!submitted || !['setPhraseTiming', 'setWordSyllables', 'setSyllableTiming', 'setWordEffect', 'setSyllableEffect'].includes(submitted.type)) fail('INVALID_OPERATION', 'Only phrase timing, syllable segmentation, timing, and appearance effects may be changed in this preview.');
+      if (!submitted || !['setPhraseTiming', 'setWordSyllables', 'setSyllableTiming', 'setWordEffect', 'setSyllableEffect', 'setWordExcluded', 'replaceWords'].includes(submitted.type)) fail('INVALID_OPERATION', 'Only phrase timing, syllable segmentation, timing, appearance effects, word exclusion, and contiguous text replacement may be changed in this preview.');
       const op = clone(submitted);
       let wordId = op.wordId;
       const effectOnly = op.type === 'setWordEffect' || op.type === 'setSyllableEffect';
+      if (op.type === 'replaceWords' && !allowProtected && Array.isArray(op.wordIds) && op.wordIds.some(id => draft.protectedIds.includes(id))) fail('MANUAL_PROTECTED', 'Enable editing saved timings before replacing words in this protected phrase.');
       if (op.type === 'setPhraseTiming') {
         const phrase=score.phrases.find(p=>p.id===op.phraseId);
         if (!phrase) fail('UNKNOWN_ID','Choose a phrase from this preview.');

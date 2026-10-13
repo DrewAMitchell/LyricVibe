@@ -13,6 +13,74 @@ function makeScore(lrc = '[00:01.00]We rise, again!\n[00:04.00]') {
 function allWords(s) { return s.phrases.flatMap(p => p.words.map(word => ({ phrase: p, word }))); }
 function errorCode(fn, code) { assert.throws(fn, error => error.code === code); }
 
+test('word exclusion toggles presentation without changing source text, identity, timing, or the input score', () => {
+  const original = makeScore('[00:01.00]See that light\n[00:04.00]');
+  const [see, that, light] = original.phrases[0].words;
+  const excluded = score.applyOperation(original, { type: 'setWordExcluded', wordId: that.id, excluded: true }, original.revision);
+  assert.equal(original.revision, 0);
+  assert.equal(that.excluded, undefined);
+  const retained = excluded.phrases[0].words[1];
+  assert.deepEqual([retained.id, retained.text, retained.startMs, retained.endMs], [that.id, that.text, that.startMs, that.endMs]);
+  assert.equal(retained.excluded, true);
+  const restored = score.applyOperation(excluded, { type: 'setWordExcluded', wordId: that.id, excluded: false }, excluded.revision);
+  assert.equal(restored.phrases[0].words[1].excluded, false);
+  assert.deepEqual([restored.phrases[0].words[1].id, restored.phrases[0].words[1].text, restored.phrases[0].words[1].startMs, restored.phrases[0].words[1].endMs], [that.id, that.text, that.startMs, that.endMs]);
+});
+
+test('activeAt omits excluded words from returned phrase presentation and fully excluded phrases', () => {
+  const original = makeScore('[00:01.00]See that light\n[00:04.00]');
+  const [see, that, light] = original.phrases[0].words;
+  let edited = score.applyOperation(original, { type: 'setWordExcluded', wordId: that.id, excluded: true }, 0);
+  let at = score.activeAt(edited, see.startMs);
+  assert.deepEqual(at.phrases[0].words.map(w => w.id), [see.id, light.id]);
+  assert.ok(!at.phrases[0].activeWords.includes(that.id));
+  edited = score.applyOperation(edited, { type: 'setWordExcluded', wordId: see.id, excluded: true }, edited.revision);
+  edited = score.applyOperation(edited, { type: 'setWordExcluded', wordId: light.id, excluded: true }, edited.revision);
+  assert.deepEqual(score.activeAt(edited, see.startMs).phrases, []);
+});
+
+test('score validation permits legacy omission and rejects nonboolean exclusion', () => {
+  const original = makeScore();
+  assert.equal(score.validateScore(original), original);
+  const malformed = structuredClone(original);
+  malformed.phrases[0].words[0].excluded = 'yes';
+  errorCode(() => score.validateScore(malformed), 'INVALID_SCORE');
+});
+
+test('replaceWords replaces a contiguous interval with estimated evenly divided words and preserves outside identities', () => {
+  const original = makeScore('[00:01.00]before See that light after\n[00:06.00]');
+  const phrase = original.phrases[0], [before, see, that, light, after] = phrase.words;
+  const start = Math.min(see.startMs, that.startMs, light.startMs), end = Math.max(see.endMs, that.endMs, light.endMs);
+  const changed = score.applyOperation(original, { type: 'replaceWords', phraseId: phrase.id, wordIds: [see.id, that.id, light.id], text: 'get down' }, original.revision);
+  const words = changed.phrases[0].words;
+  assert.deepEqual(words.map(w => w.text), ['before', 'get', 'down', 'after']);
+  assert.deepEqual([words[0].id, words.at(-1).id], [before.id, after.id]);
+  assert.notEqual(words[1].id, see.id);
+  assert.deepEqual([words[1].startMs, words[1].endMs, words[2].startMs, words[2].endMs], [start, start + Math.round((end - start) / 2), start + Math.round((end - start) / 2), end]);
+  assert.ok(words.slice(1, 3).every(w => w.provenance === 'estimated' && !w.locked));
+  assert.equal(changed.lyrics.contentHash, original.lyrics.contentHash);
+  assert.equal(original.phrases[0].words.length, 5);
+});
+
+test('replaceWords creates visible text when replacing excluded or mixed selections', () => {
+  const original = makeScore('[00:01.00]See that light');
+  const phrase = original.phrases[0];
+  const excluded = score.applyOperation(original, { type: 'setWordExcluded', wordId: phrase.words[1].id, excluded: true }, original.revision);
+  const replaced = score.applyOperation(excluded, { type: 'replaceWords', phraseId: phrase.id, wordIds: phrase.words.map(w => w.id), text: 'get down' }, excluded.revision);
+  assert.deepEqual(replaced.phrases[0].words.map(w => w.text), ['get', 'down']);
+  assert.ok(replaced.phrases[0].words.every(w => w.excluded !== true));
+});
+
+test('replaceWords rejects missing, duplicate, noncontiguous, cross-phrase and invalid text selections', () => {
+  const base = makeScore('[00:01.00]one two three\n[00:04.00]four five');
+  const [first, second, third] = base.phrases[0].words;
+  const phraseId = base.phrases[0].id;
+  for (const wordIds of [[first.id, third.id], [first.id, first.id], ['missing'], [first.id, base.phrases[1].words[0].id]]) {
+    errorCode(() => score.applyOperation(base, { type: 'replaceWords', phraseId, wordIds, text: 'new words' }, 0), wordIds[0] === 'missing' ? 'UNKNOWN_ID' : 'INVALID_OPERATION');
+  }
+  for (const text of ['', '  ', 42]) errorCode(() => score.applyOperation(base, { type: 'replaceWords', phraseId, wordIds: [first.id, second.id], text }, 0), 'INVALID_OPERATION');
+});
+
 test('exports global and CommonJS APIs and resolves only exact YouTube video identities', () => {
   assert.equal(globalThis.LvScore, score);
   assert.equal(score.mediaKey({ url: 'https://www.youtube.com/watch?v=FIXTURE0001&t=3' }), 'youtube:FIXTURE0001');

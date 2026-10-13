@@ -2,6 +2,7 @@
 (function (root) {
   const queues = new Map();
   const timingPreviews = new Map();
+  const previewStorageKey = (previewKey) => `lvTimingPreview:${previewKey}`;
   const fail = (code, message) => Object.assign(new Error(message), { code });
   const keyFor = (key) => `lvScore:${key}`;
   async function serial(key, work) {
@@ -18,8 +19,35 @@
     if (value) LvScore.validateScore(value.score);
     return value;
   }
+  async function readTimingPreview(previewKey) {
+    let preview = timingPreviews.get(previewKey);
+    if (!preview) {
+      const storageKey = previewStorageKey(previewKey);
+      preview = (await chrome.storage.session.get(storageKey))[storageKey];
+      if (preview) timingPreviews.set(previewKey, preview);
+    }
+    return preview;
+  }
+  async function writeTimingPreview(previewKey, preview) {
+    await chrome.storage.session.set({ [previewStorageKey(previewKey)]: preview });
+    timingPreviews.set(previewKey, preview);
+  }
+  async function clearTimingPreview(previewKey) {
+    timingPreviews.delete(previewKey);
+    await chrome.storage.session.remove(previewStorageKey(previewKey));
+  }
   async function publish(tabId, record) {
     const message = { type: 'LV_SCORE_UPDATED', tabId, mediaKey: LvScore.mediaKey(record.score.source), score: record.score, review: record.review || [], diagnostics: record.diagnostics || null };
+    await chrome.tabs.sendMessage(tabId, message).catch(() => {});
+    await chrome.runtime.sendMessage(message).catch(() => {});
+  }
+  async function publishTimingPreview(tabId, key, preview) {
+    const message = { type: 'LV_TIMING_PREVIEW_UPDATED', tabId, mediaKey: key, preview };
+    await chrome.tabs.sendMessage(tabId, message).catch(() => {});
+    await chrome.runtime.sendMessage(message).catch(() => {});
+  }
+  async function publishTimingClosed(tabId, key) {
+    const message = { type: 'LV_TIMING_PREVIEW_CLOSED', tabId, mediaKey: key };
     await chrome.tabs.sendMessage(tabId, message).catch(() => {});
     await chrome.runtime.sendMessage(message).catch(() => {});
   }
@@ -40,9 +68,14 @@
     } catch { return false; }
   }
   function editorSourceBound(sender, tabId, key) {
-    if (!exactExtensionPage(sender, 'editor.html')) return false;
+    if (!exactExtensionPage(sender, 'editor.html') && !exactExtensionPage(sender, 'light-editor.html')) return false;
     const url = new URL(sender.url);
     return url.searchParams.get('sourceTab') === String(tabId) && url.searchParams.get('mediaKey') === key;
+  }
+  function sourceOverlayBound(sender, tabId, key) {
+    return sender.id === chrome.runtime.id && sender.tab?.id === tabId &&
+      LvScore.mediaKey({ url: sender.url || sender.tab.url }) === key &&
+      LvScore.mediaKey({ url: sender.tab.url }) === key;
   }
   async function refreshDuration(key, record, hints) {
     const durationMs = Math.round((hints.duration || 0) * 1000);
@@ -119,6 +152,12 @@
       await chrome.tabs.create({ url: chrome.runtime.getURL(`editor.html?sourceTab=${tabId}&mediaKey=${encodeURIComponent(key)}`) });
       return { ok: true };
     }
+    if (message.type === 'LV_LIGHT_EDITOR_OPEN') {
+      const { key } = await liveIdentity(tabId, message.mediaKey);
+      if (!sourceOverlayBound(sender, tabId, key)) throw fail('SOURCE_REQUIRED', 'Open the lightweight editor from this video’s extension overlay.');
+      await chrome.windows.create({ type: 'popup', url: chrome.runtime.getURL(`light-editor.html?sourceTab=${tabId}&mediaKey=${encodeURIComponent(key)}`), width: 1100, height: 650 });
+      return { ok: true };
+    }
     if (message.type === 'LV_NATIVE_ANALYSIS_STOP' || message.type === 'LV_NATIVE_ANALYSIS_STATUS') {
       const requested = message.mediaKey;
       if (!editorSourceBound(sender, tabId, requested)) throw fail('EDITOR_REQUIRED', 'Native analysis controls require the editor opened for this source tab.');
@@ -155,29 +194,51 @@
         if (message.lyricsHash !== record.score.lyrics.contentHash) throw fail('LYRIC_REVISION_MISMATCH', 'Saved lyric revision changed. Refresh the preview.');
         const previewKey = `${tabId}:${key}`;
         if (message.type === 'LV_TIMING_PREPARE') {
-          const { hints } = await liveIdentity(tabId, key);
-          const result = await root.recognize({ hints });
-          if (!result?.ok || !result.lyrics?.synced) throw fail('TIMING_UNAVAILABLE', 'No matching timed catalog source is available.');
-          const hash = await digest(result.lyrics.synced);
-          const candidate = LvScore.createScore(record.score.source, result.lyrics.synced,
-            { provider: result.lyrics.provider, entryId: String(result.match?.id ?? ''), contentHash: hash });
-          const draft = { ...root.LvTimingVariant.merge(record.score, candidate), token: crypto.randomUUID(), previewRevision: 0,
-            baseRevision: record.score.revision, baseHash: record.score.lyrics.contentHash, createdAt: Date.now() };
-          await liveIdentity(tabId, key); timingPreviews.set(previewKey, draft);
+          let candidate;
+          if (message.fromSaved === true) {
+            candidate = JSON.parse(JSON.stringify(record.score));
+          } else {
+            const { hints } = await liveIdentity(tabId, key);
+            const result = await root.recognize({ hints });
+            if (!result?.ok || !result.lyrics?.synced) throw fail('TIMING_UNAVAILABLE', 'No matching timed catalog source is available.');
+            const hash = await digest(result.lyrics.synced);
+            candidate = LvScore.createScore(record.score.source, result.lyrics.synced,
+              { provider: result.lyrics.provider, entryId: String(result.match?.id ?? ''), contentHash: hash });
+          }
+          const draft = { ...root.LvTimingVariant.merge(record.score, candidate), token: crypto.randomUUID(), previewRevision: 0, undoScores: [],
+            baseRevision: record.score.revision, baseHash: record.score.lyrics.contentHash };
+          await liveIdentity(tabId, key); await writeTimingPreview(previewKey, draft); await publishTimingPreview(tabId, key, draft);
           return { ok: true, preview: draft, tabId, mediaKey: key };
         }
-        const draft = timingPreviews.get(previewKey);
-        if (!draft || draft.token !== message.token || draft.baseRevision !== record.score.revision || draft.baseHash !== record.score.lyrics.contentHash || Date.now() - draft.createdAt > 30 * 60 * 1000) throw fail('PREVIEW_EXPIRED', 'Refresh this timing preview before continuing.');
+        if (message.type === 'LV_TIMING_CURRENT') {
+          const preview = await readTimingPreview(previewKey);
+          const currentPreview = preview && preview.baseRevision === record.score.revision && preview.baseHash === record.score.lyrics.contentHash
+            ? preview : null;
+          if (preview && !currentPreview) await clearTimingPreview(previewKey);
+          return { ok: true, score: record.score, preview: currentPreview, tabId, mediaKey: key };
+        }
+        const draft = await readTimingPreview(previewKey);
+        if (!draft || draft.token !== message.token || draft.baseRevision !== record.score.revision || draft.baseHash !== record.score.lyrics.contentHash) throw fail('PREVIEW_EXPIRED', 'Refresh this timing preview before continuing.');
         if (message.previewRevision !== draft.previewRevision) throw fail('PREVIEW_CONFLICT', 'This preview changed. Refresh before submitting another adjustment.');
-        if (message.type === 'LV_TIMING_CANCEL') { timingPreviews.delete(previewKey); return { ok: true }; }
+        if (message.type === 'LV_TIMING_CANCEL') { await clearTimingPreview(previewKey); await publishTimingClosed(tabId, key); return { ok: true }; }
         if (message.type === 'LV_TIMING_TUNE') {
           const supplied = ['changes', 'operation', 'operations'].filter(name => Object.prototype.hasOwnProperty.call(message, name));
           if (supplied.length !== 1) throw fail('INVALID_TIMING', 'Submit exactly one of changes, operation, or operations.');
           const tunedDraft = supplied[0] === 'changes'
             ? root.LvTimingVariant.tune(draft, message.changes, message.allowProtected === true)
             : root.LvTimingVariant.operate(draft, supplied[0] === 'operation' ? message.operation : message.operations, message.allowProtected === true);
-          const tuned = { ...tunedDraft, previewRevision: draft.previewRevision + 1 };
-          timingPreviews.set(previewKey, tuned); return { ok: true, preview: tuned, tabId, mediaKey: key };
+          const undoScores = [...(draft.undoScores || []), draft.score].slice(-5);
+          const tuned = { ...tunedDraft, undoScores, previewRevision: draft.previewRevision + 1 };
+          await writeTimingPreview(previewKey, tuned); await publishTimingPreview(tabId, key, tuned);
+          return { ok: true, preview: tuned, tabId, mediaKey: key };
+        }
+        if (message.type === 'LV_TIMING_UNDO') {
+          const undoScores = [...(draft.undoScores || [])];
+          if (!undoScores.length) throw fail('PREVIEW_UNDO_EMPTY', 'There is no timing adjustment to undo.');
+          const score = undoScores.pop();
+          const undone = { ...draft, score, undoScores, previewRevision: draft.previewRevision + 1 };
+          await writeTimingPreview(previewKey, undone); await publishTimingPreview(tabId, key, undone);
+          return { ok: true, preview: undone, tabId, mediaKey: key };
         }
         if (message.type !== 'LV_TIMING_APPLY') throw fail('MESSAGE_UNKNOWN', 'Unknown timing preview action.');
         await liveIdentity(tabId, key);
@@ -185,7 +246,7 @@
         record.score = { ...draft.score, revision: record.score.revision + 1 };
         record.review = []; record.diagnostics = null; delete record.lyricRevisionAvailable;
         await chrome.storage.local.set({ [keyFor(key)]: record });
-        timingPreviews.delete(previewKey); await publish(tabId, record);
+        await clearTimingPreview(previewKey); await publish(tabId, record);
         return { ok: true, score: record.score, tabId, mediaKey: key };
       }
       let next;
@@ -248,8 +309,8 @@
       return { ok: true, score: next, review: record.review || [], tabId, mediaKey: key };
     });
   }
-  const types = new Set(['LV_ANALYSIS_CACHE_CLEAR_REQUEST', 'LV_EDITOR_OPEN', 'LV_SCORE_GET', 'LV_SCORE_OPERATION', 'LV_SCORE_IMPORT', 'LV_NATIVE_ALIGNMENT_IMPORT', 'LV_SCORE_UNDO', 'LV_SCORE_SEEK', 'LV_SCORE_TRANSPORT', 'LV_SCORE_REVIEW_APPLY', 'LV_ANALYSIS_START', 'LV_ANALYSIS_STOP', 'LV_ANALYSIS_STATUS', 'LV_NATIVE_ANALYSIS_START', 'LV_NATIVE_ANALYSIS_STOP', 'LV_NATIVE_ANALYSIS_STATUS', 'LV_ALIGNMENT_PROPOSALS']);
-  for (const type of ['LV_TIMING_PREPARE', 'LV_TIMING_TUNE', 'LV_TIMING_APPLY', 'LV_TIMING_CANCEL']) types.add(type);
+  const types = new Set(['LV_ANALYSIS_CACHE_CLEAR_REQUEST', 'LV_EDITOR_OPEN', 'LV_LIGHT_EDITOR_OPEN', 'LV_SCORE_GET', 'LV_SCORE_OPERATION', 'LV_SCORE_IMPORT', 'LV_NATIVE_ALIGNMENT_IMPORT', 'LV_SCORE_UNDO', 'LV_SCORE_SEEK', 'LV_SCORE_TRANSPORT', 'LV_SCORE_REVIEW_APPLY', 'LV_ANALYSIS_START', 'LV_ANALYSIS_STOP', 'LV_ANALYSIS_STATUS', 'LV_NATIVE_ANALYSIS_START', 'LV_NATIVE_ANALYSIS_STOP', 'LV_NATIVE_ANALYSIS_STATUS', 'LV_ALIGNMENT_PROPOSALS']);
+  for (const type of ['LV_TIMING_PREPARE', 'LV_TIMING_CURRENT', 'LV_TIMING_TUNE', 'LV_TIMING_UNDO', 'LV_TIMING_APPLY', 'LV_TIMING_CANCEL']) types.add(type);
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!types.has(message?.type)) return;
     // Only this extension can submit score mutations; content scripts supply their own tab ID.
