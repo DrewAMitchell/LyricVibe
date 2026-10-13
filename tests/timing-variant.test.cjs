@@ -44,6 +44,29 @@ test('phrase syllable capture requires override for a saved protected word', () 
   const edited = variant.operate(draft, op, true);
   assert.equal(edited.score.phrases[0].words[0].endMs, end1);
 });
+
+test('preview lane changes are allowed for a locked phrase and preserve all timing and word state', () => {
+  const base = make('[00:20.00]See (echo)');
+  const phrase = base.phrases.find(item => item.laneId === 'lead');
+  const word = phrase.words[0];
+  word.startMs += 7; word.endMs -= 7; word.provenance = 'manual'; word.locked = true;
+  word.effects = [{ type: 'pulse', strength: 0.5 }];
+  const draft = variant.merge(base, make('[00:23.00]See (echo)', 'b'));
+  assert.ok(draft.protectedIds.includes(word.id));
+  const before = structuredClone(draft.score.phrases[0]);
+  const changed = variant.operate(draft, { type: 'setPhraseLane', phraseId: phrase.id, laneId: 'backing' });
+  const after = changed.score.phrases.find(item => item.id === phrase.id);
+  assert.equal(after.laneId, 'backing');
+  const { laneId: _laneId, ...beforeState } = before;
+  const { laneId: _changedLane, ...afterState } = after;
+  assert.deepEqual(afterState, beforeState);
+  const snapshot = JSON.stringify(draft);
+  assert.throws(() => variant.operate(draft, [
+    { type: 'setPhraseLane', phraseId: phrase.id, laneId: 'backing' },
+    { type: 'setPhraseLane', phraseId: phrase.id, laneId: 'unknown' },
+  ]), { code: 'UNKNOWN_ID' });
+  assert.equal(JSON.stringify(draft), snapshot);
+});
 test('preview migrates catalog estimates and keeps ids, effects, offset and input immutable', () => {
   const base = make('[00:01.00]hello world\n[00:04.00]another line');
   base.offsetMs = 137; base.phrases[0].words[0].effects = [{type:'tilt',strength:.2}];
