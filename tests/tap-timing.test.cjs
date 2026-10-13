@@ -746,3 +746,88 @@ test('restoreWordFrameTake rejects tampered frame partitions, counts, identities
   const oversized = { ...take, units: Array.from({ length: 5001 }, (_, i) => ({ ...wordFrames()[0], id: `u${i}`, wordId: `w${i}` })) };
   assert.throws(() => tap.restoreWordFrameTake(oversized), { code: 'INVALID_SNAPSHOT' });
 });
+
+test('phrase-stream rewind to an earlier phrase retains only its prefix and Undo restores the exact take', () => {
+  let take = tap.begin(phraseStreamUnits(), { mode: 'syllable', cadence: 'phrase-stream' });
+  take = tap.mark(take, 110); take = tap.mark(take, 220); take = tap.mark(take, 650);
+  const before = structuredClone(tap.stop(take));
+  const rewound = tap.rewindToPhrase(before, 'p2');
+  assert.deepEqual(rewound.marks, before.marks.slice(0, 2));
+  assert.equal(rewound.status, 'stopped');
+  assert.equal(rewound.index, 2);
+  assert.equal(rewound.activePhraseId, null);
+  assert.equal(rewound.pendingStartMs, null);
+  assert.equal(rewound.openTailId, null);
+  assert.equal(rewound.lastMs, rewound.marks.at(-1).startMs);
+  assert.deepEqual(rewound.wordTapCounts, { hour: 1, party: 1 });
+  assert.deepEqual(rewound.acknowledgedPhraseIds, ['p1']);
+  assert.deepEqual(tap.undo(rewound), before);
+
+  // The same stopped snapshot can resume at the seek position and rerecord
+  // without duplicate syllable ids or a backwards source-time mark.
+  const resumed = { ...rewound, status: 'armed' };
+  const rerecorded = tap.mark(resumed, 640);
+  assert.deepEqual(rerecorded.marks.map(m => m.id), ['hour-syllable-1', 'party-syllable-1', 'next-syllable-1']);
+  assert.ok(rerecorded.marks.every((m, i, all) => i === 0 || m.startMs >= all[i - 1].startMs));
+});
+
+test('phrase-stream rewind keeps earlier phrases and rejects non-stopped, wrong cadence, and unknown phrase', () => {
+  let take = tap.begin(phraseStreamUnits(), { mode: 'syllable', cadence: 'phrase-stream' });
+  take = tap.mark(take, 110); take = tap.mark(take, 650);
+  const stopped = tap.stop(take);
+  const rewound = tap.rewindToPhrase(stopped, 'p2');
+  assert.deepEqual(rewound.marks.map(m => m.phraseId), ['p1']);
+  assert.throws(() => tap.rewindToPhrase({ ...stopped, status: 'armed' }, 'p2'), { code: 'TAKE_NOT_STOPPED' });
+  assert.throws(() => tap.rewindToPhrase({ ...stopped, cadence: 'word-frames' }, 'p2'), { code: 'CADENCE_UNSUPPORTED' });
+  assert.throws(() => tap.rewindToPhrase(stopped, 'missing'), { code: 'UNKNOWN_PHRASE' });
+});
+
+test('restorePhraseStreamTake round trips current and rewound snapshots and rejects tampering', () => {
+  let take = tap.begin(phraseStreamUnits(), { mode: 'syllable', cadence: 'phrase-stream' });
+  take = tap.mark(take, 110); take = tap.mark(take, 220); take = tap.mark(take, 650);
+  const current = tap.stop(take);
+  for (const snapshot of [current, tap.rewindToPhrase(current, 'p2')]) {
+    snapshot.stoppedScoreMs = -10;
+    const encoded = JSON.stringify(snapshot);
+    const restored = tap.restorePhraseStreamTake(JSON.parse(encoded));
+    assert.notEqual(restored, snapshot);
+    assert.equal(JSON.stringify(restored), encoded);
+  }
+  const invalid = [
+    s => { s.marks[0].id = 'bad'; },
+    s => { s.wordTapCounts.hour = 7; },
+    s => { s.marks[1].startMs = 120; },
+    s => { s.units[0].expectedCount = 0; },
+    s => { s.actionHistory[0].actionHistory = []; },
+    s => { s.actionHistory[0].status = 'complete'; },
+  ];
+  for (const corrupt of invalid) {
+    const snapshot = structuredClone(current); corrupt(snapshot);
+    assert.throws(() => tap.restorePhraseStreamTake(snapshot), { code: 'INVALID_SNAPSHOT' });
+  }
+});
+
+test('restorePhraseStreamTake accepts signed stopped offsets preserved in resumed undo history', () => {
+  let take = tap.begin(phraseStreamUnits(), { mode: 'syllable', cadence: 'phrase-stream' });
+  take = tap.mark(take, 110);
+  const stopped = { ...tap.stop(take), stoppedScoreMs: -35 };
+  const resumed = { ...stopped, status: 'armed' };
+  const retaken = tap.stop(tap.mark(resumed, 220));
+  assert.equal(retaken.stoppedScoreMs, -35);
+  assert.ok(retaken.actionHistory.some(entry => entry.stoppedScoreMs === -35));
+  const restored = tap.restorePhraseStreamTake(retaken);
+  assert.deepEqual(restored, retaken);
+  assert.throws(() => tap.restorePhraseStreamTake({ ...retaken, stoppedScoreMs: 1.5 }), { code: 'INVALID_SNAPSHOT' });
+});
+
+test('restorePhraseStreamTake accepts an armed cross-phrase cursor with prior marks and no open tail', () => {
+  const units = phraseStreamUnits();
+  units.push({ id: 'word-next-again', wordId: 'next-again', phraseId: 'p2', text: 'again',
+    minMs: 600, maxMs: 900, expectedCount: 1 });
+  let take = tap.begin(units, { mode: 'syllable', cadence: 'phrase-stream' });
+  take = tap.mark(take, 110);
+  take = tap.moveCursor(take, 1, 650);
+  assert.equal(take.activePhraseId, 'p2');
+  assert.equal(take.openTailId, null);
+  assert.deepEqual(tap.restorePhraseStreamTake(tap.stop(take)), tap.stop(take));
+});

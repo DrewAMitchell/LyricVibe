@@ -315,7 +315,7 @@
   captureActions.before(syncPanel.querySelector('.lvx-phrase-syllables'),syncPanel.querySelector('.lvx-tap-words'),syllableFields);
   syncPanel.querySelector('.lvx-perform-cue').after(syncPanel.querySelector('.lvx-live-recovery'));
   const setSyncNotice = text => { syncNotice.textContent = text; };
-  const timingTapPending = () => Boolean(tapping.take && (tapping.take.status === 'armed' || tapping.take.marks.length || tapping.take.pendingStartMs !== null));
+  const timingTapPending = () => Boolean(tapping.take && (tapping.take.status === 'armed' || tapping.take.marks.length || tapping.take.pendingStartMs !== null || tapping.take.actionHistory?.length));
   const effectPending = () => performanceTake.armed || performanceTake.marks.length > 0;
   const tapPending = () => timingTapPending() || effectPending();
   const tapWord = () => timingPhrase()?.words.find(w => w.id === tapping.wordId) || timingPhrase()?.words[0];
@@ -325,9 +325,15 @@
   const streamTake = take => take?.cadence==='phrase-stream';
   const continuousPass = () => continuousSyllables() || phraseStream();
   const frameTake = take => take?.cadence==='word-frames';
-  function discardTapTake() { const restored=tapping.restored;tapping.restored=false;tapping.take = null; tapping.frameWordId=null; tapping.streamWordId=null; tapping.auditionScore=null; tapping.auditionMarks=null; tapping.binding = null; tapping.clockMs = null; tapping.splitDirty = false; tapping.heldInput = null; tapping.cancelledSpace = false; tapping.reviewId = null; tapping.correctionUndo = [];if(restored)syncButton('tap-syllable-flow').value='phrase-stream'; }
+  function discardTapTake() { const restored=tapping.restored;tapping.restored=false;tapping.take = null; tapping.frameWordId=null; tapping.streamWordId=null; tapping.followSeek=false;tapping.seekPhraseId=null;tapping.armSeekMs=null; tapping.auditionScore=null; tapping.auditionMarks=null; tapping.binding = null; tapping.clockMs = null; tapping.splitDirty = false; tapping.heldInput = null; tapping.cancelledSpace = false; tapping.reviewId = null; tapping.correctionUndo = [];if(restored)syncButton('tap-syllable-flow').value='phrase-stream'; }
   function restartTranscript() {
-    if(syncButton('tap-mode').value==='syllable'){getMedia()?.pause();state.auditionLoop=null;discardTapTake();state.scoreSignature='';refreshTimingPanel();setSyncNotice('Phrase take discarded. This phrase is ready to retake; other preview edits are preserved.');return;}
+    if(syncButton('tap-mode').value==='syllable'){
+      const media=getMedia(),phrase=timingPhrase();media?.pause();state.auditionLoop=null;discardTapTake();
+      tapping.wordId=phrase?.words.find(w=>!w.excluded)?.id||null;
+      if(media&&phrase)media.currentTime=Math.max(0,phrase.startMs+state.score.offsetMs-800)/1000;
+      state.scoreSignature='';refreshTimingPanel();
+      setSyncNotice('Take discarded. Word and syllable cues reset to the start of this phrase; playback is paused at its lead-in. Other preview edits are preserved.');return;
+    }
     discardTapTake();
     timing.phraseIndex = 0; tapping.wordId = timing.draft?.score.phrases[0]?.words[0]?.id || null;
     const media = getMedia(), first = timing.draft?.score.phrases[0];
@@ -381,6 +387,7 @@
     syncButton('tap-speed').disabled = timing.busy || take?.status === 'armed' || performanceTake.armed;
     syncButton('tap-arm').disabled = !sourceMatches || timing.busy || !word || (mode!=='syllable'&&word.excluded) || !timingPhrase()?.words.some(w=>!w.excluded) || timing.dirty || (mode!=='syllable'&&tapping.splitDirty) || effectPending() || tapping.take?.status === 'armed' || tapping.take?.status === 'complete';
     syncButton('tap-arm').textContent = phraseStream()?(take?.status==='stopped'?'▶ Continue syllable pass':'▶ Start syllable pass'):continuous?'▶ Start continuous pass':mode==='syllable'?'▶ Start phrase take':tapping.take?.status === 'stopped' ? '▶ Continue take' : '▶ Start take';
+    if(streamTake(take)&&take.status==='stopped'&&tapping.seekPhraseId)syncButton('tap-arm').textContent='▶ Retake from this phrase';
     syncButton('tap-mark').disabled = timing.busy || take?.status !== 'armed';
     syncButton('tap-mark').textContent = (take?.cadence || syncButton('tap-cadence').value) === 'flow' ? (take?.index === take?.units.length - 1 && take?.pendingStartMs !== null ? 'Finish lyric · Space' : 'Next lyric · Space') : take?.pendingStartMs !== null && take ? 'Mark end · Space' : 'Mark start · Space';
     if (take?.status === 'complete') syncButton('tap-mark').textContent = 'Pass complete';
@@ -388,7 +395,7 @@
     else if (syncButton('tap-cadence').value === 'hold') syncButton('tap-mark').textContent = `Hold Space · ${mode} duration`;
     syncButton('tap-release').disabled = mode === 'syllable' || timing.busy || take?.status !== 'armed' || take.pendingStartMs === null;
     syncButton('tap-stop').disabled = !take || (take.status !== 'armed' && getMedia()?.paused);
-    syncButton('tap-undo').disabled = timing.busy || !take || (!take.marks.length && take.pendingStartMs === null);
+    syncButton('tap-undo').disabled = timing.busy || !take || (!take.marks.length && take.pendingStartMs === null && !take.actionHistory?.length);
     syncButton('tap-use').disabled = timing.busy || !take?.marks.length || take.status === 'armed' || take.pendingStartMs !== null;
     syncButton('tap-discard').disabled = timing.busy || !take;
     if(mode==='syllable'&&!continuous)syncButton('tap-use').disabled=timing.busy||take?.status!=='complete';
@@ -419,6 +426,10 @@
       syncPanel.querySelector('.lvx-tap-panel > .lvx-sync-hint').textContent='Tap Space at every syllable entrance. Phrase edges contain the take; old word timings are ignored. Suggested counts advance the cue, and you can correct it live.';
       cue.querySelector('.lvx-perform-instruction').textContent='Space: next syllable · ← / →: move cue · Ctrl + ← / →: reassign last tap';
       cue.querySelector('small').textContent=take?.status==='armed'?'PHRASE-GUIDED SYLLABLES · RECORDING':take?'PHRASE-GUIDED SYLLABLES · REVIEW':'PHRASE-GUIDED SYLLABLES · READY';
+      if(take?.status==='stopped'&&tapping.seekPhraseId){
+        cue.querySelector('.lvx-perform-instruction').textContent='Retake from this phrase keeps earlier phrases and replaces this and later taps. Undo mark restores the previous take.';
+        cue.querySelector('small').textContent='PHRASE AT PLAYHEAD · READY TO RETAKE';
+      }
     }
     if (mode!=='syllable' && syncButton('tap-cadence').value === 'hold' && (!take || take.status === 'armed')) cue.querySelector('.lvx-perform-instruction').textContent = take?.pendingStartMs !== null && take ? `Release Space when this ${mode} ends` : `Hold Space while the outlined ${mode} is sung`;
     refreshToggles();
@@ -546,9 +557,22 @@
     return take.units[take.index]?.phraseId===matches[0]?take.units[take.index]:take.units.find(u=>u.phraseId===matches[0]);
   }
   function refreshPerformClock(now) {
+    if(streamTake(tapping.take)&&tapping.take.status==='stopped'&&tapping.followSeek){
+      const firstUnits=tapping.take.units.filter((u,i,a)=>!i||a[i-1].phraseId!==u.phraseId);
+      const active=firstUnits.filter(u=>now>=u.minMs&&now<u.maxMs);
+      const unit=active.length===1?active[0]:active.length?null:firstUnits.find(u=>u.minMs>=now)||firstUnits.at(-1);
+      const id=unit?.phraseId||null;
+      if(tapping.seekPhraseId!==id){
+        tapping.seekPhraseId=id;tapping.streamWordId=unit?.wordId||null;
+        if(unit){timing.phraseIndex=timing.draft.score.phrases.findIndex(p=>p.id===unit.phraseId);tapping.wordId=unit.wordId;}
+        state.scoreSignature='';refreshTimingPanel();
+      }
+      syncPanel.querySelector('.lvx-estimated-phrase').textContent=unit?'Following your playback position · recorded taps unchanged until Retake':'Overlapping phrase frames · choose an unambiguous playback position';
+      return;
+    }
     if(streamTake(tapping.take)&&tapping.take.status==='armed'){
       const take=tapping.take,unit=streamCueAt(take,now),id=unit?.wordId||null;
-      if(tapping.streamWordId!==id){tapping.streamWordId=id;if(unit){timing.phraseIndex=timing.draft.score.phrases.findIndex(p=>p.id===unit.phraseId);tapping.wordId=id;}state.scoreSignature='';refreshTapPanel();}
+      if(tapping.streamWordId!==id){tapping.streamWordId=id;if(unit){timing.phraseIndex=timing.draft.score.phrases.findIndex(p=>p.id===unit.phraseId);tapping.wordId=id;}state.scoreSignature='';refreshTimingPanel();}
       const recorded=unit?take.marks.filter(m=>m.wordId===unit.wordId).length:0;
       syncPanel.querySelector('.lvx-estimated-phrase').hidden=false;
       syncPanel.querySelector('.lvx-estimated-phrase').textContent=unit?`Next: “${unit.text}” · syllable ${recorded+1} · ${unit.expectedCount} suggested`:'Phrase lead-in or rest · wait for the next phrase';
@@ -684,7 +708,9 @@
         ...(mode === 'syllable' ? { syllableId: item.id,wordId:item.wordId,phraseId:phrase.id } : {}), text: item.text,
         minMs: mode === 'word' ? 0 : phrase.startMs, maxMs: mode === 'word' ? timing.draft.score.source.durationMs : phrase.endMs }));
       if (tapping.take && tapping.binding !== tapBinding()) throw Error('This take belongs to an older preview. Discard it before continuing.');
-      const take = tapping.take ? { ...tapping.take, status:'armed' } : LvTapTiming.begin(units, { mode, cadence:phraseStream()?'phrase-stream':continuousSyllables()?'word-frames':mode === 'syllable' ? 'entrances' : syncButton('tap-cadence').value === 'hold' ? 'pairs' : syncButton('tap-cadence').value, bpm: continuousPass()?null:syncButton('tap-snap').checked ? Number(syncButton('tap-bpm').value) : null });
+      const retakePhraseId=streamTake(tapping.take)&&tapping.take.status==='stopped'?tapping.seekPhraseId:null;
+      const retained=retakePhraseId?LvTapTiming.rewindToPhrase(tapping.take,retakePhraseId):tapping.take;
+      const take = retained ? { ...retained, status:'armed' } : LvTapTiming.begin(units, { mode, cadence:phraseStream()?'phrase-stream':continuousSyllables()?'word-frames':mode === 'syllable' ? 'entrances' : syncButton('tap-cadence').value === 'hold' ? 'pairs' : syncButton('tap-cadence').value, bpm: continuousPass()?null:syncButton('tap-snap').checked ? Number(syncButton('tap-bpm').value) : null });
       tapping.correctionUndo = []; tapping.cancelledSpace=false;
       timing.busy = true; refreshTimingPanel();
       const practiceRate = Number(syncButton('tap-speed').value);
@@ -695,11 +721,12 @@
       }
       state.auditionLoop = null;if(mode!=='syllable'||continuousPass())syncButton('loop').checked = false;
       const nextUnit = take.units[take.index];
-      const nextStart = streamTake(take)&&take.lastMs!==null?take.lastMs:mode !== 'syllable'||continuousPass() ? nextUnit?.estimatedStartMs : phrase.startMs;
-      media.currentTime = Math.max(0, (nextStart ?? word.startMs) + state.score.offsetMs - 800) / 1000;
+      const nextStart = retakePhraseId?nextUnit.minMs:streamTake(take)&&take.lastMs!==null?take.lastMs:mode !== 'syllable'||continuousPass() ? nextUnit?.estimatedStartMs : phrase.startMs;
+      tapping.armSeekMs=Math.max(0, (nextStart ?? word.startMs) + state.score.offsetMs - 800);
+      media.currentTime = tapping.armSeekMs / 1000;
       await media.play();
       if (!timing.draft || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source)) throw Error('Source changed before the take started.');
-      tapping.take = take; tapping.binding = tapBinding(); tapping.clockMs = media.currentTime * 1000; tapping.rate = media.playbackRate;
+      tapping.take = take; tapping.binding = tapBinding(); tapping.clockMs = media.currentTime * 1000; tapping.rate = media.playbackRate;tapping.followSeek=false;tapping.seekPhraseId=null;tapping.streamWordId=null;
       timing.view = 'proposed'; timing.auditioned = false; state.scoreSignature = '';
       setSyncNotice(mode === 'syllable' ? 'Tap Space at each syllable entrance, including the first. Phrase start and end stay fixed. The completed take plays back for review.' : syncButton('tap-cadence').value === 'hold' ? 'Hold Space for each sung word; release it at the end. Each release advances automatically.' : take.cadence === 'flow' ? 'Space starts each next lyric. Enter releases before a rest or at the end. Stop retains completed marks.' : 'Space marks START then END. Use take updates only the unsaved preview.');
       if(frameTake(take))setSyncNotice('Continuous syllable pass: tap each entrance. Two taps inside a word make two syllables. Stop whenever you want; untapped words keep their timing.');
@@ -754,16 +781,18 @@
   function restoreBufferedTake(packet){
     if(timing.busy||tapPending()||timing.dirty||tapping.splitDirty||!timing.draft||!getMedia()?.paused)throw Error('Restore requires an empty, paused editor with no pending text.');
     if(!packet||packet.binding!==tapBinding())throw Error('The buffered take belongs to a different preview revision or video.');
-    const take=LvTapTiming.restoreWordFrameTake(packet.take),words=timing.draft.score.phrases.flatMap(p=>p.words.map(w=>({word:w,phrase:p})));
+    const stream=packet.take?.cadence==='phrase-stream';
+    const take=stream?LvTapTiming.restorePhraseStreamTake(packet.take):LvTapTiming.restoreWordFrameTake(packet.take),words=timing.draft.score.phrases.flatMap(p=>p.words.map(w=>({word:w,phrase:p})));
     for(const unit of take.units){const match=words.find(x=>x.word.id===unit.wordId);
-      if(!match||match.word.excluded||match.word.text!==unit.text||match.word.startMs!==unit.minMs||match.word.endMs!==unit.maxMs||match.phrase.id!==unit.phraseId)throw Error('The word frames changed; keep the numeric take for review instead of guessing a match.');
+      if(!match||match.word.excluded||match.word.text!==unit.text||(stream?match.phrase.startMs:match.word.startMs)!==unit.minMs||(stream?match.phrase.endMs:match.word.endMs)!==unit.maxMs||match.phrase.id!==unit.phraseId)throw Error('The take frames changed; keep the numeric take for review instead of guessing a match.');
     }
     tapping.take=take;tapping.binding=packet.binding;tapping.rate=Number(syncButton('tap-speed').value);tapping.restored=true;
-    syncButton('tap-mode').value='syllable';syncButton('tap-syllable-flow').value='continuous';
+    tapping.followSeek=stream;tapping.seekPhraseId=null;
+    syncButton('tap-mode').value='syllable';syncButton('tap-syllable-flow').value=stream?'phrase-stream':'continuous';
     if(packet.wordId&&words.some(x=>x.word.id===packet.wordId)){const match=words.find(x=>x.word.id===packet.wordId);timing.phraseIndex=timing.draft.score.phrases.findIndex(p=>p.id===match.phrase.id);tapping.wordId=packet.wordId;}
     else followTapUnit();
     state.scoreSignature='';refreshTimingPanel();renderScore(getMediaTimeMs());
-    setSyncNotice(`${take.marks.length} buffered taps restored exactly. Review and use this take before starting the new phrase-guided pass.`);
+    setSyncNotice(`${take.marks.length} buffered taps restored exactly. Review, continue, or seek back to retake a phrase.`);
     return true;
   }
   syncButton('tap-back').addEventListener('click',()=>streamTake(tapping.take)?recoverStream(-1):repositionTap((tapping.take?.index??0)-1));
@@ -880,7 +909,7 @@
   syncButton('tap-mark').addEventListener('pointercancel', () => { if (tapping.heldInput === 'pointer') stopTapTake('Pointer canceled. Unfinished word unchanged; completed words retained.'); });
   syncButton('tap-release').addEventListener('click', () => markTapTime({release:true}));
   syncButton('tap-stop').addEventListener('click', () => { stopTapTake(); getMedia()?.pause(); });
-  syncButton('tap-undo').addEventListener('click', () => { if (tapping.take) { const live=streamTake(tapping.take)&&tapping.take.status==='armed';tapping.take = live?LvTapTiming.undo(tapping.take):LvTapTiming.stop(LvTapTiming.undo(tapping.take)); tapping.correctionUndo = []; followTapUnit();state.scoreSignature=''; } refreshTimingPanel(); });
+  syncButton('tap-undo').addEventListener('click', () => { if (tapping.take) { const live=streamTake(tapping.take)&&tapping.take.status==='armed';tapping.take = live?LvTapTiming.undo(tapping.take):LvTapTiming.stop(LvTapTiming.undo(tapping.take)); tapping.followSeek=false;tapping.seekPhraseId=null;tapping.correctionUndo = []; followTapUnit();state.scoreSignature=''; } refreshTimingPanel(); });
   syncButton('tap-use').addEventListener('click', useTapTake);
   syncButton('syllable-retake').addEventListener('click',()=>{getMedia()?.pause();state.auditionLoop=null;discardTapTake();void armTapTake();});
   syncButton('syllable-hear').addEventListener('click',hearSyllableTake);
@@ -1362,9 +1391,20 @@
   window.addEventListener('keyup', handleTapKeys, true);
   window.addEventListener('blur', () => { if (tapping.heldInput) stopTapTake('Take stopped because focus changed. Unfinished word unchanged; completed words retained.'); });
   for (const eventName of ['seeking', 'pause', 'ratechange', 'ended']) document.addEventListener(eventName, event => {
+    if(eventName==='seeking'&&event.target===getMedia()){
+      const internal=timing.busy||Number.isFinite(tapping.armSeekMs)&&Math.abs(event.target.currentTime*1000-tapping.armSeekMs)<100;
+      tapping.armSeekMs=null;
+      if(internal)return;
+      if(streamTake(tapping.take)){tapping.followSeek=true;tapping.seekPhraseId=null;}
+    }
     if (performanceTake.armed && event.target === getMedia()) stopEffects('Effects stopped because playback changed. Gestures retained.');
     if (tapping.take?.status === 'armed' && event.target === getMedia() && (eventName !== 'ratechange' || getMedia()?.playbackRate !== tapping.rate)) stopTapTake('Take stopped because playback changed. Completed marks are retained.');
   }, true);
+  document.addEventListener('seeked',event=>{
+    if(event.target!==getMedia()||!streamTake(tapping.take)||!tapping.followSeek||timing.busy)return;
+    refreshPerformClock(event.target.currentTime*1000-state.score.offsetMs);
+    setSyncNotice('Following your seek position. Recorded taps are intact. Retake from this phrase replaces this and later taps; earlier phrases stay. Undo mark restores the previous take.');
+  },true);
   window.addEventListener('resize', () => {
     if (state.currentMoment) fitMoment(state.currentMoment);
     if (state.theme === 'flow') flowFitAllSlots();

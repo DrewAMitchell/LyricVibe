@@ -504,6 +504,102 @@
       originMs: take.marks.length ? take.originMs : null };
   }
 
+  // Retake a phrase after the source clock moves backward. Keep the retained
+  // prefix and record the complete stopped take as the immediately undoable action.
+  function rewindToPhrase(take, phraseId) {
+    if (!take || take.status !== 'stopped') fail('TAKE_NOT_STOPPED', 'Phrase rewind requires a stopped take.');
+    if (take.cadence !== 'phrase-stream') fail('CADENCE_UNSUPPORTED', 'Phrase rewind requires phrase-stream cadence.');
+    const groups = phraseStreamGroups(take.units);
+    const phraseIndex = groups.findIndex(group => group.phraseId === phraseId);
+    if (phraseIndex < 0) fail('UNKNOWN_PHRASE', 'No phrase has that id.');
+    const retainedIds = new Set(groups.slice(0, phraseIndex).map(group => group.phraseId));
+    const marks = take.marks.filter(mark => retainedIds.has(mark.phraseId)).map(mark => ({ ...mark }));
+    const wordTapCounts = {};
+    for (const mark of marks) wordTapCounts[mark.wordId] = (wordTapCounts[mark.wordId] || 0) + 1;
+    const acknowledgedPhraseIds = groups.slice(0, phraseIndex)
+      .filter(group => marks.some(mark => mark.phraseId === group.phraseId)).map(group => group.phraseId);
+    return withFlowHistory(take, { ...take, status: 'stopped', marks,
+      index: groups[phraseIndex].startIndex, activePhraseId: null,
+      pendingStartMs: null, openTailId: null, wordTapCounts, acknowledgedPhraseIds,
+      lastMs: marks.length ? marks[marks.length - 1].startMs : null });
+  }
+
+  function restorePhraseStreamTake(snapshot) {
+    const invalid = message => fail('INVALID_SNAPSHOT', message);
+    const plain = value => value && typeof value === 'object' && !Array.isArray(value) &&
+      (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const keys = new Set(['status','index','pendingStartMs','marks','lastMs','units','mode','cadence','bpm',
+      'originMs','activePhraseId','acknowledgedPhraseIds','wordTapCounts','openTailId','actionHistory','stoppedScoreMs']);
+    const required = ['status','index','pendingStartMs','marks','lastMs','units','mode','cadence','bpm',
+      'originMs','activePhraseId','acknowledgedPhraseIds','wordTapCounts','openTailId'];
+    const validate = (state, statuses, main) => {
+      if (!plain(state) || !statuses.includes(state.status) || Object.keys(state).some(k => !keys.has(k)) ||
+          required.some(k => !Object.hasOwn(state,k)) || (!main && 'actionHistory' in state) ||
+          Object.hasOwn(state, 'stoppedScoreMs') && !Number.isSafeInteger(state.stoppedScoreMs) ||
+          state.mode !== 'syllable' || state.cadence !== 'phrase-stream' || !Array.isArray(state.units) ||
+          !state.units.length || state.units.length > 5000 || !Array.isArray(state.marks) || state.marks.length > 5000 ||
+          (main ? state.pendingStartMs !== null : !(state.pendingStartMs === null || integerTime(state.pendingStartMs))) || state.originMs !== null ||
+          !(state.bpm === null || typeof state.bpm === 'number' && Number.isFinite(state.bpm) && state.bpm >= 20 && state.bpm <= 400) ||
+          !Number.isSafeInteger(state.index) || state.index < 0 || state.index >= state.units.length ||
+          !Array.isArray(state.acknowledgedPhraseIds) || !plain(state.wordTapCounts) ||
+          !(state.activePhraseId === null || typeof state.activePhraseId === 'string') ||
+          !(state.openTailId === null || typeof state.openTailId === 'string')) invalid(`Phrase-stream state shape is invalid (index ${state.index}, units ${state.units?.length}, active ${state.activePhraseId}, tail ${state.openTailId}).`);
+      let initial;
+      try { initial = begin(state.units, {mode: state.mode, cadence: state.cadence, bpm: state.bpm}); }
+      catch (_) { invalid('Phrase-stream units are invalid.'); }
+      if (!same(initial.units,state.units)) invalid('Phrase-stream units are not canonical.');
+      const groups = phraseStreamGroups(state.units), groupById = new Map(groups.map(g => [g.phraseId,g]));
+      if (state.activePhraseId !== null) {
+        const active = groupById.get(state.activePhraseId);
+        if (!active || state.index < active.startIndex || state.index > active.endIndex) invalid('Active phrase and cursor disagree.');
+      }
+      if (new Set(state.acknowledgedPhraseIds).size !== state.acknowledgedPhraseIds.length ||
+          state.acknowledgedPhraseIds.some(id => !groupById.has(id))) invalid('Acknowledged phrase ids are invalid.');
+      const counts = Object.create(null); let lastPhrase = -1, currentPhrase = null, prev = null, closed = new Set();
+      for (const mark of state.marks) {
+        if (!plain(mark) || Object.keys(mark).some(k => !['id','syllableId','wordId','phraseId','startMs','endMs'].includes(k)) ||
+            typeof mark.wordId !== 'string' || typeof mark.phraseId !== 'string' || mark.id !== mark.syllableId ||
+            !integerTime(mark.startMs) || !integerTime(mark.endMs) || mark.endMs <= mark.startMs) invalid('Mark identity or interval is invalid.');
+        const g = groupById.get(mark.phraseId); if (!g) invalid('Mark phrase is unknown.');
+        const pi = groups.indexOf(g), wordIndex = state.units.findIndex(u => u.wordId === mark.wordId);
+        const unit = state.units[wordIndex];
+        if (!unit || unit.phraseId !== mark.phraseId || mark.startMs < g.minMs || mark.endMs > g.maxMs) invalid('Mark owner or frame is invalid.');
+        counts[mark.wordId] = (counts[mark.wordId] || 0) + 1;
+        if (mark.id !== `${mark.wordId}-syllable-${counts[mark.wordId]}`) invalid('Dynamic syllable id is invalid.');
+        if (pi !== lastPhrase) {
+          if (closed.has(mark.phraseId) || pi < lastPhrase || mark.startMs !== g.minMs) invalid('Phrase mark order or start is invalid.');
+          if (currentPhrase !== null && prev.endMs !== groups[lastPhrase].maxMs) invalid('Completed phrase marks must close at the phrase end.');
+          if (currentPhrase !== null) closed.add(currentPhrase);
+          currentPhrase = mark.phraseId; lastPhrase = pi;
+        } else if (prev.endMs !== mark.startMs) invalid('Phrase marks must partition their frame.');
+        if (prev && pi === lastPhrase && wordIndex < prev.wordIndex) invalid('Mark word order is invalid.');
+        prev = {endMs:mark.endMs, wordIndex};
+      }
+      if (prev && prev.endMs !== groups[lastPhrase].maxMs) invalid('Final phrase marks must close at the phrase end.');
+      if (Object.keys(state.wordTapCounts).length !== Object.keys(counts).length ||
+          Object.keys(counts).some(id => state.wordTapCounts[id] !== counts[id]) ||
+          Object.values(state.wordTapCounts).some(n => !Number.isSafeInteger(n) || n < 1)) invalid('Word tap counts do not match marks.');
+      const markedPhrases = groups.filter(g => state.marks.some(m => m.phraseId === g.phraseId)).map(g => g.phraseId);
+      if (!same(state.acknowledgedPhraseIds, markedPhrases)) invalid('Acknowledgements do not match marked phrase prefix.');
+      if (state.marks.length === 0 ? state.lastMs !== null : !integerTime(state.lastMs)) invalid('Last source time is invalid.');
+      if (state.marks.length && (state.lastMs < state.marks.at(-1).startMs || state.lastMs >= groups[lastPhrase].maxMs)) invalid('Last source time is outside the final marked phrase.');
+      const finalMark = state.marks.at(-1);
+      if (state.status === 'armed' && state.activePhraseId === (finalMark?.phraseId ?? null) &&
+          state.openTailId !== (finalMark ? finalMark.id : null) ||
+          state.openTailId !== null && state.openTailId !== (state.marks.length ? state.marks.at(-1).id : null)) invalid('Open tail does not match the final mark.');
+      return groups;
+    };
+    if (!plain(snapshot) || snapshot.status !== 'stopped' || !Array.isArray(snapshot.actionHistory) || snapshot.actionHistory.length > FLOW_HISTORY_LIMIT) invalid('Only a bounded stopped phrase-stream take can be restored.');
+    let groups;
+    try { groups = validate(snapshot, ['stopped'], true); } catch (error) { if (error.code === 'INVALID_SNAPSHOT') throw error; invalid('Snapshot is invalid.'); }
+    for (const entry of snapshot.actionHistory) {
+      const entryGroups = validate(entry, ['armed','stopped'], false);
+      if (!same(entry.units,snapshot.units) || entry.mode !== snapshot.mode || entry.cadence !== snapshot.cadence || entry.bpm !== snapshot.bpm || !same(entryGroups,groups)) invalid('Undo history configuration differs from take.');
+    }
+    try { return clone(snapshot); } catch (_) { invalid('Snapshot is not serializable.'); }
+  }
+
   function restoreWordFrameTake(snapshot) {
     const invalid = message => fail('INVALID_SNAPSHOT', message);
     const plainObject = value => value && typeof value === 'object' && !Array.isArray(value) &&
@@ -728,5 +824,5 @@
       actionHistory: take.actionHistory ? [] : undefined };
   }
 
-  return { begin, mark, release, undo, stop, adjust, reposition, moveCursor, reassignLast, restoreWordFrameTake };
+  return { begin, mark, release, undo, stop, adjust, reposition, moveCursor, reassignLast, restoreWordFrameTake, rewindToPhrase, restorePhraseStreamTake };
 });
