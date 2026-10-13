@@ -109,3 +109,18 @@ test('healthy duration-specific metadata lookup wins over conflicting fast cache
   const result = await h.run('recognize({hints:want})');
   assert.equal(result.match.id, 222); assert.match(result.lyrics.synced, /^\[00:23.19\]/);
 });
+test('YouTube video-format suffixes and notification counters do not reach the lyrics query', () => {
+  const h = harness();
+  h.context.want = { host: 'www.youtube.com', track: 'Sample Cafe - TOKENS ON THE DESK | Animated Video', pageTitle: '(32) Sample Cafe - TOKENS ON THE DESK | Animated Video - YouTube', duration: 135 };
+  const track = h.run('trackFromHints(want)');
+  assert.equal(track.artist, 'Sample Cafe'); assert.equal(track.title, 'TOKENS ON THE DESK');
+  const queries = h.run('buildLyricQueries(trackFromHints(want), want)');
+  assert.ok(queries.includes('Sample Cafe TOKENS ON THE DESK'), JSON.stringify(queries));
+  assert.ok(queries.every(q => !/animated|\(32\)|\|/i.test(q)), JSON.stringify(queries));
+  // Ordinary titles and song names containing format words mid-title are untouched.
+  assert.equal(h.run("cleanPageTitle('Tëst Artist - Sample Track (Official Music Video) - YouTube')"), 'Tëst Artist - Sample Track');
+  assert.equal(h.run("cleanPageTitle('Video Found a Sample Track - The Fixtures')"), 'Video Found a Sample Track - The Fixtures');
+  assert.equal(h.run("cleanPageTitle('Artist - Song - Official Lyric Video')"), 'Artist - Song');
+  assert.equal(h.run("cleanPageTitle('Madonna - Music')"), 'Madonna - Music');
+  assert.equal(h.run("cleanPageTitle('Band - Live')"), 'Band - Live');
+});

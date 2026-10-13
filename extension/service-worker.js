@@ -1327,6 +1327,10 @@ function cleanPageTitle(title) {
     .replace(/\s*[|\u00b7-]\s*SoundCloud\s*$/i, '')
     .replace(/^Stream\s+/i, '')
     .replace(/\s*\|\s*Listen\s.*$/i, '')
+    // YouTube's unread-notification counter, e.g. "(32) Artist - Title".
+    .replace(/^\(\d+\)\s*/, '')
+    // Trailing video-format suffixes after a separator, e.g. "| Animated Video", "- Official Lyric Video".
+    .replace(/(?:\s*[|–—-]\s*(?:(?:official|animated|lyrics?|music|performance|live|hd|4k)\s+)*(?:video|audio|visuali[sz]er|lyrics|mv)\s*)+$/i, '')
     .replace(/\[[^\]]*(official|lyrics?|visualizer|audio|video|mv)[^\]]*\]/gi, '')
     .replace(/\([^)]*(official|lyrics?|visualizer|audio|video|mv)[^)]*\)/gi, '')
     .replace(/\s+/g, ' ')
