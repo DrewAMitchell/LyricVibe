@@ -89,6 +89,36 @@ function makeHarness() {
 
 function recordFor(h, id = ID_A) { return h.values[`lvScore:youtube:${id}`]; }
 
+test('opening overlay Sync after saved text replacement preserves edits and resumes its preview without catalog lookup', async () => {
+  const h=makeHarness(), initial=await h.ensure(), phrase=initial.phrases[0];
+  const edited=await h.dispatch({type:'LV_SCORE_OPERATION',mediaKey:`youtube:${ID_A}`,expectedRevision:0,
+    operation:{type:'replaceWords',phraseId:phrase.id,wordIds:phrase.words.map(w=>w.id),text:'get down now'}});
+  assert.equal(edited.ok,true);
+  const before=JSON.stringify(recordFor(h));
+  let lookups=0;
+  h.context.recognize=async()=>{lookups++;return {ok:true,lyrics:{synced:'[00:01.00]hello world\n[00:03.00]',provider:'test'}};};
+  const source=fs.readFileSync(path.join(root,'extension/content.js'),'utf8');
+  const opener=source.slice(source.indexOf('  async function openTimingReview()'),source.indexOf('  function discardTimingLocal()'));
+  const timing={busy:false,draft:null}, panel={hidden:true,focus(){}}, notices=[];
+  const context=vm.createContext({timing,syncPanel:panel,state:{auditionLoop:null},refreshTimingPanel(){},setSyncNotice:text=>notices.push(text),
+    async timingRequest(type,extra={}) {
+      const result=await h.dispatch({type,mediaKey:`youtube:${ID_A}`,expectedRevision:edited.score.revision,lyricsHash:edited.score.lyrics.contentHash,...extra},
+        {id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`});
+      if(!result.ok)throw Error(result.error.message);
+      return result;
+    }});
+  vm.runInContext(opener,context);
+  await vm.runInContext('openTimingReview()',context);
+  assert.ok(timing.draft,notices.at(-1));
+  assert.equal(lookups,0);
+  assert.deepEqual(JSON.parse(JSON.stringify({...timing.draft.score,revision:edited.score.revision})),JSON.parse(JSON.stringify(edited.score)));
+  const token=timing.draft.token;
+  panel.hidden=true;timing.draft=null;
+  await vm.runInContext('openTimingReview()',context);
+  assert.equal(timing.draft.token,token);
+  assert.equal(JSON.stringify(recordFor(h)),before,'opening must preserve saved score and Undo history');
+});
+
 test('catalog preview, exact tuning, cancellation and application preserve history until commit', async () => {
   const h=makeHarness(), score=await h.ensure();
   h.context.recognize=async()=>({ok:true,lyrics:{synced:'[00:05.00]hello world\n[00:07.00]',provider:'fixture'},match:{id:2}});

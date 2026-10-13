@@ -1006,12 +1006,12 @@
     if (timing.busy) return;
     if (!syncPanel.hidden && timing.draft) { syncPanel.focus(); return; }
     timing.priorLoop = state.auditionLoop; syncPanel.hidden = false; timing.busy = true; refreshTimingPanel();
-    setSyncNotice('Finding the timing source for this exact video…');
+    setSyncNotice('Opening your saved lyrics and timings…');
     try {
       const current=await timingRequest('LV_TIMING_CURRENT');
-      const result = current.preview ? current : await timingRequest('LV_TIMING_PREPARE');
+      const result = current.preview ? current : await timingRequest('LV_TIMING_PREPARE', { fromSaved: true });
       timing.draft = result.preview; timing.phraseIndex = 0; timing.view = 'proposed'; timing.dirty = false; timing.auditioned = false;
-      setSyncNotice(`Unsaved preview · ${result.preview.changedWords} words retimed · ${result.preview.preservedPhraseIds.length} phrases with saved edits preserved. Audition, then apply.`);
+      setSyncNotice(current.preview ? 'Resumed your unsaved preview. Record or refine timings, then audition and Save timings.' : 'Your saved lyrics and timings are ready. Record or refine a take, then audition and Save timings.');
     } catch (error) { setSyncNotice(error.message); }
     finally { timing.busy = false; refreshTimingPanel(); }
   }
