@@ -2327,3 +2327,4 @@
 #lvx-root .lvx-score-word,#lvx-root .lvx-score-syllable{text-shadow:0 0 calc(var(--lvx-presence,0) * 12px) rgba(186,244,121,calc(var(--lvx-presence,0) * .55))}
 #lvx-root .lvx-score-word.lvx-score-recent{opacity:calc(.72 + .28 * var(--lvx-presence,0))}
 #lvx-root .lvx-score-syllable.lvx-score-recent{color:color-mix(in srgb,#baf479 calc(var(--lvx-presence,0) * 100%),#c9d4dc)}
+#lvx-root .lvx-sync-protected{display:none!important} /* Explicit edits always allowed; Undo/Discard revert. */
