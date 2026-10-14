@@ -276,10 +276,10 @@
     <details class="lvx-tap-panel"><summary>Sync by ear <span>phrase → syllables · words optional</span></summary>
       <div class="lvx-capture-phases" role="group" aria-label="Syncing phase"><button data-phase="phrase">1 · Phrases</button><button data-phase="syllable">2 · Syllables</button><button data-phase="word">Words · optional</button></div>
       <p class="lvx-sync-hint">Hold Space while each word is sung. On the next pass, tap at syllable changes inside its saved boundaries.</p>
-      <div class="lvx-perform-cue"><span class="lvx-beat-pulse" hidden aria-hidden="true"></span><small>READY</small><strong class="lvx-perform-phrase"></strong><div class="lvx-upcoming-phrases" aria-label="Upcoming lyrics"></div><span class="lvx-perform-instruction">Then start performing</span><p class="lvx-estimated-phrase" aria-live="off"></p><p class="lvx-cue-legend">Blue follows your recording cue</p><div class="lvx-live-recovery" hidden><button data-sync="tap-back">← Back one</button><button data-sync="tap-skip">Skip one →</button><button data-sync="tap-reassign-back">Last tap ← word</button><button data-sync="tap-reassign-next">Last tap → word</button><small>Left / Right moves the cue; Ctrl + Left / Right reassigns the last tap. The song keeps playing.</small></div></div>
+      <div class="lvx-perform-cue"><span class="lvx-beat-pulse" hidden role="button" title="Click (or Shift+T) on a beat to make it beat 1"></span><small>READY</small><strong class="lvx-perform-phrase"></strong><div class="lvx-upcoming-phrases" aria-label="Upcoming lyrics"></div><span class="lvx-perform-instruction">Then start performing</span><p class="lvx-estimated-phrase" aria-live="off"></p><p class="lvx-cue-legend">Blue follows your recording cue</p><div class="lvx-live-recovery" hidden><button data-sync="tap-back">← Back one</button><button data-sync="tap-skip">Skip one →</button><button data-sync="tap-reassign-back">Last tap ← word</button><button data-sync="tap-reassign-next">Last tap → word</button><small>Left / Right moves the cue; Ctrl + Left / Right reassigns the last tap. The song keeps playing.</small></div></div>
       <label class="lvx-practice-speed">YouTube practice speed <select data-sync="tap-speed" aria-label="Practice playback speed"><option value="0.5">½× · Half speed</option><option value="0.25">¼× · Quarter speed</option><option value="0.75">¾× · Slower</option><option value="1">1× · Normal</option></select></label>
       <label class="lvx-syllable-flow">Syllable pass <select data-sync="tap-syllable-flow"><option value="events">Tap freely · assign afterward</option><option value="words">Word pass · hold each word over your syllable taps</option><option value="phrase-stream">Suggested word cursor · legacy</option><option value="continuous">Fixed word frames · optional</option><option value="phrase">Phrase practice · prepared spelling</option></select></label>
-      <div class="lvx-tap-actions lvx-perform-actions"><button data-sync="tap-arm">▶ Start take</button><button data-sync="tap-stop">■ Stop</button><button data-sync="retime-flag" title="Flag the phrase you just performed for retiming (F)">⚑ Flag phrase · F</button><button data-sync="tempo-tap" title="Tap along with the beat (T)">♩ Tap tempo · T</button><button data-sync="tap-mark">Next lyric · Space</button><button data-sync="tap-release">Release · Enter</button></div>
+      <div class="lvx-tap-actions lvx-perform-actions"><button data-sync="tap-arm">▶ Start take</button><button data-sync="tap-stop">■ Stop</button><button data-sync="retime-flag" title="Flag the phrase you just performed for retiming (F)">⚑ Flag phrase · F</button><button data-sync="tempo-tap" title="Tap along with the beat (T). Shift+T on a beat makes it beat 1.">♩ Tap tempo · T</button><button data-sync="tap-mark">Next lyric · Space</button><button data-sync="tap-release">Release · Enter</button></div>
       <div class="lvx-tap-words" hidden aria-hidden="true"></div>
       <section class="lvx-phrase-syllables" hidden aria-label="Phrase syllable spelling"><details><summary>Syllable spelling <span>Edit cuts with |</span></summary><p class="lvx-sync-hint">One Space press per syllable entrance. Dictionary suggestions guide spelling, not audio alignment.</p><div class="lvx-phrase-syllable-fields"></div><button data-sync="phrase-suggest">Suggest phrase syllables</button></details><p class="lvx-phrase-syllable-hint" role="status"></p></section>
       <div class="lvx-tap-actions lvx-syllable-review" hidden><button data-sync="syllable-retake">↻ Retake phrase</button><button data-sync="syllable-hear">▶ Hear this take</button><button data-sync="syllable-next">✓ Keep phrase & next</button></div>
@@ -441,18 +441,29 @@
     if(last===undefined||ms<=last||ms-last>3000)tempo.taps=[];
     tempo.taps=[...tempo.taps,ms].slice(-64);
     const estimate=tempo.taps.length>=4?LvTapTiming.estimateTempo(tempo.taps):null;
-    if(estimate)tempo.estimate=estimate;
+    // Re-fitting keeps your chosen beat 1 (it snaps to the nearest beat of the new grid).
+    if(estimate)tempo.estimate={...estimate,...(tempo.estimate?.barAnchorMs!=null?{barAnchorMs:tempo.estimate.barAnchorMs}:{})};
     try{await chrome.storage.local.set({['lvTempo:'+tempo.mediaKey]:{taps:tempo.taps,estimate:tempo.estimate,updatedAt:new Date().toISOString()}});}catch{}
     applyTempoToGrid();
     setSyncNotice(estimate?`♩ ${estimate.bpm} BPM · ${estimate.count} taps · steadiness ±${estimate.residualMs}ms. Keep tapping to refine; the beat dot follows playback.`:`♩ Tap the beat with T · ${tempo.taps.length}/4 taps${tempo.estimate?` · current ${tempo.estimate.bpm} BPM kept`:''}`);
     refreshTimingPanel();
   }
+  // Shift+T (or clicking the beat pill): the nearest beat to now becomes "1"; counting stays in fours.
+  async function setBeatOne(){
+    const media=getMedia();await loadTempo();const e=tempo.estimate;
+    if(!media||!e){setSyncNotice('Tap the tempo with T first, then press Shift+T on a beat that should be 1.','warn');return;}
+    const ms=Math.round(media.currentTime*1000),k=Math.round((ms-e.anchorMs)/e.periodMs);
+    tempo.estimate={...e,barAnchorMs:Math.round(e.anchorMs+k*e.periodMs)};
+    try{await chrome.storage.local.set({['lvTempo:'+tempo.mediaKey]:{taps:tempo.taps,estimate:tempo.estimate,updatedAt:new Date().toISOString()}});}catch{}
+    setSyncNotice(`♩ Beat 1 set at ${(tempo.estimate.barAnchorMs/1000).toFixed(2)}s · ${e.bpm} BPM. The count now runs 1-2-3-4 from there.`);
+  }
   function refreshBeatPulse(sourceMs){
     const dot=syncPanel.querySelector('.lvx-beat-pulse');if(!dot)return;
     const e=tempo.estimate;dot.hidden=!e;if(!e)return;
     const beats=(sourceMs-e.anchorMs)/e.periodMs,index=Math.floor(beats),phase=beats-index;
-    dot.dataset.on=String(phase<.18);dot.dataset.downbeat=String(((index%4)+4)%4===0);
-    dot.textContent=`♩ ${e.bpm} · ${((index%4)+4)%4+1}`;
+    const barIndex=e.barAnchorMs!=null?Math.round((e.barAnchorMs-e.anchorMs)/e.periodMs):0,count=(((index-barIndex)%4)+4)%4;
+    dot.dataset.on=String(phase<.18);dot.dataset.downbeat=String(count===0);
+    dot.textContent=`♩ ${e.bpm} · ${count+1}`;
   }
 
   // Phrases the user flags during playback for retiming, persisted per video.
@@ -1296,6 +1307,7 @@
   });
   syncButton('transcript-close').addEventListener('click',()=>syncPanel.querySelector('.lvx-transcript-editor').close());
   syncButton('tempo-tap').addEventListener('click', () => void tapTempo());
+  syncPanel.querySelector('.lvx-beat-pulse').addEventListener('click', () => void setBeatOne());
   syncButton('tap-undo').addEventListener('click', () => { if (tapping.take) { const live=streamTake(tapping.take)&&tapping.take.status==='armed';tapping.take = eventTake(tapping.take)?LvTapTiming.undoEvent(tapping.take):wordTake(tapping.take)?LvTapTiming.undoWordHold(tapping.take):live?LvTapTiming.undo(tapping.take):LvTapTiming.stop(LvTapTiming.undo(tapping.take)); tapping.followSeek=false;tapping.seekPhraseId=null;tapping.correctionUndo = []; if(!rawTake(tapping.take))followTapUnit();state.scoreSignature=''; } refreshTimingPanel(); });
   syncButton('tap-use').addEventListener('click', useTapTake);
   syncButton('syllable-retake').addEventListener('click',()=>{getMedia()?.pause();state.auditionLoop=null;discardTapTake();void armTapTake();});
@@ -2920,13 +2932,20 @@
         const word = phrase.words[index];
         const span = line.children[index];
         span.style.visibility = mediaMs - score.offsetMs >= word.startMs ? 'visible' : 'hidden';
-        span.classList.toggle('lvx-score-current', phrase.activeWords.includes(word.id));
+        const wordCurrent = phrase.activeWords.includes(word.id), wordPresence = LvScore.presenceAt(word, mediaMs - score.offsetMs);
+        span.classList.toggle('lvx-score-current', wordCurrent);
+        // Recency trail: sung words keep a fading glow so short final syllables stay readable.
+        span.style.setProperty('--lvx-presence', wordPresence);
+        span.classList.toggle('lvx-score-recent', !wordCurrent && wordPresence > 0);
         applyReveal(span, word, mediaMs - score.offsetMs);
         for (const syllable of word.syllables || []) {
           const part = [...span.children].find(el => el.dataset.syllable === syllable.id);
           if (!part) continue;
           part.style.visibility = mediaMs - score.offsetMs >= syllable.startMs ? 'visible' : 'hidden';
-          part.classList.toggle('lvx-score-current', (phrase.activeSyllables || []).includes(syllable.id));
+          const syllableCurrent = (phrase.activeSyllables || []).includes(syllable.id), syllablePresence = LvScore.presenceAt(syllable, mediaMs - score.offsetMs);
+          part.classList.toggle('lvx-score-current', syllableCurrent);
+          part.style.setProperty('--lvx-presence', syllablePresence);
+          part.classList.toggle('lvx-score-recent', !syllableCurrent && syllablePresence > 0);
           applyReveal(part, syllable, mediaMs - score.offsetMs);
         }
       }
@@ -3329,7 +3348,7 @@
     // F flags the phrase just performed (and keeps YouTube's fullscreen shortcut away while Sync is open).
     if((event.key==='t'||event.key==='T')&&!inputTarget&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&state.score){
       event.preventDefault();event.stopImmediatePropagation();
-      if(event.type==='keydown'&&!event.repeat)void tapTempo();
+      if(event.type==='keydown'&&!event.repeat)void(event.shiftKey?setBeatOne():tapTempo());
       return;
     }
     if((event.key==='f'||event.key==='F')&&!inputTarget&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&timing.draft){

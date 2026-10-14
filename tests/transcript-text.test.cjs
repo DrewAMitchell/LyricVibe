@@ -116,3 +116,17 @@ test('a pasted transcript that drops a line and adds a new one in different plac
   assert.equal(added.words.map(w => w.text).join(' '), 'thirteen fourteen');
   assert.ok(added.startMs >= score.phrases.at(-2).endMs);
 });
+
+test('presence holds a short syllable for a minimum time, then fades over the afterglow', () => {
+  // "ter," in Sample Track phrase 1: 1412-1637ms, next word at 1881ms.
+  const ter = { startMs: 1412, endMs: 1637 };
+  assert.equal(core.presenceAt(ter, 1400), 0);
+  assert.equal(core.presenceAt(ter, 1500), 1);
+  assert.equal(core.presenceAt(ter, 1636), 1);
+  const gap = core.presenceAt(ter, 1800);
+  assert.ok(gap > 0.3 && gap < 1, `still visible in the gap: ${gap}`);
+  assert.equal(core.presenceAt(ter, 1637 + 450), 0);
+  // A 40ms tap is held for the minimum visible time.
+  assert.equal(core.presenceAt({ startMs: 508, endMs: 549 }, 680), 1);
+  assert.equal(core.presenceAt(ter, 1700, { afterglowMs: 0 }), 0);
+});

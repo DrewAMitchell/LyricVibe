@@ -2308,7 +2308,7 @@
 #lvx-root .lvx-event-review .lvx-sync-hint{overflow-wrap:anywhere}
 /* Tap-tempo beat pulse: driven by the media clock, brightest on beat 1. */
 #lvx-root .lvx-perform-cue{position:relative}
-#lvx-root .lvx-beat-pulse{position:absolute;top:6px;right:8px;font-size:11px;padding:2px 7px;border-radius:999px;border:1px solid #58606a;color:#b6c4a9;transition:background-color 60ms,color 60ms}
+#lvx-root .lvx-beat-pulse{cursor:pointer;position:absolute;top:6px;right:8px;font-size:11px;padding:2px 7px;border-radius:999px;border:1px solid #58606a;color:#b6c4a9;transition:background-color 60ms,color 60ms}
 #lvx-root .lvx-beat-pulse[data-on="true"]{background:#35452b;color:#fff;border-color:#a4ce7d}
 #lvx-root .lvx-beat-pulse[data-on="true"][data-downbeat="true"]{background:#a4ce7d;color:#111}
 /* Lyrics text popout. */
@@ -2334,3 +2334,7 @@
 /* Blocking problems are a red box; attention is amber. */
 #lvx-root .lvx-sync-notice[data-tone="error"]{background:#3a1715;border:1px solid #c4574d;color:#ffd4cf;border-radius:6px;padding:8px 10px;font-weight:600}
 #lvx-root .lvx-sync-notice[data-tone="warn"]{background:#33290f;border:1px solid #c79a3a;color:#ffe7b0;border-radius:6px;padding:8px 10px}
+/* Recency trail: --lvx-presence is 1 while sung, held briefly, then fades (score-core presenceAt). */
+#lvx-root .lvx-score-word,#lvx-root .lvx-score-syllable{text-shadow:0 0 calc(var(--lvx-presence,0) * 12px) rgba(186,244,121,calc(var(--lvx-presence,0) * .55))}
+#lvx-root .lvx-score-word.lvx-score-recent{opacity:calc(.72 + .28 * var(--lvx-presence,0))}
+#lvx-root .lvx-score-syllable.lvx-score-recent{color:color-mix(in srgb,#baf479 calc(var(--lvx-presence,0) * 100%),#c9d4dc)}

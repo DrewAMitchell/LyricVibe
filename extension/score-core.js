@@ -575,6 +575,18 @@
     return { phrases };
   }
 
+  // Display presence of a timed word or syllable: 1 while sung, held for a
+  // minimum visible time, then fading over an afterglow. It is a rendering
+  // value only; timings are never changed. Before its start it is 0.
+  function presenceAt(item, clockMs, { minVisibleMs = 180, afterglowMs = 450 } = {}) {
+    if (!item || typeof item.startMs !== "number" || typeof item.endMs !== "number" || !Number.isFinite(clockMs)) return 0;
+    if (clockMs < item.startMs) return 0;
+    const holdUntil = Math.max(item.endMs, item.startMs + minVisibleMs);
+    if (clockMs < holdUntil) return 1;
+    if (afterglowMs <= 0) return 0;
+    const fade = 1 - (clockMs - holdUntil) / afterglowMs;
+    return fade > 0 ? Math.round(fade * fade * 1000) / 1000 : 0;
+  }
   function revealProgress(item, mediaMs, offsetMs = 0) {
     if (!item || typeof item !== "object") fail("INVALID_REVEAL", "timed item is required");
     finiteNonnegative(mediaMs, "mediaMs");
@@ -615,5 +627,5 @@
     return { version: receipt.version, mediaKey: receipt.mediaKey, lyricsHash: receipt.lyricsHash, expectedRevision: receipt.expectedRevision, adapter: receipt.adapter, model: receipt.model, proposals, automaticAdmissionEnabled: false };
   }
 
-  return { VERSION, ScoreError, mediaKey, parseLrc, hyphenWordParts, createScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, applyOperation, applyAlignment };
+  return { VERSION, ScoreError, mediaKey, parseLrc, hyphenWordParts, createScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment };
 });
