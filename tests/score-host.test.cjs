@@ -32,12 +32,13 @@ function makeHarness() {
       getURL(file) { return `chrome-extension://test/${file}`; },
     },
     storage: { local: {
-      async get(key) { return { [key]: structuredClone(values[key]) }; },
+      async get(key) { return key == null ? structuredClone({ ...values }) : { [key]: structuredClone(values[key]) }; },
       async set(items) { for (const [key, value] of Object.entries(items)) values[key] = structuredClone(value); },
+      async remove(key) { for (const k of [].concat(key)) delete values[k]; },
     }, session: {
-      async get(key) { return { [key]: structuredClone(sessionValues[key]) }; },
+      async get(key) { return key == null ? structuredClone({ ...sessionValues }) : { [key]: structuredClone(sessionValues[key]) }; },
       async set(items) { for (const [key, value] of Object.entries(items)) sessionValues[key] = structuredClone(value); },
-      async remove(key) { delete sessionValues[key]; },
+      async remove(key) { for (const k of [].concat(key)) delete sessionValues[k]; },
     } },
     tabs: {
       async sendMessage(tabId, message) {
@@ -150,11 +151,11 @@ test('timing preview recovers after worker restart and remains valid beyond thir
   const word=score.phrases[0].words[0];
   const tuned=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:prepared.preview.token,previewRevision:0,
     changes:[{wordId:word.id,startMs:word.startMs+55,endMs:word.endMs+55}]},sender);
-  assert.ok(h.sessionValues[`lvTimingPreview:1:${envelope.mediaKey}`]);
+  assert.ok(h.values[`lvTimingPreview:${envelope.mediaKey}`]);
   const afterThirtyOneMinutes=Date.now()+31*60*1000;
   vm.runInContext(`Date.now = () => ${afterThirtyOneMinutes}`,h.context);
   h.restartWorker();
-  // Session storage is scoped to this browser session and survives service-worker suspension.
+  // Local storage survives service-worker suspension and browser restarts.
   const recovered=await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:prepared.preview.token,
     previewRevision:tuned.preview.previewRevision},sender);
   assert.equal(recovered.ok,true);
@@ -163,7 +164,7 @@ test('timing preview recovers after worker restart and remains valid beyond thir
   const undone=await h.dispatch({type:'LV_SCORE_UNDO',...envelope,expectedRevision:1},sender);
   assert.equal(undone.ok,true);
   assert.equal(undone.score.phrases[0].words[0].startMs,word.startMs);
-  assert.equal(h.sessionValues[`lvTimingPreview:1:${envelope.mediaKey}`],undefined);
+  assert.equal(h.values[`lvTimingPreview:${envelope.mediaKey}`],undefined);
 });
 
 test('light editor opens only from the bound source overlay and current returns the saved draft without preparing one', async () => {
@@ -184,7 +185,7 @@ test('light editor opens only from the bound source overlay and current returns 
   assert.equal(current.ok,true);
   assert.deepEqual(JSON.parse(JSON.stringify(current.score)),JSON.parse(JSON.stringify(score)));
   assert.equal(current.preview,null);
-  assert.equal(h.sessionValues[`lvTimingPreview:1:youtube:${ID_A}`],undefined);
+  assert.equal(h.values[`lvTimingPreview:youtube:${ID_A}`],undefined);
 
   h.context.recognize=async()=>({ok:true,lyrics:{synced:'[00:05.00]hello world\n[00:07.00]'},match:{id:2}});
   const envelope={mediaKey:`youtube:${ID_A}`,expectedRevision:score.revision,lyricsHash:score.lyrics.contentHash};
@@ -340,7 +341,7 @@ test('catalog preview rejects wrong sender, hash, source changes and stale token
   assert.equal((await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:preview.preview.token,previewRevision:0},sender)).ok,false);
   h.tabs.get(1).url=sender.url;
   assert.equal((await h.dispatch({type:'LV_TIMING_CANCEL',...envelope,token:preview.preview.token,previewRevision:0},sender)).ok,true);
-  assert.equal(h.sessionValues[`lvTimingPreview:1:${envelope.mediaKey}`],undefined);
+  assert.equal(h.values[`lvTimingPreview:${envelope.mediaKey}`],undefined);
   assert.ok(h.tabMessages.some(item=>item.message.type==='LV_TIMING_PREVIEW_CLOSED'&&item.message.mediaKey===envelope.mediaKey));
   assert.ok(h.runtimeMessages.some(item=>item.type==='LV_TIMING_PREVIEW_CLOSED'&&item.mediaKey===envelope.mediaKey));
   assert.equal((await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:preview.preview.token},sender)).error.code,'PREVIEW_EXPIRED');
@@ -747,4 +748,33 @@ test('proposal ingress requires the exact offscreen page and the active matching
   assert.equal(response.ok, false);
   assert.equal(response.error.code, 'ANALYSIS_SOURCE_MISMATCH');
   assert.equal(recordFor(h).review.length, 0);
+});
+
+test('an unsaved preview survives a browser restart and resumes in a different tab', async () => {
+  const h=makeHarness(), score=await h.ensure();
+  h.context.recognize=async()=>({ok:true,lyrics:{synced:'[00:05.00]hello world\n[00:07.00]'},match:{id:2}});
+  const envelope={mediaKey:`youtube:${ID_A}`,expectedRevision:score.revision,lyricsHash:score.lyrics.contentHash};
+  const first={id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`};
+  const prepared=await h.dispatch({type:'LV_TIMING_PREPARE',...envelope,fromSaved:true},first);
+  const word=score.phrases[0].words[0];
+  await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:prepared.preview.token,previewRevision:0,changes:[{wordId:word.id,startMs:word.startMs+40,endMs:word.endMs+40}]},first);
+  // Browser restart: session storage and the worker are gone, and the video reopens as tab 3.
+  for (const key of Object.keys(h.sessionValues)) delete h.sessionValues[key];
+  h.restartWorker();
+  h.tabs.set(3,{...h.tabs.get(1)});
+  const current=await h.dispatch({type:'LV_TIMING_CURRENT',...envelope},{id:'test-extension',tab:{id:3},url:`https://www.youtube.com/watch?v=${ID_A}`});
+  assert.equal(current.ok,true);
+  assert.equal(current.preview.previewRevision,1);
+  assert.equal(current.preview.score.phrases[0].words[0].startMs,word.startMs+40);
+});
+
+test('a legacy tab-scoped session preview migrates to durable storage on first read', async () => {
+  const h=makeHarness(), score=await h.ensure();
+  const legacy={score:structuredClone(score),token:'legacy-token',previewRevision:4,undoScores:[],baseRevision:score.revision,baseHash:score.lyrics.contentHash,protectedIds:[],preservedPhraseIds:[]};
+  h.sessionValues[`lvTimingPreview:7:youtube:${ID_A}`]=legacy;
+  const envelope={mediaKey:`youtube:${ID_A}`,expectedRevision:score.revision,lyricsHash:score.lyrics.contentHash};
+  const current=await h.dispatch({type:'LV_TIMING_CURRENT',...envelope},{id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`});
+  assert.equal(current.preview.token,'legacy-token');
+  assert.ok(h.values[`lvTimingPreview:youtube:${ID_A}`]);
+  assert.equal(h.sessionValues[`lvTimingPreview:7:youtube:${ID_A}`],undefined);
 });

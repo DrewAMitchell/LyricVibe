@@ -19,22 +19,35 @@
     if (value) LvScore.validateScore(value.score);
     return value;
   }
+  // Unsaved previews are durable: they live in local storage next to saved
+  // scores, keyed by video (not tab), so closing Chrome or reopening the video
+  // in another tab resumes them. Older tab-scoped session previews migrate on read.
   async function readTimingPreview(previewKey) {
     let preview = timingPreviews.get(previewKey);
     if (!preview) {
       const storageKey = previewStorageKey(previewKey);
-      preview = (await chrome.storage.session.get(storageKey))[storageKey];
+      preview = (await chrome.storage.local.get(storageKey))[storageKey];
+      if (!preview) {
+        const legacy = Object.entries(await chrome.storage.session.get(null) || {})
+          .filter(([key, value]) => key.startsWith('lvTimingPreview:') && key.endsWith(`:${previewKey}`) && value?.score)
+          .sort((a, b) => (b[1].previewRevision || 0) - (a[1].previewRevision || 0));
+        if (legacy.length) {
+          preview = legacy[0][1];
+          await chrome.storage.local.set({ [storageKey]: preview });
+          await chrome.storage.session.remove(legacy.map(([key]) => key));
+        }
+      }
       if (preview) timingPreviews.set(previewKey, preview);
     }
     return preview;
   }
   async function writeTimingPreview(previewKey, preview) {
-    await chrome.storage.session.set({ [previewStorageKey(previewKey)]: preview });
+    await chrome.storage.local.set({ [previewStorageKey(previewKey)]: preview });
     timingPreviews.set(previewKey, preview);
   }
   async function clearTimingPreview(previewKey) {
     timingPreviews.delete(previewKey);
-    await chrome.storage.session.remove(previewStorageKey(previewKey));
+    await chrome.storage.local.remove(previewStorageKey(previewKey));
   }
   async function publish(tabId, record) {
     const message = { type: 'LV_SCORE_UPDATED', tabId, mediaKey: LvScore.mediaKey(record.score.source), score: record.score, review: record.review || [], diagnostics: record.diagnostics || null };
@@ -192,7 +205,7 @@
       if (message.type.startsWith('LV_TIMING_')) {
         if (!timingControlBound(sender, tabId, key)) throw fail('SOURCE_REQUIRED', 'Open Sync in this video’s extension overlay.');
         if (message.lyricsHash !== record.score.lyrics.contentHash) throw fail('LYRIC_REVISION_MISMATCH', 'Saved lyric revision changed. Refresh the preview.');
-        const previewKey = `${tabId}:${key}`;
+        const previewKey = key;
         if (message.type === 'LV_TIMING_PREPARE') {
           let candidate;
           if (message.fromSaved === true) {

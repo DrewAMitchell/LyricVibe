@@ -7,7 +7,7 @@
   "permissions": [
     "activeTab",
     "scripting",
-    "storage", "tabCapture", "offscreen", "nativeMessaging"
+    "storage", "unlimitedStorage", "tabCapture", "offscreen", "nativeMessaging"
   ],
   "host_permissions": [
     "https://lrclib.net/*",
