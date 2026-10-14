@@ -1312,7 +1312,7 @@
     }catch(error){setSyncNotice(error.message,'error');}
     finally{timing.busy=false;refreshTimingPanel();}
   }
-  for (const name of ['tap-mode','tap-cadence','tap-scope','tap-syllable-flow']) syncButton(name).addEventListener('change',()=>{if(name==='tap-mode'&&syncButton(name).value==='syllable')syncButton('loop').checked=!continuousPass();refreshTapPanel();});
+  for (const name of ['tap-mode','tap-cadence','tap-scope','tap-syllable-flow']) syncButton(name).addEventListener('change',()=>{if(name==='tap-mode'&&syncButton(name).value==='syllable')syncButton('loop').checked=false;refreshTapPanel();});
   for (const button of syncPanel.querySelectorAll('[data-phase]')) button.addEventListener('click',()=>{
     if (timing.busy || tapPending() || tapping.splitDirty) return;
     syncButton('tap-mode').value=button.dataset.phase;
