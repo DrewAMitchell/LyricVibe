@@ -66,6 +66,7 @@
     if (cadence !== 'pairs' && cadence !== 'flow' && cadence !== 'subdivide' && cadence !== 'entrances' && cadence !== 'word-frames' && cadence !== 'phrase-stream') fail('INVALID_CADENCE', 'Cadence must be pairs, flow, subdivide, entrances, word-frames, or phrase-stream.');
     if (['subdivide', 'entrances', 'word-frames', 'phrase-stream'].includes(cadence) && mode !== 'syllable') fail('INVALID_CADENCE', 'Subdivide, entrances, word-frames, and phrase-stream cadences require syllable mode.');
     const bpm = options.bpm === undefined || options.bpm === null ? null : options.bpm;
+    if(options.tempoMap && options.tempoOffsetMs!==undefined && !Number.isSafeInteger(options.tempoOffsetMs))fail('INVALID_OFFSET','Tempo offset must be whole milliseconds.');
     if (bpm !== null && !(typeof bpm === 'number' && Number.isFinite(bpm) && bpm >= 20 && bpm <= 400)) {
       fail('INVALID_BPM', 'BPM must be between 20 and 400.');
     }
@@ -132,6 +133,7 @@
       pendingStartMs: cadence === 'subdivide' ? safeUnits[0].minMs : null,
       marks: [], lastMs: cadence === 'subdivide' ? safeUnits[0].minMs : null,
       units: safeUnits, mode, cadence, bpm,
+      ...(options.tempoMap ? {tempoMap:validateTempoMap(options.tempoMap),tempoOffsetMs:options.tempoOffsetMs||0} : {}),
       originMs: ['subdivide', 'entrances'].includes(cadence) ? safeUnits[0].minMs : null,
       ...(cadence === 'entrances' ? { entranceCount: 0 } : {}),
       ...(cadence === 'word-frames' ? { wordFrameTapCounts: {} } : {}),
@@ -159,7 +161,12 @@
     let originMs = take.originMs;
     if (firstStart && originMs === null) originMs = scoreMs;
     let acceptedMs = scoreMs;
-    if (take.bpm !== null && !(firstStart && take.originMs === null)) {
+    if (take.tempoMap && take.bpm !== null) {
+      const beat=tempoAt(take.tempoMap,scoreMs+take.tempoOffsetMs)?.beat;
+      const source=beat===undefined?null:tempoTimeAtBeat(take.tempoMap,Math.round(beat*4)/4);
+      acceptedMs=source===null?scoreMs:Math.round(source-take.tempoOffsetMs);
+      if (acceptedMs < unit.minMs || acceptedMs > unit.maxMs) fail('OUT_OF_BOUNDS', 'Snapped tap is outside the current unit bounds.');
+    } else if (take.bpm !== null && !(firstStart && take.originMs === null)) {
       const quantum = 60000 / take.bpm / 4;
       acceptedMs = Math.round((scoreMs - originMs) / quantum) * quantum + originMs;
       acceptedMs = Math.round(acceptedMs);
@@ -1164,6 +1171,65 @@
     return { bpm: Math.round(60000 / period * 100) / 100, periodMs: Math.round(period * 100) / 100,
       anchorMs: Math.round(firstBeatMs), residualMs: Math.round(residualMs), count: times.length };
   }
+  // Tempo is integrated in source time. A linear segment ramps its BPM to the
+  // following point; the final point stays constant. Beat phase is continuous.
+  function validateTempoMap(map) {
+    if (!map || map.version !== 1 || !integerTime(map.anchorMs) || !Array.isArray(map.segments) || !map.segments.length || map.segments.length > 256) fail('INVALID_TEMPO_MAP', 'Tempo needs an anchor and 1–256 sections.');
+    let prior = -1;
+    for (const s of map.segments) {
+      if (!s || typeof s!=='object' || Array.isArray(s) || !integerTime(s.startMs) || s.startMs <= prior || !Number.isFinite(s.bpm) || s.bpm < 20 || s.bpm > 400 || !['step','linear'].includes(s.transition) || !['manual','tapped','estimated'].includes(s.provenance) || (s.taps!==undefined&&(!Array.isArray(s.taps)||s.taps.length>64||s.taps.some(t=>!integerTime(t))))) fail('INVALID_TEMPO_MAP', 'Tempo sections need increasing source times, 20–400 BPM, a transition and provenance; optional raw taps are bounded whole milliseconds.');
+      prior = s.startMs;
+    }
+    if (map.segments[0].startMs !== 0) fail('INVALID_TEMPO_MAP', 'The first tempo section must start at zero.');
+    return JSON.parse(JSON.stringify(map));
+  }
+  function tempoMapFromEstimate(estimate, taps = []) {
+    if (!estimate) return null;
+    return validateTempoMap({ version:1, anchorMs:estimate.anchorMs, segments:[{ startMs:0, bpm:estimate.bpm, transition:'step', provenance:'tapped', taps:[...taps] }] });
+  }
+  function setTempoPoint(map, point) {
+    const next = validateTempoMap(map), at = next.segments.findIndex(s => s.startMs === point.startMs);
+    if (at >= 0) next.segments[at] = { ...point };
+    else next.segments.push({ ...point });
+    next.segments.sort((a,b) => a.startMs-b.startMs);
+    return validateTempoMap(next);
+  }
+  function removeTempoPoint(map, startMs) {
+    if (startMs === 0) fail('INVALID_TEMPO_MAP', 'Keep the first tempo section.');
+    const next = validateTempoMap(map);
+    if(!next.segments.some(s=>s.startMs===startMs))fail('INVALID_TEMPO_MAP','Select an existing tempo point to remove.');
+    next.segments = next.segments.filter(s => s.startMs !== startMs);
+    return validateTempoMap(next);
+  }
+  function tempoIntegral(map, sourceMs) {
+    let beats = 0;
+    for (let i = 0; i < map.segments.length; i++) {
+      const s = map.segments[i], next = map.segments[i+1];
+      if (sourceMs <= s.startMs) break;
+      const duration = Math.min(sourceMs, next?.startMs ?? sourceMs)-s.startMs;
+      const slope = next && s.transition === 'linear' ? (next.bpm-s.bpm)/(next.startMs-s.startMs) : 0;
+      beats += (s.bpm*duration + .5*slope*duration*duration)/60000;
+    }
+    return beats;
+  }
+  // Callers validate at mutation/load boundaries; frame reads allocate no map clone.
+  function tempoAt(map, sourceMs) {
+    if (!map || !Number.isFinite(sourceMs) || sourceMs < 0) return null;
+    let index = 0;while(index+1 < map.segments.length && map.segments[index+1].startMs <= sourceMs) index++;
+    const s = map.segments[index], next = map.segments[index+1];
+    const fraction = next && s.transition === 'linear' ? (sourceMs-s.startMs)/(next.startMs-s.startMs) : 0;
+    const bpm = s.bpm + (next ? (next.bpm-s.bpm)*fraction : 0);
+    const beat = tempoIntegral(map,sourceMs)-tempoIntegral(map,map.anchorMs);
+    return { bpm, beat, phase:beat-Math.floor(beat), index, periodMs:60000/bpm };
+  }
+  function tempoTimeAtBeat(map, beat) {
+    if (!Number.isFinite(beat)) fail('INVALID_BEAT', 'Beat must be finite.');
+    const target = beat+tempoIntegral(map,map.anchorMs);
+    if (target < 0) return null;
+    let low = 0, high = Math.max(map.anchorMs, map.segments.at(-1).startMs, target*3000+1);
+    for (let i=0;i<50;i++) { const mid=(low+high)/2;if(tempoIntegral(map,mid)<target)low=mid;else high=mid; }
+    return (low+high)/2;
+  }
   // Reinterpret a Words-mode hold take (press/release pairs, score clock) as a
   // word pass over recorded syllable taps (source clock). Hyphen parts of one
   // word merge into a single hold from the first press to the last release.
@@ -1263,5 +1329,5 @@
   return { begin, mark, release, undo, stop, adjust, reposition, moveCursor, reassignLast, restoreWordFrameTake, rewindToPhrase, restorePhraseStreamTake,
     beginEvents, markEvent, stopEvents, undoEvent, rewindEvents, associateEvents,
     beginWordHolds, pressWord, releaseWord, skipWords, undoWordHold, stopWordHolds, rewindWordHolds, retimePhraseHolds, associateWordHolds, wordHoldsFromPairs, estimateTempo,
-    leadInProgress, captureProgress };
+    leadInProgress, captureProgress, validateTempoMap, tempoMapFromEstimate, setTempoPoint, removeTempoPoint, tempoAt, tempoTimeAtBeat };
 });

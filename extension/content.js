@@ -105,6 +105,34 @@
 
   const stage = document.createElement('div');
   stage.className = 'lvx-stage';
+  const viewport = document.createElement('div');viewport.className='lvx-viewport';viewport.append(stage);
+  const placementDefaults={left:0,top:0,width:100,height:100,maxFontPx:128};
+  let placement={...placementDefaults};
+  const bounds=document.createElement('div');bounds.className='lvx-placement-bounds';bounds.hidden=true;
+  bounds.setAttribute('aria-label','Lyric placement bounds');
+  bounds.innerHTML='<span>Lyric bounds · drag to move</span><button class="lvx-bounds-resize" aria-label="Resize lyric bounds" title="Drag to resize">↘</button>';
+  viewport.append(bounds);
+  function applyPlacement(value,persist=false){
+    const next={...placementDefaults,...value};
+    for(const key of Object.keys(placementDefaults))if(!Number.isFinite(next[key]))throw Error('Placement values must be numbers.');
+    next.width=clamp(next.width,20,100);next.height=clamp(next.height,20,100);
+    next.left=clamp(next.left,0,100-next.width);next.top=clamp(next.top,0,100-next.height);next.maxFontPx=clamp(next.maxFontPx,16,200);
+    placement=next;
+    for(const node of [stage,bounds])Object.assign(node.style,{left:next.left+'%',top:next.top+'%',width:next.width+'%',height:next.height+'%'});
+    stage.style.setProperty('--lvx-max-font',next.maxFontPx+'px');
+    viewport.classList.toggle('lvx-placement-custom',next.left!==0||next.top!==0||next.width!==100||next.height!==100);
+    if(persist)chrome.storage.local.set({lvxPlacement:next}).catch(error=>setHud('Bounds changed in this tab; local save failed: '+error.message,true,true));
+    return {...next};
+  }
+  bounds.addEventListener('pointerdown',event=>{
+    if(event.button!==0)return;event.preventDefault();
+    const box=viewport.getBoundingClientRect(),initial={...placement},x=event.clientX,y=event.clientY,resize=event.target.closest('.lvx-bounds-resize');
+    bounds.setPointerCapture(event.pointerId);
+    const move=e=>{const dx=(e.clientX-x)/box.width*100,dy=(e.clientY-y)/box.height*100;
+      applyPlacement(resize?{...initial,width:clamp(initial.width+dx,20,100-initial.left),height:clamp(initial.height+dy,20,100-initial.top)}:{...initial,left:initial.left+dx,top:initial.top+dy});syncPlacementFields();};
+    const end=()=>{bounds.removeEventListener('pointermove',move);bounds.removeEventListener('pointerup',end);bounds.removeEventListener('pointercancel',end);applyPlacement(placement,true);};
+    bounds.addEventListener('pointermove',move);bounds.addEventListener('pointerup',end);bounds.addEventListener('pointercancel',end);
+  });
 
   const hud = document.createElement('div');
   hud.className = 'lvx-hud';
@@ -220,8 +248,11 @@
   offsetGroup.append(syncLabel, syncEarlier, offsetControl, syncLater, autoSyncButton);
   const editGroup = document.createElement('span'); editGroup.className = 'lvx-hud-group'; editGroup.append(quickSyncButton, editButton);
   const endGroup = document.createElement('span'); endGroup.className = 'lvx-hud-group'; endGroup.append(helpButton, stopButton);
+  const tempoButton=document.createElement('button');tempoButton.className='lvx-theme-btn lvx-tempo-button';tempoButton.textContent='♩ — BPM · T';
+  tempoButton.title='Tap T along with the beat; click to edit tempo sections and ramps. Tempo tapping is unavailable during a take.';
+  tempoButton.addEventListener('click',async()=>{if(!state.score)return;await openTimingReview();const panel=syncPanel.querySelector('.lvx-tempo-panel');panel.open=true;panel.scrollIntoView({block:'nearest'});});
   const statusGroup = document.createElement('span'); statusGroup.className = 'lvx-hud-status'; statusGroup.append(hudLabel, hudText);
-  hud.append(statusGroup, offsetGroup, editGroup, themeButton, endGroup);
+  hud.append(statusGroup, offsetGroup, editGroup, themeButton, tempoButton, endGroup);
 
   /* Display picker: one tile per theme, animated with this video's own lyrics. */
   const themePicker = document.createElement('div');
@@ -239,11 +270,18 @@
     return (line || 'Your lyrics, your style').split(/\s+/).slice(0, 6);
   }
   function buildThemePicker() {
+    bounds.hidden=true;
     const words = themePreviewWords();
     themePicker.replaceChildren();
     const heading = document.createElement('div'); heading.className = 'lvx-theme-picker-head';
     heading.textContent = 'Display style · previews use this video\u2019s lyrics';
     themePicker.append(heading);
+    const settings=document.createElement('details');settings.className='lvx-placement-settings';
+    settings.innerHTML='<summary>Lyric bounds &amp; text size</summary><p>Move or resize the outline, or enter percentages. Both vocal lanes stay inside it.</p><div class="lvx-placement-fields">'+Object.keys(placementDefaults).map(key=>`<label>${({left:'Left %',top:'Top %',width:'Width %',height:'Height %',maxFontPx:'Max text px'})[key]}<input data-placement="${key}" type="number" min="${key==='maxFontPx'?16:0}" max="${key==='maxFontPx'?200:100}" step="1" value="${placement[key]}"></label>`).join('')+'</div><button data-placement-reset>Reset bounds</button>';
+    settings.addEventListener('toggle',()=>{bounds.hidden=!settings.open;});
+    settings.addEventListener('change',event=>{const key=event.target.dataset.placement;if(!key)return;const value=Number(event.target.value);if(event.target.value.trim()&&Number.isFinite(value)){applyPlacement({...placement,[key]:value},true);syncPlacementFields();}});
+    settings.querySelector('[data-placement-reset]').onclick=()=>{applyPlacement(placementDefaults,true);syncPlacementFields();};
+    themePicker.append(settings);
     const grid = document.createElement('div'); grid.className = 'lvx-theme-grid'; themePicker.append(grid);
     for (const name of THEMES) {
       const tile = document.createElement('button');
@@ -268,10 +306,12 @@
     const open = force ?? themePicker.hidden;
     if (open) buildThemePicker();
     themePicker.hidden = !open; themeButton.setAttribute('aria-expanded', String(open));
+    if(!open)bounds.hidden=true;
     if (open) themePicker.querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
   }
+  function syncPlacementFields(){for(const input of themePicker.querySelectorAll('[data-placement]'))if(document.activeElement!==input)input.value=String(Math.round(placement[input.dataset.placement]*10)/10);}
   themePicker.addEventListener('keydown', event => { if (event.key === 'Escape') { event.stopPropagation(); toggleThemePicker(false); themeButton.focus(); } });
-  document.addEventListener('pointerdown', event => { if (!themePicker.hidden && !themePicker.contains(event.target) && event.target !== themeButton) toggleThemePicker(false); }, true);
+  document.addEventListener('pointerdown', event => { if (!themePicker.hidden && !themePicker.contains(event.target) && !bounds.contains(event.target) && event.target !== themeButton) toggleThemePicker(false); }, true);
 
   /* Next-line preview (bottom center) */
   const preview = document.createElement('div');
@@ -296,7 +336,7 @@
     '<div class="lvx-shortcuts-grid">',
     '  <div class="lvx-shortcut-row">',
     '    <span class="lvx-key-badge">T</span><span class="lvx-shortcut-sep">/</span><span class="lvx-key-badge">Shift+T</span>',
-    '    <span class="lvx-shortcut-desc">Tap tempo in Edit timing (outside takes); cycle displays elsewhere</span>',
+    '    <span class="lvx-shortcut-desc">T: tap tempo (outside takes) · Shift+T: next display</span>',
     '  </div>',
     '  <div class="lvx-shortcut-row">',
     '    <span class="lvx-key-badge">[</span><span class="lvx-shortcut-sep">/</span><span class="lvx-key-badge">]</span>',
@@ -343,13 +383,14 @@
     <p class="lvx-sync-phrase"></p><div class="lvx-sync-range"></div>
     <div class="lvx-sync-transport"><button data-sync="audition">▶ Audition at 1×</button><button data-sync="pause">Ⅱ Pause</button><output class="lvx-sync-clock" aria-label="Source playback time" aria-live="off">0.000s</output></div>
     <label class="lvx-sync-loop"><input type="checkbox" data-sync="loop"> Loop this phrase</label>
+    <details class="lvx-tempo-panel"><summary>Tempo map <span>T · tap the beat</span></summary><p class="lvx-sync-hint">Steps change BPM at a point. Ramp glides from that point to the next. Time is source seconds; beat phase stays continuous.</p><div class="lvx-tempo-list"></div><div class="lvx-tempo-fields"><label>Start s<input data-sync="tempo-start" type="number" min="0" step="0.001" value="0"></label><label>BPM<input data-sync="tempo-bpm" type="number" min="20" max="400" step="0.01" value="120"></label><label>To next<select data-sync="tempo-transition"><option value="step">Step</option><option value="linear">Ramp</option></select></label></div><div class="lvx-tap-actions"><button data-sync="tempo-here">At playhead</button><button data-sync="tempo-save">Save point</button><button data-sync="tempo-remove">Remove point</button><button data-sync="tempo-undo">Undo tempo</button></div><label class="lvx-tempo-scope">T taps update <select data-sync="tempo-scope"><option value="song">whole song</option><option value="section">a new section here</option></select></label><div class="lvx-tap-actions"><button data-sync="tempo-tap">♩ Tap beat · T</button></div><label>Phase anchor s<input data-sync="tempo-anchor" type="number" min="0" step="0.001" value="0"></label><button data-sync="tempo-phase">Set phase</button><p class="lvx-tempo-status" role="status"></p></details>
     <details class="lvx-tap-panel"><summary>Record by ear <span>phrase → syllables · words optional</span></summary>
       <div class="lvx-capture-phases" role="group" aria-label="Syncing phase"><button data-phase="phrase">1 · Phrases</button><button data-phase="syllable">2 · Syllables</button><button data-phase="word">Words · optional</button></div>
       <p class="lvx-sync-hint">Hold Space while each word is sung. On the next pass, tap at syllable changes inside its saved boundaries.</p>
-      <div class="lvx-perform-cue"><span class="lvx-beat-pulse" hidden aria-hidden="true"></span><small>READY</small><strong class="lvx-perform-phrase"></strong><div class="lvx-upcoming-phrases" aria-label="Upcoming lyrics"></div><span class="lvx-perform-instruction">Then start performing</span><p class="lvx-estimated-phrase" aria-live="off"></p><p class="lvx-cue-legend">Blue follows your recording cue</p><div class="lvx-live-recovery" hidden><button data-sync="tap-back">← Back one</button><button data-sync="tap-skip">Skip one →</button><button data-sync="tap-reassign-back">Last tap ← word</button><button data-sync="tap-reassign-next">Last tap → word</button><small>Left / Right moves the cue; Ctrl + Left / Right reassigns the last tap. The song keeps playing.</small></div></div>
+      <div class="lvx-perform-cue"><small>READY</small><strong class="lvx-perform-phrase"></strong><div class="lvx-upcoming-phrases" aria-label="Upcoming lyrics"></div><span class="lvx-perform-instruction">Then start performing</span><p class="lvx-estimated-phrase" aria-live="off"></p><p class="lvx-cue-legend">Blue follows your recording cue</p><div class="lvx-live-recovery" hidden><button data-sync="tap-back">← Back one</button><button data-sync="tap-skip">Skip one →</button><button data-sync="tap-reassign-back">Last tap ← word</button><button data-sync="tap-reassign-next">Last tap → word</button><small>Left / Right moves the cue; Ctrl + Left / Right reassigns the last tap. The song keeps playing.</small></div></div>
       <label class="lvx-practice-speed">YouTube practice speed <select data-sync="tap-speed" aria-label="Practice playback speed"><option value="0.5">½× · Half speed</option><option value="0.25">¼× · Quarter speed</option><option value="0.75">¾× · Slower</option><option value="1">1× · Normal</option></select></label>
       <label class="lvx-syllable-flow">Syllable pass <select data-sync="tap-syllable-flow"><option value="events">Tap freely · assign afterward</option><option value="words">Word pass · hold each word over your syllable taps</option><option value="phrase-stream">Suggested word cursor · legacy</option><option value="continuous">Fixed word frames · optional</option><option value="phrase">Phrase practice · prepared spelling</option></select></label>
-      <div class="lvx-tap-actions lvx-perform-actions"><button data-sync="tap-arm">▶ Start take</button><button data-sync="tap-stop">■ Stop</button><button data-sync="capture-forward" title="Jump to the next lead-in without skipping a lyric (Shift+→)">⏩ Next lead-in</button><button data-sync="retime-flag" title="Flag the phrase you just performed for retiming (F)">⚑ Flag phrase · F</button><button data-sync="tempo-tap" title="Tap along with the beat anywhere in the song (T). One tempo covers the whole song; not available during a take.">♩ Tap tempo · T</button><button data-sync="tap-mark">Next lyric · Space</button><button data-sync="tap-release">Release · Enter</button></div>
+      <div class="lvx-tap-actions lvx-perform-actions"><button data-sync="tap-arm">▶ Start take</button><button data-sync="tap-stop">■ Stop</button><button data-sync="capture-forward" title="Jump to the next lead-in without skipping a lyric (Shift+→)">⏩ Next lead-in</button><button data-sync="retime-flag" title="Flag the phrase you just performed for retiming (F)">⚑ Flag phrase · F</button><button data-sync="tap-mark">Next lyric · Space</button><button data-sync="tap-release">Release · Enter</button></div>
       <div class="lvx-tap-words" hidden aria-hidden="true"></div>
       <section class="lvx-phrase-syllables" hidden aria-label="Phrase syllable spelling"><details><summary>Syllable spelling <span>Edit cuts with |</span></summary><p class="lvx-sync-hint">One Space press per syllable entrance. Dictionary suggestions guide spelling, not audio alignment.</p><div class="lvx-phrase-syllable-fields"></div><button data-sync="phrase-suggest">Suggest phrase syllables</button></details><p class="lvx-phrase-syllable-hint" role="status"></p></section>
       <div class="lvx-tap-actions lvx-syllable-review" hidden><button data-sync="syllable-retake">↻ Retake phrase</button><button data-sync="syllable-hear">▶ Hear this take</button><button data-sync="syllable-next">✓ Keep phrase & next</button></div>
@@ -495,36 +536,72 @@
   }
 
   // Tap tempo: raw beat taps (source clock) fit to a beat grid, persisted per video.
-  const tempo={mediaKey:null,taps:[],estimate:null};
+  const tempo={mediaKey:null,taps:[],estimate:null,map:null,history:[],scope:'song',sessionStartMs:null,write:Promise.resolve()};
   async function loadTempo(){
     const mediaKey=state.score?LvScore.mediaKey(state.score.source):null;
     if(!mediaKey||tempo.mediaKey===mediaKey)return tempo;
-    try{const key='lvTempo:'+mediaKey,stored=(await chrome.storage.local.get(key))[key];tempo.taps=Array.isArray(stored?.taps)?stored.taps:[];tempo.estimate=stored?.estimate||null;}catch{tempo.taps=[];tempo.estimate=null;}
-    tempo.mediaKey=mediaKey;applyTempoToGrid();refreshTimingPanel();return tempo;
+    let stored;
+    try{const key='lvTempo:'+mediaKey;stored=(await chrome.storage.local.get(key))[key];}catch(error){setHud('Tempo could not load: '+error.message,true,true);return tempo;}
+    if(mediaKey!==(state.score?LvScore.mediaKey(state.score.source):null))return tempo;
+    tempo.taps=Array.isArray(stored?.taps)?stored.taps:[];tempo.estimate=stored?.estimate||null;tempo.map=null;tempo.history=[];tempo.sessionStartMs=null;
+    try{tempo.map=stored&&Object.hasOwn(stored,'map')?(stored.map?LvTapTiming.validateTempoMap(stored.map):null):LvTapTiming.tempoMapFromEstimate(tempo.estimate,tempo.taps);}catch(error){setHud('Saved tempo needs review: '+error.message,true,true);}
+    tempo.mediaKey=mediaKey;applyTempoToGrid();refreshTempoEditor();refreshTimingPanel();refreshBeatPulse(getMediaTimeMs());return tempo;
   }
-  function applyTempoToGrid(){if(!tempo.estimate)return;const bpm=syncButton('tap-bpm');bpm.step='0.01';bpm.value=String(tempo.estimate.bpm);}
+  function applyTempoToGrid(){const value=LvTapTiming.tempoAt(tempo.map,getMediaTimeMs());if(!value)return;const bpm=syncButton('tap-bpm');bpm.step='0.01';bpm.value=String(Math.round(value.bpm*100)/100);}
+  function tempoEditable(){if(tapping.take?.status==='armed'||performanceTake.armed){setSyncNotice('Stop the take before editing or tapping tempo.','warn');return false;}return Boolean(state.score&&tempo.mediaKey===LvScore.mediaKey(state.score.source));}
+  function persistTempo(){
+    const mediaKey=tempo.mediaKey,packet=JSON.parse(JSON.stringify({taps:tempo.taps,estimate:tempo.estimate,map:tempo.map,updatedAt:new Date().toISOString()}));
+    tempo.write=tempo.write.catch(()=>{}).then(()=>chrome.storage.local.set({['lvTempo:'+mediaKey]:packet}));
+    tempo.write.catch(error=>{syncPanel.querySelector('.lvx-tempo-status').textContent='Tempo kept in this tab; local save failed: '+error.message;});
+    return tempo.write;
+  }
+  function updateTempoMap(map){if(!tempoEditable())return false;const next=LvTapTiming.validateTempoMap(map);tempo.history=[...tempo.history,tempo.map].slice(-20);tempo.map=next;void persistTempo();applyTempoToGrid();refreshTempoEditor();refreshBeatPulse(getMediaTimeMs());return true;}
+  function refreshTempoEditor(){
+    const list=syncPanel.querySelector('.lvx-tempo-list');list.replaceChildren();
+    for(const point of tempo.map?.segments||[]){const button=document.createElement('button');button.textContent=`${(point.startMs/1000).toFixed(3)}s · ${point.bpm} BPM · ${point.transition==='linear'?'ramp →':'step'} · ${point.provenance}`;
+      button.onclick=()=>{syncButton('tempo-start').value=String(point.startMs/1000);syncButton('tempo-bpm').value=String(point.bpm);syncButton('tempo-transition').value=point.transition;};list.append(button);}
+    if(document.activeElement!==syncButton('tempo-anchor'))syncButton('tempo-anchor').value=String((tempo.map?.anchorMs||0)/1000);
+    syncButton('tempo-undo').disabled=!tempo.history.length;
+    syncPanel.querySelector('.lvx-tempo-status').textContent=tempo.map?`${tempo.map.segments.length} tempo ${tempo.map.segments.length===1?'section':'sections'} · source-clock phase · saved per video`:'No tempo yet. Tap T at least four times, or save a BPM point at 0s.';
+  }
   async function tapTempo(){
     const media=getMedia();if(!media||!state.score)return;
-    if(tapping.take?.status==='armed'||performanceTake.armed){setSyncNotice('Tempo tapping is separate from takes. Pause or stop the take, then tap T along with the song.','warn');return;}
     await loadTempo();
+    if(!tempoEditable())return;
     const ms=Math.round(media.currentTime*1000),last=tempo.taps.at(-1);
     // A pause of 3s, or tapping earlier than the last tap after a seek, starts a fresh tempo session.
-    if(last===undefined||ms<=last||ms-last>3000)tempo.taps=[];
+    if(last===undefined||ms<=last||ms-last>3000){tempo.taps=[];tempo.sessionStartMs=ms;tempo.sessionMap=tempo.map;}
     tempo.taps=[...tempo.taps,ms].slice(-64);
     const estimate=tempo.taps.length>=4?LvTapTiming.estimateTempo(tempo.taps):null;
-    if(estimate)tempo.estimate=estimate;
-    try{await chrome.storage.local.set({['lvTempo:'+tempo.mediaKey]:{taps:tempo.taps,estimate:tempo.estimate,updatedAt:new Date().toISOString()}});}catch{}
+    if(estimate){
+      if(tempo.taps.length===4)tempo.history=[...tempo.history,tempo.sessionMap??null].slice(-20);
+      tempo.estimate=estimate;
+      if(syncButton('tempo-scope').value==='section'&&tempo.map)tempo.map=LvTapTiming.setTempoPoint(tempo.map,{startMs:tempo.sessionStartMs??tempo.taps[0],bpm:estimate.bpm,transition:'step',provenance:'tapped',taps:[...tempo.taps]});
+      else tempo.map=LvTapTiming.tempoMapFromEstimate(estimate,tempo.taps);
+    }
+    void persistTempo();refreshTempoEditor();refreshBeatPulse(ms);
     applyTempoToGrid();
-    setSyncNotice(estimate?`♩ ${estimate.bpm} BPM · ${estimate.count} taps · steadiness ±${estimate.residualMs}ms. Keep tapping to refine; the beat dot follows playback.`:`♩ Tap the beat with T · ${tempo.taps.length}/4 taps${tempo.estimate?` · current ${tempo.estimate.bpm} BPM kept`:''}`);
+    setSyncNotice(estimate?`♩ ${estimate.bpm} BPM · ${estimate.count} taps · steadiness ±${estimate.residualMs}ms. Keep tapping to refine; the BPM indicator follows playback.`:`♩ Tap the beat with T · ${tempo.taps.length}/4 taps${tempo.estimate?` · current ${tempo.estimate.bpm} BPM kept`:''}`);
     refreshTimingPanel();
   }
   function refreshBeatPulse(sourceMs){
-    const dot=syncPanel.querySelector('.lvx-beat-pulse');if(!dot)return;
-    const e=tempo.estimate;dot.hidden=!e;if(!e)return;
-    const beats=(sourceMs-e.anchorMs)/e.periodMs,index=Math.floor(beats),phase=beats-index;
-    dot.dataset.on=String(phase<.18);
-    dot.textContent=`♩ ${e.bpm}`;
+    const valid=state.score&&tempo.mediaKey===LvScore.mediaKey(state.score.source),e=valid?LvTapTiming.tempoAt(tempo.map,sourceMs):null;
+    const text=e?`♩ ${e.bpm.toFixed(1)} BPM · T`:`♩ ${tempo.taps.length&&valid?tempo.taps.length+'/4':'—'} BPM · T`;
+    if(tempoButton.textContent!==text)tempoButton.textContent=text;
+    const on=String(Boolean(e&&e.phase<.18));if(tempoButton.dataset.on!==on)tempoButton.dataset.on=on;
   }
+  syncButton('tempo-scope').onchange=()=>{tempo.taps=[];tempo.sessionStartMs=null;};
+  syncButton('tempo-here').onclick=()=>{syncButton('tempo-start').value=(getMediaTimeMs()/1000).toFixed(3);syncButton('tempo-bpm').value=String(Math.round((LvTapTiming.tempoAt(tempo.map,getMediaTimeMs())?.bpm||120)*100)/100);};
+  syncButton('tempo-save').onclick=()=>{try{
+    const time=syncButton('tempo-start'),bpm=syncButton('tempo-bpm');if(!time.value.trim()||!bpm.value.trim())throw Error('Enter start seconds and BPM.');
+    const startMs=Math.round(Number(time.value)*1000),value=Number(bpm.value),point={startMs,bpm:value,transition:syncButton('tempo-transition').value,provenance:'manual'};
+    if(!tempo.map&&startMs!==0)throw Error('Set the first tempo point at 0s, then add sections.');
+    const map=tempo.map||{version:1,anchorMs:0,segments:[{startMs:0,bpm:value,transition:'step',provenance:'manual'}]};
+    updateTempoMap(LvTapTiming.setTempoPoint(map,point));
+  }catch(error){syncPanel.querySelector('.lvx-tempo-status').textContent=error.message;}};
+  syncButton('tempo-remove').onclick=()=>{try{if(tempo.map)updateTempoMap(LvTapTiming.removeTempoPoint(tempo.map,Math.round(Number(syncButton('tempo-start').value)*1000)));}catch(error){syncPanel.querySelector('.lvx-tempo-status').textContent=error.message;}};
+  syncButton('tempo-phase').onclick=()=>{try{if(!tempo.map)throw Error('Set a tempo first.');const field=syncButton('tempo-anchor');if(!field.value.trim())throw Error('Enter phase anchor seconds.');updateTempoMap({...tempo.map,anchorMs:Math.round(Number(field.value)*1000)});}catch(error){syncPanel.querySelector('.lvx-tempo-status').textContent=error.message;}};
+  syncButton('tempo-undo').onclick=()=>{if(!tempoEditable()||!tempo.history.length)return;tempo.map=tempo.history.pop();tempo.taps=[];void persistTempo();refreshTempoEditor();refreshBeatPulse(getMediaTimeMs());};
 
   // Phrases the user flags during playback for retiming, persisted per video.
   const retimeFlags={mediaKey:null,items:[]};
@@ -1100,7 +1177,7 @@
       }
       const retained=retakePhraseId?(eventTake(current)?LvTapTiming.rewindEvents(current,retakePhraseId):wordTake(current)?LvTapTiming.rewindWordHolds(current,retakePhraseId):LvTapTiming.rewindToPhrase(current,retakePhraseId)):current;
       if(!current&&rawTake(tapping.take)){tapping.take=null;tapping.eventCounts={};tapping.eventApplied=[];}
-      const take = retained ? { ...retained, status:'armed' } : wordPass()?LvTapTiming.beginWordHolds(units,syllableSource):eventPass()?LvTapTiming.beginEvents(units):LvTapTiming.begin(units, { mode, cadence:phraseStream()?'phrase-stream':continuousSyllables()?'word-frames':mode === 'syllable' ? 'entrances' : syncButton('tap-cadence').value === 'hold' ? 'pairs' : syncButton('tap-cadence').value, bpm: continuousPass()?null:syncButton('tap-snap').checked ? Number(syncButton('tap-bpm').value) : null });
+      const take = retained ? { ...retained, status:'armed' } : wordPass()?LvTapTiming.beginWordHolds(units,syllableSource):eventPass()?LvTapTiming.beginEvents(units):LvTapTiming.begin(units, { mode, cadence:phraseStream()?'phrase-stream':continuousSyllables()?'word-frames':mode === 'syllable' ? 'entrances' : syncButton('tap-cadence').value === 'hold' ? 'pairs' : syncButton('tap-cadence').value, bpm: continuousPass()?null:syncButton('tap-snap').checked ? Number(syncButton('tap-bpm').value) : null, ...(!continuousPass()&&syncButton('tap-snap').checked&&tempo.map?{tempoMap:tempo.map,tempoOffsetMs:state.score.offsetMs}:{}) });
       tapping.correctionUndo = []; tapping.cancelledSpace=false;
       timing.busy = true; refreshTimingPanel();
       const practiceRate = Number(syncButton('tap-speed').value);
@@ -1752,7 +1829,7 @@
     event.stopPropagation();
     if (event.key === 'Escape') { event.preventDefault(); closeTimingReview(); }
   });
-  root.append(stage, preview, progress, hud, themePicker, shortcutsPanel, syncPanel);
+  root.append(viewport, preview, progress, hud, themePicker, shortcutsPanel, syncPanel);
   function mountRoot() {
     const surface = document.fullscreenElement;
     if (surface && !['VIDEO', 'AUDIO'].includes(surface.tagName)) surface.appendChild(root);
@@ -1772,6 +1849,8 @@
     show,
     hide: teardown,
     hints: getPageHints,
+    placement:Object.freeze({getState:()=>({...placement}),set:value=>applyPlacement(value,true)}),
+    tempo:Object.freeze({getState:()=>JSON.parse(JSON.stringify({mediaKey:tempo.mediaKey,map:tempo.map,taps:tempo.taps,estimate:tempo.estimate})),at:ms=>LvTapTiming.tempoAt(tempo.map,ms),tap:tapTempo,setMap:updateTempoMap}),
     sync: Object.freeze({ getState: () => JSON.parse(JSON.stringify(timing)), open: openTimingReview,
       selectPhrase: index => navigateTiming(index - timing.phraseIndex), setView: view => { if (['saved','proposed'].includes(view)) syncButton(view).click(); },
       tuneText: text => { syncText.value = text; timing.dirty = true; return tuneTimingText(); }, audition: auditionTiming, cancel: closeTimingReview,
@@ -1785,7 +1864,8 @@
 
   /* Load saved preferences (theme, font scale, lite mode) */
   try {
-    chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode'], (result) => {
+    chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement'], (result) => {
+      if(result?.lvxPlacement)try{applyPlacement(result.lvxPlacement);}catch(error){setHud(error.message,true,true);}
       if (result && result.lvxTheme && THEMES.includes(result.lvxTheme)) {
         applyTheme(result.lvxTheme);
       }
@@ -1852,6 +1932,7 @@
           setSyncNotice('The saved score changed. Reopen Sync to refresh. Any retained take belongs to the previous revision and cannot be applied.');
         }
         state.score = message.score;
+        void loadTempo();
         state.scoreSignature = '';
         state.active = true;
         state.errorShown = false;
@@ -2962,6 +3043,7 @@
         if (state.auditionLoop && media && !media.paused && mediaMs >= state.auditionLoop.endMs) media.currentTime = state.auditionLoop.startMs / 1000;
         if (performanceTake.armed && !effectSourceReady()) stopEffects('Effects stopped because playback changed. Gestures retained.');
         renderScore(mediaMs);
+        refreshBeatPulse(mediaMs);
         if (!syncPanel.hidden) {
           refreshPerformClock(mediaMs-state.score.offsetMs);
           const lane = syncPanel.querySelector('.lvx-tap-blocks'), head = syncPanel.querySelector('.lvx-tap-playhead');
@@ -3483,7 +3565,7 @@
       else size = 82;
     }
 
-    return Math.round(size * state.fontScale);
+    return Math.min(placement.maxFontPx,Math.round(size * state.fontScale));
   }
 
   function fitMoment(moment) {
@@ -3538,9 +3620,9 @@
 
     if (!state.active) return;
 
-    if (event.key === 't' || event.key === 'T') {
+    if ((event.key === 't' || event.key === 'T')&&!event.ctrlKey&&!event.metaKey&&!event.altKey) {
       event.preventDefault();
-      cycleTheme(event.shiftKey ? -1 : 1);
+      if(state.score&&!event.shiftKey){if(!event.repeat)void tapTempo();}else cycleTheme(1);
     }
 
     if (event.key === '[' || event.key === ']') {
@@ -3575,7 +3657,7 @@
     const inputTarget=event.target?.matches?.('input,textarea,select')||event.target?.isContentEditable;
     if(event.shiftKey&&event.key==='ArrowRight'&&!inputTarget&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&tapping.take?.status==='armed'){event.preventDefault();event.stopImmediatePropagation();if(event.type==='keydown'&&!event.repeat)jumpCaptureLeadIn();return;}
     // F flags the phrase just performed (and keeps YouTube's fullscreen shortcut away while Sync is open).
-    if((event.key==='t'||event.key==='T')&&!inputTarget&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&state.score){
+    if((event.key==='t'||event.key==='T')&&!event.shiftKey&&!inputTarget&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&state.score){
       event.preventDefault();event.stopImmediatePropagation();
       if(event.type==='keydown'&&!event.repeat)void tapTempo();
       return;
@@ -3835,7 +3917,7 @@
       return;
     }
 
-    const viewportWidth = Math.max(320, window.innerWidth || 1280);
+    const viewportWidth = Math.max(1, stage.clientWidth || window.innerWidth || 1280);
     const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
     const compact = viewportWidth <= 760;
     const distance = Math.abs(position);
@@ -4179,7 +4261,7 @@
     const idx = THEMES.indexOf(state.theme);
     const next = THEMES[(idx + direction + THEMES.length) % THEMES.length];
     applyTheme(next);
-    setHud(`Theme: ${THEME_LABELS[next]}  (T next · Shift+T back)`, false, false);
+    setHud(`Theme: ${THEME_LABELS[next]}  (Shift+T next display · T tap tempo)`, false, false);
   }
 
   /* ══════════════════════════════════════
@@ -4212,7 +4294,7 @@
 
   function show() {
     if (!root.isConnected) {
-      root.append(stage, preview, progress, hud, themePicker, shortcutsPanel);
+      root.append(viewport, preview, progress, hud, themePicker, shortcutsPanel);
       mountRoot();
     }
   }
