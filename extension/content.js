@@ -339,7 +339,7 @@
     if(syncButton('tap-mode').value==='syllable'){
       const media=getMedia(),phrase=timingPhrase();media?.pause();state.auditionLoop=null;discardTapTake();
       tapping.wordId=phrase?.words.find(w=>!w.excluded)?.id||null;
-      if(media&&phrase)media.currentTime=Math.max(0,phrase.startMs+state.score.offsetMs-800)/1000;
+      if(media&&phrase)media.currentTime=Math.max(0,phraseLeadInMs(phrase)+state.score.offsetMs)/1000;
       state.scoreSignature='';refreshTimingPanel();
       setSyncNotice('Take discarded. Word and syllable cues reset to the start of this phrase; playback is paused at its lead-in. Other preview edits are preserved.');return;
     }
@@ -743,10 +743,18 @@
   }
   // Keep the selected phrase on the playhead (score clock), in both directions.
   // The selection is kept while the playhead sits in its lead-in or body.
+  // Lead-in for parking playback before a phrase: up to 800ms, but never inside the previous phrase.
+  function phraseLeadInMs(phrase){
+    const lane=timing.draft.score.phrases.filter(p=>p.laneId===phrase.laneId&&p.words.some(w=>!w.excluded));
+    const previous=lane.filter(p=>p.startMs<phrase.startMs).at(-1);
+    return Math.max(0,phrase.startMs-800,Math.min(phrase.startMs,previous?previous.endMs:0));
+  }
   function followPlaybackPhrase(now){
     const phrase=timingPhrase();if(!phrase||!timing.draft)return null;
-    if(now>=phrase.startMs-1500&&now<phrase.endMs)return phrase;
     const lane=timing.draft.score.phrases.filter(p=>p.laneId===phrase.laneId&&p.words.some(w=>!w.excluded));
+    // A lead-in counts for the selected phrase only while no other phrase is actually playing.
+    if(now>=phrase.startMs&&now<phrase.endMs)return phrase;
+    if(now>=phrase.startMs-1500&&now<phrase.startMs&&!lane.some(p=>p!==phrase&&now>=p.startMs&&now<p.endMs))return phrase;
     const target=lane.find(p=>now>=p.startMs&&now<p.endMs)||lane.find(p=>p.startMs>now)||lane.at(-1);
     if(target&&target.id!==phrase.id){
       timing.phraseIndex=timing.draft.score.phrases.indexOf(target);
@@ -754,6 +762,12 @@
       state.scoreSignature='';refreshTimingPanel();
     }
     return target;
+  }
+  // No hidden cursor: outside a recording take, the selected word is the one at the playhead.
+  function followPlaybackWord(now){
+    const phrase=timingPhrase();if(!phrase)return;
+    const word=phrase.words.find(w=>!w.excluded&&now>=w.startMs&&now<w.endMs);
+    if(word&&tapping.wordId!==word.id){tapping.wordId=word.id;state.scoreSignature='';refreshTapPanel();}
   }
   function refreshPerformClock(now) {
     refreshBeatPulse(now+state.score.offsetMs);
@@ -806,7 +820,7 @@
       syncPanel.querySelector('.lvx-cue-legend').textContent='Blue follows your presses · original timing is hidden during recording';
       return;
     }
-    if(!tapping.take&&!timing.busy&&(!getMedia()?.paused||tapping.followSeek))followPlaybackPhrase(now);
+    if((!tapping.take||tapping.take.status==='stopped')&&!timing.busy){followPlaybackPhrase(now);followPlaybackWord(now);}
     syncPanel.querySelector('.lvx-estimated-phrase').hidden=false;
     syncPanel.querySelector('.lvx-cue-legend').textContent=tapping.take?.mode==='syllable'&&tapping.take.status==='complete'?'Playing your recorded syllable boundaries · not yet kept':'Blue: selected recording cue · playback estimates shown below';
     phrase=timingPhrase();
@@ -920,8 +934,9 @@
       const laneWords = (syncButton('tap-scope').value === 'lane' ? timing.draft.score.phrases.slice(timing.phraseIndex).filter(p => p.laneId === phrase.laneId).flatMap(p => p.words) : phrase.words).filter(w=>!w.excluded);
       const selected = mode === 'word' ? laneWords.slice(laneWords.findIndex(w => w.id === word.id)) : phraseSyllableUnits(phrase);
       const phrases=(syncButton('tap-scope').value === 'lane' ? timing.draft.score.phrases.slice(timing.phraseIndex).filter(p=>p.laneId===phrase.laneId) : [phrase]).filter(p=>p.words.some(w=>!w.excluded));
-      if(continuousPass()&&!(wordTake(tapping.take)&&tapping.take.retime)&&!(tapping.take&&['stopped'].includes(tapping.take.status)&&(streamTake(tapping.take)||rawTake(tapping.take))&&(eventPass()?eventTake(tapping.take):wordPass()?wordTake(tapping.take):streamTake(tapping.take)))){
-        // A fresh pass begins at the phrase you are listening to, not a stale selection.
+      const retiming=wordTake(tapping.take)&&tapping.take.retime;
+      if(!retiming){
+        // Start and Continue both begin at the phrase you are listening to, never a stale selection or the take's old end.
         const now=Math.round(media.currentTime*1000)-state.score.offsetMs,lane=timing.draft.score.phrases.filter(p=>p.laneId===phrase.laneId&&p.words.some(w=>!w.excluded));
         const parked=now>=phrase.startMs-1500&&now<phrase.endMs;
         if(!parked){
@@ -937,7 +952,12 @@
       if (current && tapping.binding !== tapBinding()) throw Error('This take belongs to an older preview. Discard it before continuing.');
       const syllableSource=wordPass()&&!current?(eventTake(tapping.take)&&tapping.take.events.length?tapping.take.events:await latestArchivedSyllableEvents()):null;
       if(wordPass()&&!current&&!syllableSource?.length)throw Error('Record a “Tap freely” syllable pass first. The word pass claims those taps.');
-      const retakePhraseId=(streamTake(current)||rawTake(current))&&current.status==='stopped'?tapping.seekPhraseId:null;
+      const resuming=Boolean(current&&current.status==='stopped'&&!retiming);
+      const retakePhraseId=resuming&&(streamTake(current)||rawTake(current))?phrase.id:null;
+      if(resuming&&!streamTake(current)&&!rawTake(current)&&['word','phrase'].includes(current.mode)){
+        const at=current.mode==='phrase'?current.units.findIndex(u=>u.id===phrase.id||u.phraseId===phrase.id):current.units.findIndex(u=>phrase.words.some(w=>w.id===u.wordId));
+        if(at>=0)current=LvTapTiming.reposition(current,at);
+      }
       if(retakePhraseId&&rawTake(current)&&!current.units.some(u=>u.phraseId===retakePhraseId)){
         const at=timing.draft.score.phrases.findIndex(p=>p.id===retakePhraseId),firstMin=current.units[0].minMs;
         const earlier=(await prepareStreamUnits(timing.draft.score.phrases[at],true,at)).filter(u=>u.minMs<firstMin&&!current.units.some(c=>c.wordId===u.wordId));
@@ -957,7 +977,7 @@
       }
       state.auditionLoop = null;if(mode!=='syllable'||continuousPass())syncButton('loop').checked = false;
       const nextUnit = take.units[take.index];
-      const nextStart = wordTake(take)&&take.retime?nextUnit.minMs-state.score.offsetMs:retakePhraseId?nextUnit.minMs-(rawTake(take)?state.score.offsetMs:0):(streamTake(take)||rawTake(take))&&take.lastMs!==null?take.lastMs-(rawTake(take)?state.score.offsetMs:0):mode !== 'syllable'||continuousPass() ? nextUnit?.estimatedStartMs : phrase.startMs;
+      const nextStart = wordTake(take)&&take.retime?nextUnit.minMs-state.score.offsetMs:resuming?phrase.startMs:retakePhraseId?nextUnit.minMs-(rawTake(take)?state.score.offsetMs:0):(streamTake(take)||rawTake(take))&&take.lastMs!==null?take.lastMs-(rawTake(take)?state.score.offsetMs:0):mode !== 'syllable'||continuousPass() ? nextUnit?.estimatedStartMs : phrase.startMs;
       tapping.armSeekMs=Math.max(0, (nextStart ?? word.startMs) + state.score.offsetMs - 800);
       media.currentTime = tapping.armSeekMs / 1000;
       await media.play();
@@ -1466,7 +1486,7 @@
     timing.phraseIndex = clamp(timing.phraseIndex + delta, 0, timing.draft.score.phrases.length - 1);
     const media=getMedia(),phrase=timingPhrase();
     if(media&&phrase&&!tapping.take?.status?.startsWith('arm')){
-      tapping.wordId=phrase.words.find(w=>!w.excluded)?.id||null;tapping.armSeekMs=Math.max(0,phrase.startMs+state.score.offsetMs-800);media.currentTime=tapping.armSeekMs/1000;
+      tapping.wordId=phrase.words.find(w=>!w.excluded)?.id||null;tapping.armSeekMs=Math.max(0,phraseLeadInMs(phrase)+state.score.offsetMs);media.currentTime=tapping.armSeekMs/1000;
     }
     else if(!tapping.take)tapping.followSeek=false;
     syncButton('protected').checked = false; refreshTimingPanel(); return true;
