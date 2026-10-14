@@ -1002,6 +1002,15 @@
       if(wordTake(tapping.take)&&tapping.take.status==='complete'){getMedia()?.pause();setSyncNotice(`All ${tapping.take.holds.length} words held. Review below, then Use held phrases.`);}
     } catch (error) { setSyncNotice(error.message,'error'); }
   }
+  // Going back must be as easy as going forward: rewind playback to the
+  // unit's lead-in and keep recording. The seek is marked internal so the
+  // seek/pause guards do not end the take.
+  function rewindPlaybackForTake(targetMs){
+    const media=getMedia();if(!media||!Number.isFinite(targetMs))return;
+    tapping.armSeekMs=Math.max(0,Math.round(targetMs));tapping.takeSeekUntil=performance.now()+1500;
+    media.currentTime=tapping.armSeekMs/1000;
+    if(media.paused)void media.play().catch(()=>{});
+  }
   function repositionTap(index) {
     const take=tapping.take;
     if(timing.busy||!take||!['armed','complete'].includes(take.status)||getMedia()?.paused||take.mode==='syllable'||tapping.binding!==tapBinding())return false;
@@ -1009,7 +1018,13 @@
       const updated=LvTapTiming.reposition(take,index), removed=take.marks.length-updated.marks.length;
       if(tapping.heldInput==='keyboard')tapping.cancelledSpace=true;
       tapping.heldInput=null;tapping.take={...updated,status:'armed'};tapping.correctionUndo=[];tapping.reviewId=null;
+      if(index<take.index){
+        // Rewind to the lead-in, but never before the last kept mark (the next mark must follow it).
+        const unit=updated.units[index],lead=(unit.estimatedStartMs??unit.minMs??0)-800,floor=updated.lastMs!=null?updated.lastMs+1:0;
+        rewindPlaybackForTake(Math.max(lead,floor)+state.score.offsetMs);
+      }
       followTapUnit();state.scoreSignature='';refreshTimingPanel();renderScore(getMediaTimeMs());
+      if(index<take.index){setSyncNotice(`Back to ${take.mode==='phrase'?'phrase':'word'} ${index+1}: ${updated.units[index].text}. Playback rewound to its lead-in${removed?`; ${removed} later mark${removed===1?'':'s'} cleared for rerecording`:''}. Keep going.`);return true;}
       setSyncNotice(`${take.mode==='phrase'?'Phrase':'Word'} ${index+1}: ${updated.units[index].text}. ${removed?`${removed} later mark${removed===1?'':'s'} cleared for rerecording. `:''}The song keeps playing; skipped lyrics keep existing timing.`);
       return true;
     }catch(error){setSyncNotice(error.message,'error');return false;}
@@ -1041,7 +1056,7 @@
     setSyncNotice(`${take.marks.length} buffered taps restored exactly. Review, continue, or seek back to retake a phrase.`);
     return true;
   }
-  function skipWordHold(delta){const take=tapping.take;if(!wordTake(take)||timing.busy)return;try{tapping.take=LvTapTiming.skipWords(take,delta);tapping.streamWordId=null;state.scoreSignature='';refreshTimingPanel();renderScore(getMediaTimeMs());}catch(error){setSyncNotice(error.message,'error');}}
+  function skipWordHold(delta){const take=tapping.take;if(!wordTake(take)||timing.busy)return;try{tapping.take=LvTapTiming.skipWords(take,delta);if(delta<0&&take.status==='armed'){const unit=tapping.take.units[tapping.take.index];rewindPlaybackForTake(Math.max((tapping.take.lastMs??unit.minMs)-600,0));}tapping.streamWordId=null;state.scoreSignature='';refreshTimingPanel();renderScore(getMediaTimeMs());}catch(error){setSyncNotice(error.message,'error');}}
   syncButton('tap-back').addEventListener('click',()=>wordTake(tapping.take)?skipWordHold(-1):streamTake(tapping.take)?recoverStream(-1):repositionTap((tapping.take?.index??0)-1));
   syncButton('tap-skip').addEventListener('click',()=>wordTake(tapping.take)?skipWordHold(1):streamTake(tapping.take)?recoverStream(1):repositionTap((tapping.take?.index??0)+1));
   syncButton('tap-reassign-back').addEventListener('click',()=>recoverStream(-1,true));
@@ -1450,7 +1465,7 @@
     if (!timing.draft || timing.busy || !Number.isInteger(delta)) return false;
     timing.phraseIndex = clamp(timing.phraseIndex + delta, 0, timing.draft.score.phrases.length - 1);
     const media=getMedia(),phrase=timingPhrase();
-    if(syncButton('tap-mode').value==='syllable'&&media&&phrase&&!tapping.take?.status?.startsWith('arm')){
+    if(media&&phrase&&!tapping.take?.status?.startsWith('arm')){
       tapping.wordId=phrase.words.find(w=>!w.excluded)?.id||null;tapping.armSeekMs=Math.max(0,phrase.startMs+state.score.offsetMs-800);media.currentTime=tapping.armSeekMs/1000;
     }
     else if(!tapping.take)tapping.followSeek=false;
@@ -1803,7 +1818,7 @@
   window.addEventListener('blur', () => { if (tapping.heldInput) stopTapTake('Take stopped because focus changed. Unfinished word unchanged; completed words retained.'); });
   for (const eventName of ['seeking', 'pause', 'ratechange', 'ended']) document.addEventListener(eventName, event => {
     if(eventName==='seeking'&&event.target===getMedia()){
-      const internal=timing.busy||Number.isFinite(tapping.armSeekMs)&&Math.abs(event.target.currentTime*1000-tapping.armSeekMs)<100;
+      const internal=timing.busy||Number.isFinite(tapping.armSeekMs)&&Math.abs(event.target.currentTime*1000-tapping.armSeekMs)<100||performance.now()<(tapping.takeSeekUntil||0);
       tapping.armSeekMs=null;
       if(internal)return;
       if(streamTake(tapping.take)||rawTake(tapping.take)){tapping.followSeek=true;tapping.seekPhraseId=null;}
@@ -2750,7 +2765,7 @@
         const media = getMedia();
         const ad = isAdvertisement() || youtubeMediaState()?.clockUsable === false;
         if (performanceTake.armed && ad) stopEffects('Effects stopped because the main-video clock is unavailable. Gestures retained.');
-        if (tapping.take?.status === 'armed' && (ad || media?.paused || media?.seeking || media?.playbackRate !== tapping.rate || tapping.binding !== tapBinding())) stopTapTake('Take stopped because playback changed. Completed marks are retained.');
+        if (tapping.take?.status === 'armed' && performance.now() >= (tapping.takeSeekUntil || 0) && (ad || media?.paused || media?.seeking || media?.playbackRate !== tapping.rate || tapping.binding !== tapBinding())) stopTapTake('Take stopped because playback changed. Completed marks are retained.');
         stage.classList.toggle('lvx-score-paused', media?.paused ?? true);
         root.classList.toggle('lvx-ad-paused', ad);
         if (ad) {
