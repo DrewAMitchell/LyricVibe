@@ -1458,7 +1458,7 @@
     syncPanel.querySelector('.lvx-sync-phrase').textContent = phrase?.words.map(w => w.text).join(' ') || 'Your saved score stays unchanged while you review.';
     const shown = timing.view === 'saved' ? timingPhrase(state.score) : phrase;
     const protectedPhrase = draft?.preservedPhraseIds.includes(phrase?.id);
-    syncPanel.querySelector('.lvx-sync-range').textContent = shown ? `${(shown.startMs / 1000).toFixed(3)}–${(shown.endMs / 1000).toFixed(3)}s · ${protectedPhrase ? 'saved edits preserved' : 'catalog estimate'}` : '';
+    syncPanel.querySelector('.lvx-sync-range').textContent = shown ? `${(shown.startMs / 1000).toFixed(3)}–${(shown.endMs / 1000).toFixed(3)}s · ${(()=>{const a=phrase?phraseAuthoring(phrase):null;return a?AUTHORING_LABELS[a.level]+(a.mixed?' (some words further)':''):'';})()}` : '';
     syncPanel.querySelector('.lvx-sync-protected').hidden = !protectedPhrase && !(syncButton('tap-scope').value === 'lane' && draft?.protectedIds.length);
     syncText.disabled = timing.busy || !draft;
     if (!timing.dirty) syncText.value = phrase?.words.map(w => `${w.text}\t${w.startMs}\t${w.endMs}`).join('\n') || '';
@@ -2910,6 +2910,23 @@
       context.append(line,upcoming);stage.append(context);state.scoreSignature=signature;
     }
   }
+  // How far a phrase has been authored: recorded in the current take, else the lowest level all its
+  // words share (syllables > words > phrase > estimate), plus whether some words are further along.
+  const AUTHORING_LABELS={take:'recorded in this take',syllables:'syllables timed',words:'words timed',phrase:'phrase timed',estimate:'estimate'};
+  function takePhraseIds(){
+    const take=tapping.take,ids=new Set();if(!take||!timing.draft)return ids;
+    const phraseOfWord=new Map(timing.draft.score.phrases.flatMap(p=>p.words.map(w=>[w.id,p.id])));
+    if(eventTake(take)){for(const u of take.units)if(take.events.some(e=>e.sourceMs>=u.minMs&&e.sourceMs<u.maxMs))ids.add(u.phraseId);}
+    else if(wordTake(take)){for(const h of take.holds)ids.add(h.phraseId);}
+    else for(const m of take.marks||[]){if(take.mode==='phrase')ids.add(m.id);else{const pid=phraseOfWord.get(m.wordId??m.id);if(pid)ids.add(pid);}}
+    return ids;
+  }
+  function phraseAuthoring(phrase,takeIds=takePhraseIds()){
+    if(takeIds.has(phrase.id))return {level:'take',mixed:false};
+    const rank=w=>(w.syllables||[]).some(x=>x.provenance==='manual')?3:w.provenance==='manual'&&w.locked?2:w.provenance==='manual'?1:0;
+    const ranks=phrase.words.filter(w=>!w.excluded).map(rank);if(!ranks.length)return {level:'estimate',mixed:false};
+    const low=Math.min(...ranks);return {level:['estimate','phrase','words','syllables'][low],mixed:Math.max(...ranks)>low};
+  }
   function renderScore(mediaMs) {
     if (tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete') && timing.draft && !syncPanel.hidden) {renderCaptureScore();return;}
     const score = syllableTakeScore() || (timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score);
@@ -2965,10 +2982,14 @@
       }
       state.scoreSignature = signature;
     }
+    // Authoring outline only while editing, so you can see where to continue a take while scrubbing.
+    const takeIds = syncPanel.hidden ? null : takePhraseIds();
     for (const phrase of active.phrases) {
       const line = [...stage.children].find(el => el.dataset.phrase === phrase.id);
       if (!line) continue;
       line.style.opacity = phrase.opacity;
+      if (takeIds) { const a = phraseAuthoring(phrase, takeIds); line.dataset.authored = a.level; line.dataset.mixed = String(a.mixed); line.title = AUTHORING_LABELS[a.level]; }
+      else { delete line.dataset.authored; delete line.dataset.mixed; line.removeAttribute('title'); }
       for (let index = 0; index < phrase.words.length; index++) {
         const word = phrase.words[index];
         const span = line.children[index];
