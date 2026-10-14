@@ -402,7 +402,7 @@
       <div class="lvx-tap-actions lvx-syllable-review" hidden><button data-sync="syllable-retake">↻ Retake phrase</button><button data-sync="syllable-hear">▶ Hear this take</button><button data-sync="syllable-next">✓ Keep phrase & next</button></div>
       <div class="lvx-tap-timeline" aria-label="Current phrase timing"><div class="lvx-tap-blocks"></div><i class="lvx-tap-playhead" hidden></i></div>
       <div class="lvx-tap-status" role="status" aria-live="polite">Choose a word to begin.</div>
-      <div class="lvx-tap-actions"><button data-sync="tap-use">Use take in preview</button><button data-sync="tap-undo">↶ Undo mark</button><button data-sync="tap-discard">Discard take</button></div>
+      <div class="lvx-tap-actions"><button data-sync="tap-use">Use take in preview</button><button data-sync="tap-undo">↶ Undo mark</button><button data-sync="tap-discard">Discard take</button><button data-sync="take-export" disabled>Export take</button></div>
       <button data-sync="transcript-open" class="lvx-transcript-open">✎ Lyrics text</button><dialog class="lvx-transcript-editor" aria-label="Lyrics text"><h3>Lyrics</h3><p class="lvx-sync-hint">Paste or edit the lyrics, one phrase per line. Prefix a word with = to show it all at once (e.g. =NoOoOoOo); remove = to follow syllables. <code>[backing]</code> puts a line on the backing lane. Fixed words keep their timing; new lines get estimated timing to retime; deleted words and lines are hidden. Undo preview reverts.</p><textarea data-sync="transcript-text" rows="18" spellcheck="true" aria-label="Lyrics, one phrase per line"></textarea><ul class="lvx-transcript-changes" aria-live="polite"></ul><div class="lvx-tap-actions"><button data-sync="transcript-apply">Apply to preview</button><button data-sync="transcript-close">Close</button></div></dialog><section class="lvx-event-review" hidden aria-label="Assign recorded events"><p class="lvx-event-summary" role="status"></p><div class="lvx-event-phrases"></div><div class="lvx-tap-actions"><button data-sync="events-review">Use reviewed assignments</button><button data-sync="events-export">Export events</button></div><p class="lvx-sync-hint">Counts group your recorded entrances into words. Amber means uncertain or changed. Raw timestamps never move. A word starts at its first entrance; its end stays provisional until word-boundary cleanup. Long gaps are flagged because a held syllable can look like the next word. Unresolved phrases stay in the take.</p></section>
       <section class="lvx-mark-correction" hidden aria-label="Correct recorded timing"><label>Recorded <select data-sync="correct-mark" aria-label="Recorded mark to correct"></select></label><div class="lvx-correction-times"><label>Start ms <input data-sync="correct-start" type="number" min="0" step="10"></label><label>End ms <input data-sync="correct-end" type="number" min="0" step="10"></label></div><div class="lvx-tap-actions"><button data-sync="correct-hear">▶ Hear this mark</button><button data-sync="correct-save">Use exact times</button></div><label>Adjust <select data-sync="correct-edge"><option value="move">Whole mark</option><option value="start">Start only</option><option value="end">End only</option></select></label><div class="lvx-tap-actions"><button data-sync="correct-earlier">← Earlier 10 ms</button><button data-sync="correct-later">Later 10 ms →</button><button data-sync="correct-undo">↶ Undo correction</button></div><p class="lvx-sync-hint">Alt + ← / → adjusts the selected edge by 10 ms; add Shift for 50 ms. Corrections use original song time. Hear this mark plays a short loop at practice speed.</p></section>
       <details class="lvx-perform-options"><summary>Performance options <span>units · grid · clicks</span></summary>
@@ -1563,6 +1563,11 @@
     }catch(error){setSyncNotice(error.message,'error');}finally{timing.busy=false;refreshTimingPanel();}
   }
   syncButton('events-review').addEventListener('click',useEventAssignments);
+  syncButton('take-export').addEventListener('click',()=>{
+    if(!tapping.take)return;
+    const packet=rawTake(tapping.take)?eventEnvelope():{schema:'lyricvibe-buffered-take-v1',createdAt:new Date().toISOString(),mediaKey:LvScore.mediaKey(state.score.source),offsetMs:state.score.offsetMs,take:structuredClone(tapping.take),audioIncluded:false};
+    const url=URL.createObjectURL(new Blob([JSON.stringify(packet,null,2)],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download=`lyricvibe-${state.score.source.videoId}-take.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  });
   syncButton('events-export').addEventListener('click',()=>{
     if(!rawTake(tapping.take))return;const blob=new Blob([JSON.stringify(eventEnvelope(),null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');
     a.href=url;a.download=`lyricvibe-${state.score.source.videoId}-${wordTake(tapping.take)?'word-holds':'performance-events'}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
@@ -1777,7 +1782,8 @@
     syncPanel.querySelector('.lvx-sync-save-status').textContent=saveReason;
     const saveWrap=syncPanel.querySelector('.lvx-save-wrap'),blocked=syncButton('apply').disabled||Boolean(timing.saveError)||Boolean(captureSaveWarning());saveWrap.dataset.blocked=String(blocked);saveWrap.tabIndex=blocked?0:-1;saveWrap.setAttribute('aria-label',blocked?'Save needs attention: '+saveReason:'Save timings');syncPanel.querySelector('.lvx-save-tooltip').textContent=blocked?saveReason:'';
     syncButton('light-editor').disabled=timing.busy||!draft||timing.dirty||tapping.splitDirty||effectPending();
-    syncButton('export').disabled = timing.busy || !draft || timing.dirty || tapping.splitDirty || tapPending();
+    syncButton('export').disabled = !draft && !state.score;
+    syncButton('take-export').disabled = !tapping.take;
     syncButton('undo').disabled = timing.busy || Boolean(draft);
     syncPanel.querySelector('.lvx-sync-position').textContent = draft ? `Phrase ${timing.phraseIndex + 1} / ${draft.score.phrases.length}` : 'No preview';
     syncPanel.querySelector('.lvx-sync-phrase').textContent = phrase?.words.map(w => w.text).join(' ') || 'Your saved score stays unchanged while you review.';
@@ -1916,8 +1922,8 @@
     refreshTimingPanel();
   });
   syncButton('export').addEventListener('click', () => {
-    if (!timing.draft || timing.busy || timing.dirty || tapping.splitDirty || tapPending()) return;
-    const score = LvScore.validateScore(timing.draft.score), url = URL.createObjectURL(new Blob([JSON.stringify(score)],{type:'application/json'}));
+    if (!timing.draft && !state.score) return;
+    const score = LvScore.validateScore(timing.draft?.score || state.score), url = URL.createObjectURL(new Blob([JSON.stringify(score)],{type:'application/json'}));
     const link = document.createElement('a'); link.href = url; link.download = `lyricvibe-${score.source.videoId}-preview.json`; link.click();
     setTimeout(() => URL.revokeObjectURL(url),1000); setSyncNotice('Preview JSON exported. This does not save it as this video’s playback score.');
   });
