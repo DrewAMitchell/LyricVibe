@@ -1541,7 +1541,8 @@
           const wordBounds=wordTake(take)?take.holds.filter(h=>h.phraseId===p.phraseId).map(h=>({...h,pressMs:h.pressMs-state.score.offsetMs,releaseMs:h.releaseMs-state.score.offsetMs})):null;
           const operations=await continuousSyllableOperations({...take,cadence:'phrase-stream',marks,wordBounds,stoppedScoreMs:Number.MAX_SAFE_INTEGER});
           if(wordTake(take)){
-            const phrase=timing.draft.score.phrases.find(x=>x.id===p.phraseId),startMs=Math.min(phrase.startMs,...wordBounds.map(h=>h.pressMs)),endMs=Math.max(phrase.endMs,...wordBounds.map(h=>h.releaseMs));
+            const phrase=timing.draft.score.phrases.find(x=>x.id===p.phraseId),complete=phrase.words.filter(w=>!w.excluded).every(w=>wordBounds.some(h=>h.wordId===w.id));
+            const startMs=Math.min(...wordBounds.map(h=>h.pressMs),...(complete?[]:[phrase.startMs])),endMs=Math.max(...wordBounds.map(h=>h.releaseMs),...(complete?[]:[phrase.endMs]));
             if(startMs!==phrase.startMs||endMs!==phrase.endMs)operations.unshift({type:'setPhraseTiming',phraseId:p.phraseId,startMs,endMs});
           }
           if(tapping.take!==take||tapping.binding!==tapBinding())throw Error('The take changed while spelling. Marks remain backed up.');
