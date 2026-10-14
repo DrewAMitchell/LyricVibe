@@ -43,7 +43,7 @@
     $('save').disabled=state.busy||!ready||!state.auditioned||state.dirty;
     $('undo').disabled=state.busy||!state.draft?.undoScores?.length;
     $('save-status').textContent=!ready?'Saved · reopen Sync to continue':state.dirty?'Use exact times first':state.auditioned?'Ready to save this iteration':'Audition preview before saving';
-    const blocked=$('save').disabled||Boolean(state.saveError),reason=state.busy?'Updating preview…':!ready?'Reopen Sync to prepare this video’s preview.':state.dirty?'Use exact times for your typed changes first.':!state.auditioned?'Audition preview at 1× before saving.':state.saveError||'Ready to save this iteration.';
+    const blocked=$('save').disabled||Boolean(state.saveError),reason=state.busy?'Updating preview…':!ready?'Reopen Sync to prepare this video’s preview.':state.dirty?'Use exact times for your typed changes first.':!state.auditioned?'Audition preview before saving.':state.saveError||'Ready to save this iteration.';
     $('save-wrap').dataset.blocked=String(blocked);$('save-wrap').tabIndex=blocked?0:-1;$('save-wrap').setAttribute('aria-label',blocked?'Save unavailable: '+reason:'Save timings');$('save-reason').textContent=blocked?reason:'';
   }
   function setDraft(draft) {
@@ -183,10 +183,9 @@
   $('phrase-track').onchange=()=>run(async()=>{try{if(state.dirty)throw Error('Use exact times before changing vocal tracks.');const laneId=$('phrase-track').value,phraseId=phrase().id,wordId=word().id,all=state.trackId==='all';const r=await request('LV_TIMING_TUNE',{operation:{type:'setPhraseLane',phraseId,laneId},allowProtected:true});state.phrase=r.preview.score.phrases.findIndex(p=>p.id===phraseId);state.wordId=wordId;state.trackId=all?'all':laneId;setDraft(r.preview);notice('Phrase moved to '+trackLabel(state.draft.score.lanes.find(l=>l.id===laneId))+'. Timings are unchanged. Audition, then Save timings; Undo restores its prior track.');}catch(error){$('phrase-track').value=phrase()?.laneId;throw error;}}).finally(()=>document.getElementById('phrase-track').focus());
   $('return').onclick=()=>run(async()=>{await chrome.tabs.update(tabId,{active:true});const tab=await chrome.tabs.get(tabId);await chrome.windows.update(tab.windowId,{focused:true});});
   $('play').onclick=()=>run(()=>request('LV_SCORE_TRANSPORT',{action:'play'}));$('pause').onclick=()=>run(()=>request('LV_SCORE_TRANSPORT',{action:'pause'}));
-  $('speed').onchange=()=>run(()=>request('LV_SCORE_TRANSPORT',{action:'setRate',rate:Number($('speed').value)}));
   const updateLoop=()=>request('LV_SCORE_TRANSPORT',$('loop').checked?{action:'setLoop',loop:{startMs:Math.max(0,phrase().startMs+state.draft.score.offsetMs-250),endMs:phrase().endMs+state.draft.score.offsetMs+250}}:{action:'clearLoop'});
   $('loop').onchange=()=>run(updateLoop);
-  $('audition').onclick=()=>run(async()=>{if(state.dirty)throw Error('Use exact times first.');await request('LV_SCORE_TRANSPORT',{action:'setRate',rate:1});$('speed').value='1';await seek(phrase().startMs-300);await request('LV_SCORE_TRANSPORT',{action:'play'});state.auditioned=true;notice('Preview is playing in YouTube. Save timings keeps this partial iteration, including exclusions.');});
+  $('audition').onclick=()=>run(async()=>{if(state.dirty)throw Error('Use exact times first.');await seek(phrase().startMs-300);await request('LV_SCORE_TRANSPORT',{action:'play'});state.auditioned=true;notice('Preview is playing in YouTube. Save timings keeps this partial iteration, including exclusions.');});
   $('undo').onclick=()=>run(async()=>{state.dirty=false;const phraseId=phrase().id,wordId=word().id,all=state.trackId==='all';const result=await request('LV_TIMING_UNDO');state.phrase=result.preview.score.phrases.findIndex(p=>p.id===phraseId);state.wordId=wordId;state.trackId=all?'all':result.preview.score.phrases[state.phrase].laneId;setDraft(result.preview);notice('Last preview edit undone in YouTube. Saved timings are unchanged.');});
   $('save').onclick=()=>run(async()=>{state.saveError=null;try{if(!state.auditioned||state.dirty)throw Error('Audition this preview before saving.');const r=await request('LV_TIMING_APPLY');state.score=r.score;state.draft=null;setDraft((await request('LV_TIMING_PREPARE',{fromSaved:true})).preview);notice('Timings saved. Keep refining here; each save has its own undo in YouTube.');buttons();}catch(error){state.saveError=error.message;throw error}});
   document.addEventListener('keydown',event=>{
@@ -206,7 +205,7 @@
     try{const c=await chrome.tabs.sendMessage(tabId,{type:'LV_ANALYSIS_CLOCK'});if(c.mediaKey!==mediaKey||c.isAd)throw Error('Source changed or advertisement active.');
       const now=c.currentTimeMs-(state.draft?.score.offsetMs||0),head=$('playhead');
       const followLane=state.trackId==='all'?phrase()?.laneId:state.trackId,laneInfo=state.draft?.score.lanes.find(l=>l.id===followLane),laneActive=state.draft?.score.phrases.some(p=>p.laneId===followLane&&now>=p.startMs&&now<p.endMs&&p.words.some(w=>!w.excluded));
-      if(Number.isFinite(c.playbackRate)&&c.playbackRate>0){const select=$('speed');if(![...select.options].some(o=>Number(o.value)===c.playbackRate))select.add(new Option(c.playbackRate+'×',String(c.playbackRate)));select.value=String(c.playbackRate);}
+      if(Number.isFinite(c.playbackRate)&&c.playbackRate>0)$('speed').textContent=c.playbackRate+'×';
       $('clock').textContent=`${(c.currentTimeMs/1000).toFixed(3)}s · ${c.paused?'paused':'playing'}${laneInfo?' · '+trackLabel(laneInfo)+(!c.paused&&!laneActive?' rest':''):''}`;
       if(state.draft&&!c.paused&&$('follow').checked&&!$('loop').checked&&!state.busy&&!state.dirty&&!document.activeElement?.closest('aside')&&document.activeElement?.id!=='phrase-track'&&!document.querySelector('.lane button:active')){
         const rows=state.draft.score.phrases,current=phrase(),lane=current?.laneId;

@@ -387,7 +387,7 @@
     <div class="lvx-sync-tabs" role="group" aria-label="Timing to audition"><button data-sync="saved" aria-pressed="false">Saved</button><button data-sync="proposed" aria-pressed="true">Proposed · unsaved</button></div>
     <div class="lvx-sync-nav"><button data-sync="previous" aria-label="Previous lyric phrase">‹</button><span class="lvx-sync-position"></span><button data-sync="next" aria-label="Next lyric phrase">›</button></div>
     <p class="lvx-sync-phrase"></p><div class="lvx-sync-range"></div>
-    <div class="lvx-sync-transport"><button data-sync="audition">▶ Audition at 1×</button><button data-sync="pause">Ⅱ Pause</button><output class="lvx-sync-clock" aria-label="Source playback time" aria-live="off">0.000s</output></div>
+    <div class="lvx-sync-transport"><button data-sync="audition">▶ Audition preview</button><button data-sync="pause">Ⅱ Pause</button><output class="lvx-sync-clock" aria-label="Source playback time" aria-live="off">0.000s</output></div>
     <label class="lvx-sync-loop"><input type="checkbox" data-sync="loop"> Loop this phrase</label>
     <details class="lvx-tempo-panel"><summary>Beat clicker <span>T · tap the beat</span></summary><div class="lvx-clicker-controls"><button data-sync="tempo-tap">Tap · T</button><button data-sync="tempo-downbeat">Beat 1 here</button><label>BPM<input data-sync="tempo-bpm" type="number" min="20" max="400" step="1" value="120"></label><button data-sync="tempo-save">Set BPM</button><label class="lvx-sync-loop"><input type="checkbox" data-sync="tempo-click"> Click</label><button data-sync="tempo-sections">Sections ↗</button></div><p class="lvx-sync-hint">First tap sets beat 1. Keep tapping to fit BPM, or type an exact integer.</p><p class="lvx-tempo-status" role="status"></p><button data-sync="tempo-undo">↶ Undo tempo</button></details>
     <details class="lvx-tap-panel"><summary>Record by ear <span>phrase → syllables · words optional</span></summary>
@@ -543,10 +543,22 @@
   }
 
   const tempo={mediaKey:null,taps:[],estimate:null,map:null,history:[],revision:0,sessionStartMs:null,write:Promise.resolve()};
-  let observedRate=null,observedRateMedia=null;
+  let observedRate=null,observedRateMedia=null,observedRateSource=null,preferredRate=null,ratePreferenceLoaded=false;
+  function persistPlaybackRate(rate){
+    preferredRate=rate;
+    try{Promise.resolve(chrome.storage.local.set({lvxPlaybackRate:rate})).catch(error=>setSyncNotice('Playback changed; speed preference could not save: '+error.message));}catch(error){setSyncNotice('Playback changed; speed preference could not save: '+error.message);}
+  }
+  async function loadPlaybackRatePreference(){
+    try{const stored=(await chrome.storage.local.get('lvxPlaybackRate')).lvxPlaybackRate;if(Number.isFinite(stored)&&stored>=.25&&stored<=4)preferredRate=stored;}catch{}
+    ratePreferenceLoaded=true;observedRateMedia=null;observePlaybackRate();
+  }
   function observePlaybackRate(media=getMedia()){
-    const rate=media?.playbackRate;if(!Number.isFinite(rate)||rate<=0||media===observedRateMedia&&rate===observedRate)return;
-    observedRate=rate;observedRateMedia=media;state.playbackRate=rate;
+    if(isAdvertisement()||youtubeMediaState()?.clockUsable===false)return;
+    const source=LvScore.mediaKey({url:location.href}),newSource=media!==observedRateMedia||source!==observedRateSource;
+    if(media&&newSource&&ratePreferenceLoaded&&preferredRate!==null&&media.playbackRate!==preferredRate){media.preservesPitch=true;media.playbackRate=preferredRate;}
+    const rate=media?.playbackRate;if(!Number.isFinite(rate)||rate<=0||!newSource&&rate===observedRate)return;
+    if(ratePreferenceLoaded&&(!newSource||preferredRate===null))persistPlaybackRate(rate);
+    observedRate=rate;observedRateMedia=media;observedRateSource=source;state.playbackRate=rate;
     for(const select of [speedSelect,syncButton('tap-speed')]){if(![...select.options].some(o=>Number(o.value)===rate)){const o=document.createElement('option');o.value=String(rate);o.textContent=rate+'×';select.append(o);}select.value=String(rate);}
     for(const button of speedGroup.querySelectorAll('[data-playback-rate]'))button.setAttribute('aria-pressed',String(Number(button.dataset.playbackRate)===rate));
     if(tapping.take?.status==='armed')tapping.rate=rate;
@@ -555,7 +567,7 @@
   }
   function setPlaybackSpeed(rate){
     const media=getMedia();if(!media||!Number.isFinite(rate)||rate<.25||rate>4||isAdvertisement()||youtubeMediaState()?.clockUsable===false){setSyncNotice('Wait for the main video, then choose speed from ¼× to 4×.');return false;}
-    media.preservesPitch=true;media.playbackRate=rate;observePlaybackRate(media);return true;
+    persistPlaybackRate(rate);media.preservesPitch=true;media.playbackRate=rate;observePlaybackRate(media);return true;
   }
   const beatClick={enabled:false,userSet:false,audio:null,nodes:new Set(),scheduled:new Set(),map:null,rate:null,lastSource:null,lastWall:null};
   function cancelBeatClicks(keepManual=false){for(const node of beatClick.nodes){if(keepManual&&node.lvManual)continue;try{node.stop();}catch{}beatClick.nodes.delete(node);}beatClick.scheduled.clear();beatClick.map=tempo.map;beatClick.lastSource=null;}
@@ -701,7 +713,7 @@
     const continuous=continuousPass();
     syncButton('tap-syllable-flow').parentElement.hidden=mode!=='syllable';
     syncButton('tap-syllable-flow').disabled=timing.busy||tapPending();
-    syncButton('tap-speed').parentElement.hidden=false;
+    syncButton('tap-speed').parentElement.hidden=true;
     if(take?.status==='armed')syncButton('tap-syllable-flow').parentElement.hidden=true;
     for (const button of syncPanel.querySelectorAll('[data-phase]')) { button.setAttribute('aria-pressed',String(button.dataset.phase === mode)); button.disabled = timing.busy || tapPending() || tapping.splitDirty; }
     const words = syncPanel.querySelector('.lvx-tap-words'); words.replaceChildren(); words.hidden=true; words.setAttribute('aria-hidden','true');
@@ -867,7 +879,7 @@
     try{const score=syllableTakeScore();if(!score)return;const media=getMedia(),phrase=timingPhrase(score);
       if(!media||isAdvertisement()||LvScore.mediaKey({url:location.href})!==LvScore.mediaKey(score.source))throw Error('Reopen Sync on the matching video.');
       const startMs=Math.max(0,phrase.startMs+score.offsetMs-350),endMs=phrase.endMs+score.offsetMs+350;
-      media.playbackRate=Number(syncButton('tap-speed').value);media.currentTime=startMs/1000;state.auditionLoop=syncButton('loop').checked?{startMs,endMs}:null;
+      media.currentTime=startMs/1000;state.auditionLoop=syncButton('loop').checked?{startMs,endMs}:null;
       timing.view='proposed';await media.play();setSyncNotice('Playing your phrase take. Retake, correct a shared boundary below, or Keep phrase & next.');
     }catch(error){setSyncNotice(error.message,'error');}
   }
@@ -1118,7 +1130,7 @@
     if (!mark || !media || timing.busy || tapping.take.status==='armed' || tapping.binding!==tapBinding()) return;
     media.pause();
     const startMs=Math.max(0,mark.startMs+state.score.offsetMs-350), endMs=Math.min(state.score.source.durationMs,mark.endMs+state.score.offsetMs+350);
-    state.auditionLoop={startMs,endMs}; media.preservesPitch=true; media.playbackRate=Number(syncButton('tap-speed').value); media.currentTime=startMs/1000;
+    state.auditionLoop={startMs,endMs}; media.preservesPitch=true; media.currentTime=startMs/1000;
     try { await media.play(); setSyncNotice('Looping this recorded mark at practice speed. Pause to stop; corrections remain buffered.'); } catch(error) {setSyncNotice(error.message,'error');}
   }
   syncButton('correct-mark').addEventListener('change',()=>{tapping.reviewId=syncButton('correct-mark').value;refreshMarkCorrection();});
@@ -1216,7 +1228,7 @@
       timing.busy = true; refreshTimingPanel();
       const practiceRate = media.playbackRate;
       if (!Number.isFinite(practiceRate)||practiceRate<=0) throw Error('Choose a valid playback speed.');
-      media.preservesPitch = true; media.playbackRate = practiceRate;
+      media.preservesPitch = true;
       if(mode==='syllable'&&tapping.audio){await tapping.audio.close();tapping.audio=null;}
       if (mode!=='syllable'&&syncButton('tap-click').checked) {
         tapping.audio ||= new AudioContext(); await tapping.audio.resume();
@@ -1326,7 +1338,7 @@
     for(const unit of take.units){const match=words.find(x=>x.word.id===unit.wordId);
       if(!match||match.word.excluded||match.word.text!==unit.text||(stream?match.phrase.startMs:match.word.startMs)!==unit.minMs||(stream?match.phrase.endMs:match.word.endMs)!==unit.maxMs||match.phrase.id!==unit.phraseId)throw Error('The take frames changed; keep the numeric take for review instead of guessing a match.');
     }
-    tapping.take=take;tapping.binding=packet.binding;tapping.rate=Number(syncButton('tap-speed').value);tapping.restored=true;
+    tapping.take=take;tapping.binding=packet.binding;tapping.rate=getMedia().playbackRate;tapping.restored=true;
     tapping.followSeek=stream;tapping.seekPhraseId=null;
     syncButton('tap-mode').value='syllable';syncButton('tap-syllable-flow').value=stream?'phrase-stream':'continuous';
     if(packet.wordId&&words.some(x=>x.word.id===packet.wordId)){const match=words.find(x=>x.word.id===packet.wordId);timing.phraseIndex=timing.draft.score.phrases.findIndex(p=>p.id===match.phrase.id);tapping.wordId=packet.wordId;}
@@ -1840,7 +1852,7 @@
     const media = getMedia(), phrase = timingPhrase(timing.view === 'saved' ? state.score : timing.draft.score);
     if (!media || isAdvertisement() || youtubeMediaState()?.clockUsable === false || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source)) { setSyncNotice('Wait for this video’s main audio before auditioning.'); return; }
     const startMs = Math.max(0, phrase.startMs + state.score.offsetMs - 600), endMs = phrase.endMs + state.score.offsetMs + 400;
-    media.preservesPitch = true; media.playbackRate = 1;
+    media.preservesPitch = true;
     state.auditionLoop = syncButton('loop').checked ? { startMs, endMs } : null;
     media.currentTime = startMs / 1000;
     try { await media.play(); if (timing.view === 'proposed') timing.auditioned = true; setSyncNotice(`${timing.view === 'proposed' ? 'Proposed · unsaved' : 'Saved'} timing is playing. Pause whenever you need.`); }
@@ -2173,7 +2185,7 @@
   window.addEventListener('keydown', handleTapKeys, true);
   window.addEventListener('keyup', handleTapKeys, true);
   window.addEventListener('blur', () => { if (tapping.heldInput) stopTapTake('Take stopped because focus changed. Unfinished word unchanged; completed words retained.'); });
-  syncButton('tap-speed').addEventListener('change',()=>setPlaybackSpeed(Number(syncButton('tap-speed').value)));
+  void loadPlaybackRatePreference();
   observePlaybackRate();
   for (const eventName of ['seeking', 'pause', 'ratechange', 'ended']) document.addEventListener(eventName, event => {
     if(eventName==='ratechange'&&event.target===getMedia()){observePlaybackRate(event.target);return;}
