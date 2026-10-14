@@ -43,7 +43,7 @@
     $('save').disabled=state.busy||!ready||!state.auditioned||state.dirty;
     $('undo').disabled=state.busy||!state.draft?.undoScores?.length;
     $('save-status').textContent=!ready?'Saved · reopen Sync to continue':state.dirty?'Use exact times first':state.auditioned?'Ready to save this iteration':'Audition preview before saving';
-    const blocked=$('save').disabled,reason=state.busy?'Updating preview…':!ready?'Reopen Sync to prepare this video’s preview.':state.dirty?'Use exact times for your typed changes first.':!state.auditioned?'Audition preview at 1× before saving.':'Ready to save this iteration.';
+    const blocked=$('save').disabled||Boolean(state.saveError),reason=state.busy?'Updating preview…':!ready?'Reopen Sync to prepare this video’s preview.':state.dirty?'Use exact times for your typed changes first.':!state.auditioned?'Audition preview at 1× before saving.':state.saveError||'Ready to save this iteration.';
     $('save-wrap').dataset.blocked=String(blocked);$('save-wrap').tabIndex=blocked?0:-1;$('save-wrap').setAttribute('aria-label',blocked?'Save unavailable: '+reason:'Save timings');$('save-reason').textContent=blocked?reason:'';
   }
   function setDraft(draft) {
@@ -187,7 +187,7 @@
   $('loop').onchange=()=>run(updateLoop);
   $('audition').onclick=()=>run(async()=>{if(state.dirty)throw Error('Use exact times first.');await request('LV_SCORE_TRANSPORT',{action:'setRate',rate:1});$('speed').value='1';await seek(phrase().startMs-300);await request('LV_SCORE_TRANSPORT',{action:'play'});state.auditioned=true;notice('Preview is playing in YouTube. Save timings keeps this partial iteration, including exclusions.');});
   $('undo').onclick=()=>run(async()=>{state.dirty=false;const phraseId=phrase().id,wordId=word().id,all=state.trackId==='all';const result=await request('LV_TIMING_UNDO');state.phrase=result.preview.score.phrases.findIndex(p=>p.id===phraseId);state.wordId=wordId;state.trackId=all?'all':result.preview.score.phrases[state.phrase].laneId;setDraft(result.preview);notice('Last preview edit undone in YouTube. Saved timings are unchanged.');});
-  $('save').onclick=()=>run(async()=>{if(!state.auditioned||state.dirty)throw Error('Audition this preview before saving.');const r=await request('LV_TIMING_APPLY');state.score=r.score;state.draft=null;setDraft((await request('LV_TIMING_PREPARE',{fromSaved:true})).preview);notice('Timings saved. Keep refining here; each save has its own undo in YouTube.');buttons();});
+  $('save').onclick=()=>run(async()=>{state.saveError=null;try{if(!state.auditioned||state.dirty)throw Error('Audition this preview before saving.');const r=await request('LV_TIMING_APPLY');state.score=r.score;state.draft=null;setDraft((await request('LV_TIMING_PREPARE',{fromSaved:true})).preview);notice('Timings saved. Keep refining here; each save has its own undo in YouTube.');buttons();}catch(error){state.saveError=error.message;throw error}});
   document.addEventListener('keydown',event=>{
     if(!['ArrowLeft','ArrowRight'].includes(event.key)||event.metaKey||event.target.matches('input,textarea,select,[contenteditable=true]'))return;
     const direction=event.key==='ArrowLeft'?-1:1;
