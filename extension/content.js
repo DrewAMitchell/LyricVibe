@@ -254,11 +254,14 @@
   tempoButton.addEventListener('click',()=>void tapTempo());
   const statusGroup = document.createElement('span'); statusGroup.className = 'lvx-hud-status'; statusGroup.append(hudLabel, hudText);
   const speedGroup=document.createElement('span');speedGroup.className='lvx-hud-group lvx-speed-group';
+  speedGroup.setAttribute('role','group');speedGroup.setAttribute('aria-label','Playback speed');
+  const speedLabel=document.createElement('span');speedLabel.className='lvx-speed-label';speedLabel.textContent='Speed';speedGroup.append(speedLabel);
   const speedSelect=document.createElement('select');speedSelect.className='lvx-playback-speed';speedSelect.setAttribute('aria-label','YouTube playback speed');speedSelect.title='Change playback speed now; takes keep original song time.';
   for(const rate of PLAYBACK_RATES){const option=document.createElement('option');option.value=String(rate);option.textContent=rate+'×';speedSelect.append(option);}
-  for(const [rate,label]of [[.5,'½×'],[1,'1×']]){const button=document.createElement('button');button.type='button';button.textContent=label;button.dataset.playbackRate=rate;button.title=rate===1?'Real-time speed':'Half speed';button.onclick=()=>setPlaybackSpeed(rate);speedGroup.append(button);}
+  for(const [rate,label,title]of [[.5,'½×','Half speed'],[.75,'¾×','Three-quarter speed'],[1,'1×','Real-time speed']]){const button=document.createElement('button');button.type='button';button.textContent=label;button.dataset.playbackRate=rate;button.title=title;button.setAttribute('aria-label',title);button.onclick=()=>setPlaybackSpeed(rate);speedGroup.append(button);}
   speedGroup.append(speedSelect);speedSelect.onchange=()=>setPlaybackSpeed(Number(speedSelect.value));
-  hud.append(statusGroup, offsetGroup, editGroup, themeButton, tempoButton, speedGroup, endGroup);
+  hud.append(statusGroup, speedGroup, offsetGroup, editGroup, themeButton, tempoButton, endGroup);
+  const hudSizeObserver=new ResizeObserver(()=>root.style.setProperty('--lvx-toolbar-height',`${Math.ceil(hud.getBoundingClientRect().height)}px`));
 
   /* Display picker: one tile per theme, animated with this video's own lyrics. */
   const themePicker = document.createElement('div');
@@ -1943,6 +1946,7 @@
     const surface = document.fullscreenElement;
     if (surface && !['VIDEO', 'AUDIO'].includes(surface.tagName)) surface.appendChild(root);
     else document.documentElement.appendChild(root);
+    hudSizeObserver.observe(hud);
   }
   mountRoot();
   document.addEventListener('fullscreenchange', () => { if (root.isConnected) mountRoot(); });
@@ -4401,6 +4405,7 @@
      TEARDOWN / SHOW
      ══════════════════════════════════════ */
   function teardown() {
+    hudSizeObserver.disconnect();
     cancelBeatClicks();if(beatClick.audio){beatClick.audio.close().catch(()=>{});beatClick.audio=null;}
     if (tapping.audio) { tapping.audio.close().catch(() => {}); tapping.audio = null; }
     syncPanel.hidden = true; discardTimingLocal();
