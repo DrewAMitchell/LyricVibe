@@ -1479,7 +1479,7 @@
       const current=await timingRequest('LV_TIMING_CURRENT');
       const result = current.preview ? current : await timingRequest('LV_TIMING_PREPARE', { fromSaved: true });
       timing.draft = result.preview; timing.phraseIndex = 0; timing.view = 'proposed'; timing.dirty = false; timing.auditioned = false;
-      setSyncNotice(current.preview ? 'Resumed your unsaved preview. Record or refine timings, then audition and Save timings.' : 'Your saved lyrics and timings are ready. Record or refine a take, then audition and Save timings.');
+      setSyncNotice(current.preview ? 'Resumed your unsaved changes. Keep recording or refining; Save timings when you like.' : 'Your saved lyrics and timings are ready. Record or refine a take; Save timings when you like.');
     } catch (error) { setSyncNotice(error.message,'error'); }
     finally { timing.busy = false; refreshTimingPanel(); }
   }
