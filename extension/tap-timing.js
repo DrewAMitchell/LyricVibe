@@ -8,6 +8,55 @@
   const clone = value => JSON.parse(JSON.stringify(value));
   const integerTime = n => Number.isSafeInteger(n) && n >= 0;
 
+  // Lead-in guidance is derived from source-media time so pause, seek, and
+  // playback-rate changes are handled by the caller's current media clock.
+  function leadInProgress(nowMs, startMs, leadInMs) {
+    if (![nowMs, startMs, leadInMs].every(Number.isFinite) || leadInMs < 0) {
+      fail('INVALID_LEAD_IN', 'Lead-in times must be finite and the duration cannot be negative.');
+    }
+    const remainingMs = Math.max(0, startMs - nowMs);
+    const progress = leadInMs === 0 ? 1 : Math.max(0, Math.min(1, (leadInMs - remainingMs) / leadInMs));
+    return { remainingMs, progress };
+  }
+
+  function captureProgress(take, phrase, offsetMs = 0) {
+    if (!take || typeof take !== 'object' || !phrase || typeof phrase !== 'object' ||
+        !Number.isFinite(offsetMs)) return { phraseRecorded: false, wordIds: [], eventCount: 0 };
+    const words = Array.isArray(phrase.words) ? phrase.words.filter(word => word && !word.excluded) : [];
+    const wordIds = new Set(words.map(word => word.id).filter(id => typeof id === 'string'));
+    const recordedWords = new Set();
+    let eventCount = 0;
+    if (take.mode === 'phrase') {
+      const marks = Array.isArray(take.marks) ? take.marks : [];
+      const recorded = marks.some(mark => mark && mark.id === phrase.id);
+      return { phraseRecorded: recorded, wordIds: recorded ? words.map(word => word.id).filter(id => typeof id === 'string') : [], eventCount: recorded ? 1 : 0 };
+    }
+    if (Array.isArray(take.holds)) {
+      for (const hold of take.holds) {
+        if (!hold || hold.phraseId !== phrase.id || !wordIds.has(hold.wordId)) continue;
+        recordedWords.add(hold.wordId);
+        eventCount++;
+      }
+      return { phraseRecorded: eventCount > 0, wordIds: [...recordedWords], eventCount };
+    }
+    if (take.cadence === 'performance-events' || Array.isArray(take.events)) {
+      const startMs = phrase.startMs + offsetMs, endMs = phrase.endMs + offsetMs;
+      const events = Array.isArray(take.events) ? take.events : [];
+      eventCount = events.filter(event => event && Number.isFinite(event.sourceMs) &&
+        event.sourceMs >= startMs && event.sourceMs < endMs).length;
+      return { phraseRecorded: eventCount > 0, wordIds: [], eventCount };
+    }
+    const marks = Array.isArray(take.marks) ? take.marks : [];
+    for (const mark of marks) {
+      if (!mark) continue;
+      if (wordIds.has(mark.wordId) && (mark.phraseId === undefined || mark.phraseId === phrase.id)) {
+        recordedWords.add(mark.wordId);
+        eventCount++;
+      }
+    }
+    return { phraseRecorded: eventCount > 0, wordIds: [...recordedWords], eventCount };
+  }
+
   function begin(units, options = {}) {
     if (!Array.isArray(units) || units.length === 0) fail('INVALID_UNITS', 'Provide at least one timing unit.');
     if (!options || typeof options !== 'object' || Array.isArray(options)) fail('INVALID_OPTIONS', 'Timing options must be an object.');
@@ -1045,11 +1094,23 @@
   function skipWords(take, delta) {
     assertHoldTake(take);
     if (take.pendingStartMs !== null) fail('PRESS_PENDING', 'Release the current word first.');
-    const index = Math.max(0, Math.min(take.units.length - 1, take.index + delta));
+    let minIndex = 0, maxIndex = take.units.length - 1;
+    if (take.retime) {
+      minIndex = take.units.findIndex(unit => unit.phraseId === take.retime.phraseId);
+      if (minIndex < 0) fail('UNKNOWN_PHRASE', `Unknown phrase: ${take.retime.phraseId}`);
+      maxIndex = minIndex;
+      while (maxIndex + 1 < take.units.length && take.units[maxIndex + 1].phraseId === take.retime.phraseId) maxIndex++;
+    }
+    const index = Math.max(minIndex, Math.min(maxIndex, take.index + delta));
     // Moving back un-claims the words from the new cursor onward so they can be re-held.
     const keep = new Set(take.units.slice(0, index).map(u => u.wordId));
-    const holds = delta < 0 ? take.holds.filter(h => keep.has(h.wordId)) : take.holds;
-    return { ...take, index, holds, lastMs: holds.length ? Math.max(...holds.map(h => h.releaseMs)) : null,
+    const holds = delta < 0 ? take.holds.filter(h => take.retime
+      ? h.phraseId !== take.retime.phraseId || keep.has(h.wordId)
+      : keep.has(h.wordId)) : take.holds;
+    // Future holds outside a retimed phrase are retained, but cannot constrain
+    // the source time of a new press within that phrase.
+    const prior = take.retime ? holds.filter(h => keep.has(h.wordId)) : holds;
+    return { ...take, index, holds, lastMs: prior.length ? Math.max(...prior.map(h => h.releaseMs)) : null,
       actionHistory: [...take.actionHistory, holdSnapshot(take)].slice(-256) };
   }
   function undoWordHold(take) {
@@ -1201,5 +1262,6 @@
 
   return { begin, mark, release, undo, stop, adjust, reposition, moveCursor, reassignLast, restoreWordFrameTake, rewindToPhrase, restorePhraseStreamTake,
     beginEvents, markEvent, stopEvents, undoEvent, rewindEvents, associateEvents,
-    beginWordHolds, pressWord, releaseWord, skipWords, undoWordHold, stopWordHolds, rewindWordHolds, retimePhraseHolds, associateWordHolds, wordHoldsFromPairs, estimateTempo };
+    beginWordHolds, pressWord, releaseWord, skipWords, undoWordHold, stopWordHolds, rewindWordHolds, retimePhraseHolds, associateWordHolds, wordHoldsFromPairs, estimateTempo,
+    leadInProgress, captureProgress };
 });

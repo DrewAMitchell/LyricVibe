@@ -2378,3 +2378,14 @@
 @media (prefers-reduced-motion:reduce){#lvx-root .lvx-tile-word{animation:none;opacity:1}}
 #lvx-root .lvx-hud-group-label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.6);padding:0 4px 0 6px}
 #lvx-root .lvx-auto-sync[hidden]{display:none}
+#lvx-root .lvx-capture-countdown{height:24px;margin:0 0 4px;color:#d6e8bf;font-size:12px;line-height:18px;white-space:nowrap;overflow:hidden}
+#lvx-root .lvx-capture-countdown>span{font:inherit;color:inherit}
+#lvx-root .lvx-countdown-track{height:3px;margin-top:3px;background:#ffffff16;overflow:hidden;border-radius:3px}
+#lvx-root .lvx-countdown-track i{display:block;height:100%;background:#c7dfa1;transform-origin:left}
+#lvx-root .lvx-capture-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;height:18px;margin-bottom:4px;white-space:nowrap;overflow:hidden;font:11px/18px system-ui,sans-serif}
+#lvx-root .lvx-capture-flag{color:#f5cd82;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#lvx-root .lvx-capture-receipt{color:#bee6c2!important;margin-top:6px}
+#lvx-root .lvx-input-recorded::after{content:none!important}
+#lvx-root .lvx-perform-cue .lvx-context-word.lvx-input-recorded,#lvx-root .lvx-capture-transcript span.lvx-input-recorded{box-shadow:none;color:#b8d6bd}
+#lvx-root .lvx-capture-meta .lvx-capture-receipt{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#lvx-root .lvx-idle-hint{font:11px/16px system-ui,sans-serif!important;color:#c3cbbd!important;height:16px;margin:8px 0 0!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

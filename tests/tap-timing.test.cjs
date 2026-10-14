@@ -2,6 +2,55 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const tap = require('../extension/tap-timing.js');
 
+test('lead-in guidance follows source-clock time and clamps before and after the lead-in', () => {
+  assert.deepEqual(tap.leadInProgress(1000, 3000, 1000), { remainingMs: 2000, progress: 0 });
+  assert.deepEqual(tap.leadInProgress(2500, 3000, 1000), { remainingMs: 500, progress: 0.5 });
+  assert.deepEqual(tap.leadInProgress(3000, 3000, 1000), { remainingMs: 0, progress: 1 });
+  assert.deepEqual(tap.leadInProgress(4000, 3000, 1000), { remainingMs: 0, progress: 1 });
+  // A paused, sought, or rate-adjusted player supplies its current source time;
+  // the helper does not apply playback-rate or wice-clock estimates.
+  assert.deepEqual(tap.leadInProgress(2000, 3000, 1000), { remainingMs: 1000, progress: 0 });
+  assert.deepEqual(tap.leadInProgress(2500, 3500, 1000), { remainingMs: 1000, progress: 0 });
+  assert.deepEqual(tap.leadInProgress(100, 200, 0), { remainingMs: 100, progress: 1 });
+  assert.throws(() => tap.leadInProgress(0, 1, -1), { code: 'INVALID_LEAD_IN' });
+});
+
+test('capture progress counts raw events in the offset phrase window without guessing word ownership', () => {
+  const phrase = { id: 'p', startMs: 100, endMs: 300, words: [{ id: 'w1' }, { id: 'w2' }] };
+  const take = { cadence: 'performance-events', events: [
+    { sourceMs: 109, wordId: 'w1' }, { sourceMs: 200, wordId: 'w2' }, { sourceMs: 301 },
+  ] };
+  assert.deepEqual(tap.captureProgress(take, phrase, 10), { phraseRecorded: true, wordIds: [], eventCount: 2 });
+  assert.deepEqual(tap.captureProgress(take, phrase, 210), { phraseRecorded: false, wordIds: [], eventCount: 0 });
+});
+
+test('capture progress recognizes phrase marks and reports all included phrase words', () => {
+  const phrase = { id: 'p', startMs: 10, endMs: 30, words: [{ id: 'w1' }, { id: 'w2' }, { id: 'w3', excluded: true }] };
+  assert.deepEqual(tap.captureProgress({ mode: 'phrase', marks: [{ id: 'p' }] }, phrase), {
+    phraseRecorded: true, wordIds: ['w1', 'w2'], eventCount: 1,
+  });
+  assert.deepEqual(tap.captureProgress({ mode: 'phrase', marks: [] }, phrase), { phraseRecorded: false, wordIds: [], eventCount: 0 });
+});
+
+test('capture progress uses explicit word marks and word holds only', () => {
+  const phrase = { id: 'p', startMs: 10, endMs: 30, words: [{ id: 'w1' }, { id: 'w2' }] };
+  assert.deepEqual(tap.captureProgress({ marks: [
+    { id: 's1', phraseId: 'p', wordId: 'w1' }, { id: 's2', phraseId: 'elsewhere', wordId: 'w2' },
+  ] }, phrase), { phraseRecorded: true, wordIds: ['w1'], eventCount: 1 });
+  assert.deepEqual(tap.captureProgress({ holds: [
+    { phraseId: 'p', wordId: 'w2' }, { phraseId: 'elsewhere', wordId: 'w1' },
+  ] }, phrase), { phraseRecorded: true, wordIds: ['w2'], eventCount: 1 });
+});
+
+test('capture progress recognizes actual Words cadence marks without phraseId', () => {
+  const phrase = { id: 'p', startMs: 10, endMs: 100, words: [{ id: 'w1' }, { id: 'w2' }] };
+  let take = tap.begin([{ id: 'w1', wordId: 'w1', text: 'one', minMs: 10, maxMs: 60 }]);
+  take = tap.mark(take, 20);
+  take = tap.release(take, 40);
+  assert.equal(take.marks[0].phraseId, undefined);
+  assert.deepEqual(tap.captureProgress(take, phrase), { phraseRecorded: true, wordIds: ['w1'], eventCount: 1 });
+});
+
 test('performance events preserve exact raw taps until later count association', () => {
   const units = [
     { id:'a', wordId:'a', phraseId:'p', text:'known', minMs:100, maxMs:500, expectedCount:1 },
@@ -1067,6 +1116,32 @@ test('retiming one phrase replaces only its holds and returns the cursor', () =>
   assert.deepEqual(partial.holds.map(h=>[h.wordId,h.pressMs]).sort(),[['a',130],['b',380],['c',1100]]);
   assert.equal(partial.index,3);
   assert.throws(()=>tap.retimePhraseHolds({...take,status:'armed'},'p1'),/Stop the pass/);
+});
+
+test('rewinding inside a phrase retime preserves later phrases and uses only the source prefix', () => {
+  const units=[
+    {wordId:'a',phraseId:'p1',text:'a',minMs:0,maxMs:1000,expectedCount:1},
+    {wordId:'b',phraseId:'p1',text:'b',minMs:0,maxMs:1000,expectedCount:1},
+    {wordId:'c',phraseId:'p2',text:'c',minMs:1000,maxMs:2000,expectedCount:1},
+    {wordId:'d',phraseId:'p3',text:'d',minMs:2000,maxMs:3000,expectedCount:1}];
+  let take=tap.beginWordHolds(units,[]);
+  for(const [press,release] of [[100,300],[400,600],[1100,1500],[2100,2500]]){
+    take=tap.pressWord(take,press);take=tap.releaseWord(take,release);
+  }
+  take={...tap.retimePhraseHolds(tap.stopWordHolds(take),'p1'),status:'armed'};
+  take=tap.pressWord(take,120);take=tap.releaseWord(take,320);
+  take=tap.skipWords(take,-1);
+  assert.equal(take.index,0);
+  assert.deepEqual(take.holds.map(h=>h.wordId).sort(),['c','d']);
+  assert.equal(take.lastMs,null);
+  take=tap.pressWord(take,125);take=tap.releaseWord(take,200);
+
+  // Skipping cannot move the retime cursor into a later phrase.
+  take=tap.skipWords(take,99);
+  assert.equal(take.index,1);
+  assert.deepEqual(take.holds.map(h=>h.wordId).sort(),['a','c','d']);
+  const stopped=tap.stopWordHolds(take);
+  assert.deepEqual(stopped.holds.map(h=>h.wordId).sort(),['a','b','c','d']);
 });
 
 test('a quick word keeps the tap inside its hold even when the next press follows within the lead', () => {
