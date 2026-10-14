@@ -1458,7 +1458,7 @@
     syncPanel.querySelector('.lvx-sync-phrase').textContent = phrase?.words.map(w => w.text).join(' ') || 'Your saved score stays unchanged while you review.';
     const shown = timing.view === 'saved' ? timingPhrase(state.score) : phrase;
     const protectedPhrase = draft?.preservedPhraseIds.includes(phrase?.id);
-    syncPanel.querySelector('.lvx-sync-range').textContent = shown ? `${(shown.startMs / 1000).toFixed(3)}–${(shown.endMs / 1000).toFixed(3)}s · ${(()=>{const a=phrase?phraseAuthoring(phrase):null;return a?AUTHORING_LABELS[a.level]+(a.mixed?' (some words further)':''):'';})()}` : '';
+    syncPanel.querySelector('.lvx-sync-range').textContent = shown ? `${(shown.startMs / 1000).toFixed(3)}–${(shown.endMs / 1000).toFixed(3)}s · ${(()=>{const a=phrase?phraseAuthoring(phrase):null;return a?`${authoringProgress(a)==='todo'?'to do for this mode · ':authoringProgress(a)==='done'?'done for this mode · ':''}${AUTHORING_LABELS[a.level]}${a.mixed?' (some words further)':''}`:'';})()}` : '';
     syncPanel.querySelector('.lvx-sync-protected').hidden = !protectedPhrase && !(syncButton('tap-scope').value === 'lane' && draft?.protectedIds.length);
     syncText.disabled = timing.busy || !draft;
     if (!timing.dirty) syncText.value = phrase?.words.map(w => `${w.text}\t${w.startMs}\t${w.endMs}`).join('\n') || '';
@@ -2927,6 +2927,12 @@
     const ranks=phrase.words.filter(w=>!w.excluded).map(rank);if(!ranks.length)return {level:'estimate',mixed:false};
     const low=Math.min(...ranks);return {level:['estimate','phrase','words','syllables'][low],mixed:Math.max(...ranks)>low};
   }
+  // Done is relative to the capture mode: Phrases needs phrase timing, Words needs words, Syllables needs syllables.
+  function authoringProgress(authoring){
+    if(authoring.level==='take')return 'take';
+    const need={phrase:1,word:2,syllable:3}[syncButton('tap-mode').value]??1;
+    return ['estimate','phrase','words','syllables'].indexOf(authoring.level)>=need?'done':'todo';
+  }
   function renderScore(mediaMs) {
     if (tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete') && timing.draft && !syncPanel.hidden) {renderCaptureScore();return;}
     const score = syllableTakeScore() || (timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score);
@@ -2988,8 +2994,8 @@
       const line = [...stage.children].find(el => el.dataset.phrase === phrase.id);
       if (!line) continue;
       line.style.opacity = phrase.opacity;
-      if (takeIds) { const a = phraseAuthoring(phrase, takeIds); line.dataset.authored = a.level; line.dataset.mixed = String(a.mixed); line.title = AUTHORING_LABELS[a.level]; }
-      else { delete line.dataset.authored; delete line.dataset.mixed; line.removeAttribute('title'); }
+      if (takeIds) { const a = phraseAuthoring(phrase, takeIds); line.dataset.authored = a.level; line.dataset.progress = authoringProgress(a); line.dataset.mixed = String(a.mixed); line.title = AUTHORING_LABELS[a.level]; }
+      else { delete line.dataset.authored; delete line.dataset.progress; delete line.dataset.mixed; line.removeAttribute('title'); }
       for (let index = 0; index < phrase.words.length; index++) {
         const word = phrase.words[index];
         const span = line.children[index];

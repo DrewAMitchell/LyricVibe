@@ -2331,11 +2331,9 @@
 /* Not yet sung: dimmed, not hidden (lead-in ghost and the rest of the line). One level only, never compounded. */
 #lvx-root .lvx-score-word.lvx-score-ahead{opacity:.35}
 #lvx-root .lvx-score-word:not(.lvx-score-ahead) .lvx-score-syllable.lvx-score-ahead{opacity:.35}
-/* Authoring status per phrase (shown only while Sync is open). */
+/* Authoring progress per phrase, relative to the capture mode (shown only while Sync is open). */
 #lvx-root .lvx-score-phrase[data-authored]{border-radius:8px;outline-offset:4px;position:relative}
-#lvx-root .lvx-score-phrase[data-authored="estimate"]{outline:1px dashed rgba(200,200,200,.45)}
-#lvx-root .lvx-score-phrase[data-authored="phrase"]{outline:2px solid rgba(214,168,85,.85)}
-#lvx-root .lvx-score-phrase[data-authored="words"]{outline:2px solid rgba(110,170,255,.9)}
-#lvx-root .lvx-score-phrase[data-authored="syllables"]{outline:2px solid rgba(164,206,125,.95);box-shadow:0 0 18px 4px rgba(164,206,125,.35)}
-#lvx-root .lvx-score-phrase[data-authored="take"]{outline:2px solid rgba(80,220,230,.95);box-shadow:0 0 18px 4px rgba(80,220,230,.35)}
+#lvx-root .lvx-score-phrase[data-progress="todo"]{outline:2px dashed rgba(214,168,85,.8)}
+#lvx-root .lvx-score-phrase[data-progress="done"]{outline:2px solid rgba(164,206,125,.95);box-shadow:0 0 18px 4px rgba(164,206,125,.3)}
+#lvx-root .lvx-score-phrase[data-progress="take"]{outline:2px solid rgba(80,220,230,.95);box-shadow:0 0 18px 4px rgba(80,220,230,.35)}
 #lvx-root .lvx-score-phrase[data-mixed="true"]::after{content:"";position:absolute;top:-6px;right:-6px;width:7px;height:7px;border-radius:50%;background:#a4ce7d}
