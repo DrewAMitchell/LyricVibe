@@ -2463,7 +2463,7 @@
 #lvx-root .lvx-playback-speed{height:44px;min-width:80px;padding:5px 8px;background:#fff;color:#15241b;border:1px solid #637a5e;border-radius:6px;font:650 15px system-ui,sans-serif;cursor:pointer}
 #lvx-root :is(.lvx-hud,.lvx-sync-panel,.lvx-theme-picker,.lvx-shortcuts-panel) :is(button,select,input,summary,textarea):focus-visible{outline:3px solid #f7cc70;outline-offset:2px}
 #lvx-root .lvx-sync-panel,#lvx-root .lvx-theme-picker,#lvx-root .lvx-shortcuts-panel{background:#202c36;color:#f4f7fa;border:1px solid #8b9eab;box-shadow:0 8px 32px #000c}
-#lvx-root .lvx-theme-picker{top:calc(22px + var(--lvx-toolbar-height,70px) + 10px)}
+#lvx-root .lvx-theme-picker{top:calc(22px + var(--lvx-toolbar-height,70px) + 10px);max-height:calc(100% - var(--lvx-toolbar-height,70px) - 54px);box-sizing:border-box}
 #lvx-root.lvx-sync-open .lvx-theme-picker{top:auto;bottom:calc(24px + var(--lvx-toolbar-height,70px) + 10px)}
 #lvx-root .lvx-sync-panel footer{background:#202c36;border-top-color:#6b7f8d}
 #lvx-root .lvx-sync-panel :is(input,select,textarea){color:#f4f7fa;background:#101c25;border-color:#8195a3}
@@ -2478,3 +2478,9 @@
   #lvx-root.lvx-sync-open .lvx-sync-panel{top:12px;bottom:calc(var(--lvx-toolbar-height,70px) + 24px);max-height:calc(100% - var(--lvx-toolbar-height,70px) - 36px)}
   #lvx-root .lvx-theme-picker{left:12px;max-width:calc(100vw - 24px);box-sizing:border-box}
 }
+
+/* Only the exterior halo follows the beat; control contrast stays constant. */
+#lvx-root .lvx-hud:has(.lvx-speed-group),#lvx-root .lvx-sync-panel,#lvx-root .lvx-theme-picker,#lvx-root .lvx-shortcuts-panel{box-shadow:0 5px 22px #000b,0 0 var(--lvx-bloom-radius,16px) 3px rgb(157 210 229 / var(--lvx-bloom-alpha,.06))}
+#lvx-root .lvx-bloom-setting{display:flex;align-items:center;gap:8px;min-height:36px;margin-bottom:10px;color:#e1e9ee;font:12px/1.4 system-ui,sans-serif}
+#lvx-root .lvx-bloom-setting input{accent-color:#c7dda8;width:18px;height:18px}
+@media(prefers-reduced-motion:reduce){#lvx-root .lvx-hud:has(.lvx-speed-group),#lvx-root .lvx-sync-panel,#lvx-root .lvx-theme-picker,#lvx-root .lvx-shortcuts-panel{box-shadow:0 5px 22px #000b}}

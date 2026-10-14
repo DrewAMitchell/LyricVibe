@@ -137,6 +137,8 @@
 
   const hud = document.createElement('div');
   hud.className = 'lvx-hud';
+  let bloomEnabled=true;
+  const bloomMotion=matchMedia('(prefers-reduced-motion: reduce)');
 
   const hudLabel = document.createElement('span');
   hudLabel.className = 'lvx-hud-label';
@@ -285,6 +287,10 @@
     const heading = document.createElement('div'); heading.className = 'lvx-theme-picker-head';
     heading.textContent = 'Display style · previews use this video\u2019s lyrics';
     themePicker.append(heading);
+    const bloomLabel=document.createElement('label');bloomLabel.className='lvx-bloom-setting';
+    const bloomToggle=document.createElement('input');bloomToggle.type='checkbox';bloomToggle.checked=bloomEnabled;
+    bloomToggle.onchange=()=>{bloomEnabled=bloomToggle.checked;refreshBeatPulse(getMediaTimeMs());chrome.storage.local.set({lvxBloomEnabled:bloomEnabled}).catch(error=>setHud('Bloom changed in this tab; preference could not save: '+error.message,true,true));};
+    bloomLabel.append(bloomToggle,document.createTextNode('Beat bloom · song BPM or 120 BPM default'));themePicker.append(bloomLabel);
     const settings=document.createElement('details');settings.className='lvx-placement-settings';
     settings.innerHTML='<summary>Lyric bounds &amp; text size</summary><p>Move or resize the outline, or enter percentages. Both vocal lanes stay inside it.</p><div class="lvx-placement-fields">'+Object.keys(placementDefaults).map(key=>`<label>${({left:'Left %',top:'Top %',width:'Width %',height:'Height %',maxFontPx:'Max text px'})[key]}<input data-placement="${key}" type="number" min="${key==='maxFontPx'?16:0}" max="${key==='maxFontPx'?200:100}" step="1" value="${placement[key]}"></label>`).join('')+'</div><button data-placement-reset>Reset bounds</button>';
     settings.addEventListener('toggle',()=>{bounds.hidden=!settings.open;});
@@ -636,6 +642,10 @@
   }
   function refreshBeatPulse(sourceMs){
     const valid=state.score&&tempo.mediaKey===LvScore.mediaKey(state.score.source),e=valid?LvTapTiming.tempoAt(tempo.map,sourceMs):null;
+    const media=getMedia(),phase=e?.phase??(((sourceMs/500)%1)+1)%1;
+    const pulse=bloomEnabled&&!bloomMotion.matches&&media&&!media.paused&&!media.seeking?Math.pow((1+Math.cos(phase*Math.PI*2))/2,3):0;
+    root.style.setProperty('--lvx-bloom-alpha',bloomEnabled?String(.06+.18*pulse):'0');
+    root.style.setProperty('--lvx-bloom-radius',`${16+18*pulse}px`);
     const text=e?`♩ ${Math.round(e.bpm)} BPM · T`:`♩ ${tempo.taps.length&&valid?tempo.taps.length+'/4':'—'} BPM · T`;
     if(tempoButton.textContent!==text)tempoButton.textContent=text;
     const on=String(Boolean(e&&e.phase<.18));if(tempoButton.dataset.on!==on)tempoButton.dataset.on=on;
@@ -1977,7 +1987,8 @@
 
   /* Load saved preferences (theme, font scale, lite mode) */
   try {
-    chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement'], (result) => {
+    chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement','lvxBloomEnabled'], (result) => {
+      bloomEnabled=result?.lvxBloomEnabled!==false;
       if(result?.lvxPlacement)try{applyPlacement(result.lvxPlacement);}catch(error){setHud(error.message,true,true);}
       if (result && result.lvxTheme && THEMES.includes(result.lvxTheme)) {
         applyTheme(result.lvxTheme);
@@ -3135,6 +3146,7 @@
       autoSyncButton.hidden = Boolean(state.score);
 
       const mediaMs = getMediaTimeMs();
+      if(!state.score)refreshBeatPulse(mediaMs);
       if (state.score) {
         const key = LvScore.mediaKey({ url: location.href });
         if (key !== LvScore.mediaKey(state.score.source)) {
