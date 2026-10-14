@@ -476,9 +476,15 @@
     if(wordTake(take)&&take.holds.length)phraseId=take.holds.reduce((a,b)=>b.pressMs>a.pressMs?b:a).phraseId;
     if(!phraseId)phraseId=(phrases.find(p=>now>=p.startMs&&now<p.endMs)||[...phrases].reverse().find(p=>p.startMs<=now)||phrases[0])?.id;
     if(!phraseId)return;
-    if(!isFlagged(phraseId))retimeFlags.items=[...retimeFlags.items,{phraseId,sourceMs:Math.round(media.currentTime*1000),flaggedAt:new Date().toISOString()}];
+    // A late reaction usually means the mistake was just before: within 2s of a phrase start, or in a
+    // gap, the previous phrase in the lane is flagged too.
+    const current=phrases.find(p=>p.id===phraseId),lane=phrases.filter(p=>p.laneId===current.laneId&&p.words.some(w=>!w.excluded));
+    const previous=lane.filter(p=>p.startMs<current.startMs).at(-1);
+    const nearStart=now<current.startMs+2000||now>=current.endMs;
+    const ids=[...(previous&&nearStart?[previous.id]:[]),phraseId];
+    for(const id of ids)if(!isFlagged(id))retimeFlags.items=[...retimeFlags.items,{phraseId:id,sourceMs:Math.round(media.currentTime*1000),flaggedAt:new Date().toISOString()}];
     await saveRetimeFlags();
-    setSyncNotice(`⚑ Phrase ${phraseOrdinal(phraseId)} flagged for retiming · ${retimeFlags.items.length} flagged. Keep going; after Stop, use Retime on it in the review.`);
+    setSyncNotice(`⚑ ${ids.map(id=>'Phrase '+phraseOrdinal(id)).join(' and ')} flagged for retiming · ${retimeFlags.items.length} flagged. Keep going; Retime them from the review after Stop.`);
     refreshTimingPanel();
   }
   async function clearRetimeFlag(phraseId){retimeFlags.items=retimeFlags.items.filter(f=>f.phraseId!==phraseId);await saveRetimeFlags();}
@@ -1112,7 +1118,7 @@
       // Re-recording is explicit permission to replace saved timings; Undo preview and Discard all revert it.
       const result = await timingRequest('LV_TIMING_TUNE', { ...payload, allowProtected: true });
       timing.draft = result.preview; discardTapTake(); timing.auditioned = false; state.scoreSignature = '';
-      if (take.mode === 'phrase') { syncButton('tap-mode').value='syllable';syncButton('loop').checked=true; timing.phraseIndex=0; tapping.wordId=timing.draft.score.phrases[0]?.words[0]?.id; }
+      if (take.mode === 'phrase') { syncButton('tap-mode').value='syllable';syncButton('loop').checked=false; timing.phraseIndex=0; tapping.wordId=timing.draft.score.phrases[0]?.words[0]?.id; }
       setSyncNotice(take.mode === 'phrase' ? 'Phrases added to preview. Keep refining, or save this iteration.' : 'Take added to preview. Save timings to keep it for this video.');
       if(frameTake(take))setSyncNotice('Tapped syllables added to preview; word edges and untapped words kept. Text cuts are suggestions: inspect them in the lightweight editor. Save timings when ready.');
       if(streamTake(take))setSyncNotice('Phrase-guided syllables added to preview. Word edges now come from your taps. Untapped words and an unfinished trailing word keep their earlier data. Save timings when ready.');
@@ -1310,7 +1316,7 @@
   for (const button of syncPanel.querySelectorAll('[data-phase]')) button.addEventListener('click',()=>{
     if (timing.busy || tapPending() || tapping.splitDirty) return;
     syncButton('tap-mode').value=button.dataset.phase;
-    if(button.dataset.phase==='syllable')syncButton('loop').checked=!continuousPass();
+    if(button.dataset.phase==='syllable')syncButton('loop').checked=false;
     if (button.dataset.phase!=='syllable') { timing.phraseIndex=0; tapping.wordId=timing.draft?.score.phrases[0]?.words[0]?.id; }
     refreshTimingPanel();
   });
@@ -1542,7 +1548,11 @@
     try {
       const result = await timingRequest('LV_TIMING_APPLY');
       state.score = result.score; state.syncOffsetMs = result.score.offsetMs;
-      discardTimingLocal(); setSyncNotice('Timings saved. Undo saved change restores the previous score and timing source.');
+      discardTimingLocal(); transcript.dirty = false; transcript.shownFor = null;
+      // Keep editing: a fresh preview of what was just saved, so any mode can start straight away.
+      const reopened = await timingRequest('LV_TIMING_PREPARE', { fromSaved: true });
+      timing.draft = reopened.preview; timing.view = 'proposed';
+      setSyncNotice('Timings saved. Keep going in any mode; Undo saved change restores the previous score.');
     } catch (error) { setSyncNotice(error.message,'error'); }
     finally { timing.busy = false; refreshTimingPanel(); }
   }
@@ -3422,6 +3432,15 @@
     if((event.key==='f'||event.key==='F')&&!inputTarget&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&timing.draft){
       event.preventDefault();event.stopImmediatePropagation();
       if(event.type==='keydown'&&!event.repeat)void flagPhraseForRetime();
+      return;
+    }
+    // Free-tap syllables (and phrase syllable takes): Left removes the last tap, like Undo mark.
+    if(tapping.take?.status==='armed'&&(eventTake(tapping.take)||tapping.take.mode==='syllable'&&tapping.take.cadence==='entrances')&&!inputTarget&&!event.altKey&&!event.metaKey&&!event.ctrlKey&&event.key==='ArrowLeft'){
+      event.preventDefault();event.stopImmediatePropagation();
+      if(event.type==='keydown'&&!event.repeat&&tapCount(tapping.take)){
+        tapping.take=eventTake(tapping.take)?LvTapTiming.undoEvent(tapping.take):LvTapTiming.undo(tapping.take);
+        state.scoreSignature='';refreshTimingPanel();renderScore(getMediaTimeMs());setSyncNotice(`Last tap removed · ${tapCount(tapping.take)} remain. Keep tapping.`);
+      }
       return;
     }
     if(wordTake(tapping.take)&&tapping.take.status==='armed'&&!inputTarget&&!event.altKey&&!event.metaKey&&!event.ctrlKey&&['ArrowLeft','ArrowRight'].includes(event.key)){

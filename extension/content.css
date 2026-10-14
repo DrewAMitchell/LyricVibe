@@ -2337,3 +2337,4 @@
 #lvx-root .lvx-score-phrase[data-progress="done"]{outline:2px solid rgba(164,206,125,.95);box-shadow:0 0 18px 4px rgba(164,206,125,.3)}
 #lvx-root .lvx-score-phrase[data-progress="take"]{outline:2px solid rgba(80,220,230,.95);box-shadow:0 0 18px 4px rgba(80,220,230,.35)}
 #lvx-root .lvx-score-phrase[data-mixed="true"]::after{content:"";position:absolute;top:-6px;right:-6px;width:7px;height:7px;border-radius:50%;background:#a4ce7d}
+#lvx-root [data-sync="pause"],#lvx-root .lvx-sync-loop{display:none!important} /* YouTube's own controls cover pause; looping is replaced by Back/rewind. */
