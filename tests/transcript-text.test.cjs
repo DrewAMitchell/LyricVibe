@@ -130,3 +130,14 @@ test('presence holds a short syllable for a minimum time, then fades over the af
   assert.equal(core.presenceAt({ startMs: 508, endMs: 549 }, 680), 1);
   assert.equal(core.presenceAt(ter, 1700, { afterglowMs: 0 }), 0);
 });
+
+test('whole-word marker changes only display and survives add/remove, replacement and literal escaping',()=>{
+ const s=core.createScore({platform:'youtube',videoId:'TESTVIDEO01',durationMs:10000},'[00:01.00]Oh now\n[00:05.00]',{provider:'fixture',entryId:'a',contentHash:'a'.repeat(64)});
+ const w=s.phrases[0].words[0],before=JSON.stringify(w),d=transcript.diff(s,'=Oh now');assert.deepEqual(d.operations,[{type:'setWordDisplayMode',wordId:w.id,mode:'whole'}]);
+ let next=s;for(const op of d.operations)next=core.applyOperation(next,op,next.revision);
+ assert.equal(next.phrases[0].words[0].text,'Oh');assert.equal(next.phrases[0].words[0].displayMode,'whole');assert.equal(transcript.toText(next),'=Oh now');
+ assert.equal(transcript.diff(next,transcript.toText(next)).operations.length,0);
+ next=core.applyOperation(next,transcript.diff(next,'Oh now').operations[0],next.revision);assert.equal(JSON.stringify(next.phrases[0].words[0]),before);
+ const replace=transcript.diff(s,'=Oh =yes now');next=s;for(const op of replace.operations)next=core.applyOperation(next,op,next.revision);assert.equal(transcript.toText(next),'=Oh =yes now');assert.equal(next.phrases[0].words[0].text,'Oh');
+ next=core.applyOperation(s,{type:'replaceWords',phraseId:s.phrases[0].id,wordIds:[w.id],text:'==equals'},s.revision);assert.equal(next.phrases[0].words[0].text,'=equals');assert.equal(transcript.toText(next),'==equals now');
+});

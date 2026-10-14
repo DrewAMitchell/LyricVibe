@@ -598,3 +598,10 @@ test('import validation rejects malformed IDs, times, lanes, effects, and hashes
   }
   errorCode(() => score.createScore({ videoId: 'FIXTURE0001', durationMs: 1 }, '', {}), 'INVALID_LYRICS');
 });
+
+test('recorded word bounds remain authoritative while syllables occupy intervals inside them',()=>{
+ const s=makeScore('[00:01.00]Oh\n[00:04.00]'),p=s.phrases[0],w=p.words[0];
+ const operation={type:'setPhraseSyllablePerformance',phraseId:p.id,words:[{wordId:w.id,startMs:1100,endMs:2300,spokenText:'OhOh',syllables:[{id:'o1',text:'Oh',startMs:1200,endMs:1500},{id:'o2',text:'Oh',startMs:1800,endMs:2200}]}]};
+ const n=score.applyOperation(s,operation,s.revision),word=n.phrases[0].words[0];assert.deepEqual([word.startMs,word.endMs],[1100,2300]);assert.deepEqual(word.syllables.map(x=>[x.startMs,x.endMs]),[[1200,1500],[1800,2200]]);
+ errorCode(()=>score.applyOperation(s,{...operation,words:[{...operation.words[0],startMs:1300}]},s.revision),'INVALID_TIME');
+});

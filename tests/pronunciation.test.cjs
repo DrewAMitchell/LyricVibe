@@ -167,3 +167,9 @@ test('partsForCount uses fallback for an unindexed observed count and rejects gr
   assert.deepEqual(overflow.parts, []);
   assert.equal(overflow.reason, 'count-exceeds-graphemes');
 });
+
+test('repeated vocalizations support observed entrances without changing the visible lyric',()=>{
+ const result=pronunciation.partsForCount('Oh',5);assert.deepEqual(result.parts,['Oh','Oh','Oh','Oh','Oh']);assert.equal(result.method,'repeated-vocalization');assert.equal(result.estimated,true);
+ assert.deepEqual(pronunciation.partsForCount('Oh',4,{spokenText:'ohohohoh',existingParts:['oh','oh','oh','oh']}).parts,['oh','oh','oh','oh']);
+ assert.deepEqual(pronunciation.partsForCount('cat',5).parts,[]);
+});

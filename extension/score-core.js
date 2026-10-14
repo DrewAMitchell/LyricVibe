@@ -29,6 +29,7 @@
     if (!Number.isSafeInteger(value) || value < 0) fail("INVALID_TIME", `${label} must be a nonnegative integer`);
   }
   function clone(value) { return JSON.parse(JSON.stringify(value)); }
+  function displayToken(token){return token.startsWith('==')?{text:token.slice(1)}:token.startsWith('=')&&token.length>1?{text:token.slice(1),displayMode:'whole'}:{text:token};}
   function parseVideoId(value) { return typeof value === "string" && ID_RE.test(value) ? value : ""; }
 
   function mediaKey(hintsOrSource) {
@@ -258,6 +259,7 @@
         ids.add(word.id);
         if (typeof word.startMs !== "number" || !Number.isFinite(word.startMs) || word.startMs < 0 || typeof word.endMs !== "number" || !Number.isFinite(word.endMs) || word.endMs < 0 || word.endMs < word.startMs || word.startMs < phrase.startMs || word.endMs > phrase.endMs || !["estimated", "manual", "aligned"].includes(word.provenance) || typeof word.locked !== "boolean" || !Array.isArray(word.effects)) bad("invalid word timing or fields");
         if (word.excluded !== undefined && typeof word.excluded !== "boolean") bad("word excluded must be boolean when present");
+        if(word.displayMode!==undefined&&word.displayMode!=='whole')bad('invalid word displayMode');
         if (word.spokenText !== undefined && (typeof word.spokenText !== "string" || !word.spokenText.trim() || word.spokenText.length > 256 || word.spokenText.includes("|"))) bad("invalid spokenText");
         for (const effect of word.effects) if (!effect || !EFFECTS.has(effect.type) || typeof effect.strength !== "number" || !Number.isFinite(effect.strength) || effect.strength < 0 || effect.strength > 1) bad("invalid effect");
         if (word.reveal !== undefined && !validReveal(word.reveal)) bad("invalid word reveal");
@@ -369,7 +371,7 @@
       while (tokens.some((_, i) => usedIds.has(`${prefix}-${suffix}-${i + 1}`))) suffix++;
       const span = endMs - startMs;
       const replacements = tokens.map((text, i) => ({
-        id: `${prefix}-${suffix}-${i + 1}`, text,
+        id: `${prefix}-${suffix}-${i + 1}`, ...displayToken(text),
         startMs: startMs + Math.round(span * i / tokens.length),
         endMs: startMs + Math.round(span * (i + 1) / tokens.length),
         provenance: "estimated", locked: false, effects: [],
@@ -388,7 +390,7 @@
       while (usedIds.has(`phrase-added-${n}`)) n++;
       const id = `phrase-added-${n}`;
       const phrase = { id, laneId: op.laneId, startMs: op.startMs, endMs: op.endMs, endEstimated: true, fadeOutMs: 120,
-        words: op.text.trim().split(/\s+/).map((text, i) => ({ id: `${id}-word-${i + 1}`, text, startMs: op.startMs, endMs: op.startMs, provenance: "estimated", locked: false, effects: [] })) };
+        words: op.text.trim().split(/\s+/).map((text, i) => ({ id: `${id}-word-${i + 1}`, ...displayToken(text), startMs: op.startMs, endMs: op.startMs, provenance: "estimated", locked: false, effects: [] })) };
       estimateWordTimes(phrase);
       next.phrases.splice(after + 1, 0, phrase);
     } else if (op.type === "setWordLock") {
@@ -509,7 +511,9 @@
           };
           syllables.push(syllable); seenChildren.add(item.id); previousEndMs = item.endMs;
         }
-        pending.push({ word, syllables, spokenText: submitted.spokenText, startMs: syllables[0].startMs, endMs: syllables.at(-1).endMs });
+        const startMs=submitted.startMs??syllables[0].startMs,endMs=submitted.endMs??syllables.at(-1).endMs;
+        if(!Number.isSafeInteger(startMs)||!Number.isSafeInteger(endMs)||startMs<phrase.startMs||endMs>phrase.endMs||endMs<=startMs||syllables.some(s=>s.startMs<startMs||s.endMs>endMs))fail('INVALID_TIME','Syllables must fit inside their recorded word bounds.');
+        pending.push({ word, syllables, spokenText: submitted.spokenText, startMs, endMs });
         seenWords.add(submitted.wordId); previousWordIndex = wordIndex;
       }
       for (const { word, syllables, spokenText, startMs, endMs } of pending) {
@@ -529,6 +533,9 @@
         if (!op.effect || !EFFECTS.has(op.effect.type) || typeof op.effect.strength !== "number" || !Number.isFinite(op.effect.strength) || op.effect.strength < 0 || op.effect.strength > 1) fail("INVALID_EFFECT", "effect type or strength is invalid");
         syllable.effects = [clone(op.effect)];
       }
+    } else if(op.type==='setWordDisplayMode'){
+      const {word}=locateWord(next,op.wordId);if(!['whole','syllables'].includes(op.mode))fail('INVALID_OPERATION','Choose whole or syllables display.');
+      if(op.mode==='whole')word.displayMode='whole';else delete word.displayMode;
     } else if (op.type === "setWordReveal") {
       const { word } = locateWord(next, op.wordId);
       if (!validReveal(op.reveal)) fail("INVALID_REVEAL", "reveal must be null or a supported sweep configuration");

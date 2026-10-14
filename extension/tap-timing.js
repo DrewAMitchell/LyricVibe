@@ -1283,25 +1283,21 @@
       for (const u of units) {
         const hold = holdFor.get(u.wordId);
         if (!hold) { issues.add('word-not-held'); words.push({ wordId: u.wordId, text: u.text, held: false, count: 0, issues: ['word-not-held'] }); continue; }
-        const next = pressOrder[pressOrder.indexOf(hold) + 1];
-        const own = take.syllableEvents.filter(e => ownerOf.get(e.id) === u.wordId && !claimed.has(e.id));
+        const candidates = take.syllableEvents.filter(e => ownerOf.get(e.id) === u.wordId && !claimed.has(e.id));
+        const own=candidates.filter(e=>e.sourceMs<hold.releaseMs);
         own.forEach(e => claimed.add(e.id));
         const wordIssues = [];
         if (!own.length) wordIssues.push('no-syllable-claimed');
-        if (own.some(e => e.sourceMs > hold.releaseMs + leadMs)) wordIssues.push('syllable-after-release');
+        if (candidates.length!==own.length) wordIssues.push('syllable-after-release');
         if (Number.isSafeInteger(u.expectedCount) && own.length && own.length !== u.expectedCount) wordIssues.push('count-differs');
         const entrances = own.length ? own : [{ id: `press-${u.wordId}`, sourceMs: hold.pressMs, synthetic: true }];
         entrances.forEach((e, i) => {
           const last = i === entrances.length - 1;
-          let endMs = last ? hold.releaseMs : entrances[i + 1].sourceMs, endSource = last ? 'word-release' : 'next-entrance';
-          if (last && endMs <= e.sourceMs) {
-            // Release before the final entrance: keep the entrance and bound it by the next press.
-            wordIssues.push('release-before-last-syllable');
-            endMs = Math.min(end, next ? Math.max(e.sourceMs + 1, next.pressMs) : end); endSource = 'provisional-next-press';
-            if (endMs <= e.sourceMs) endMs = e.sourceMs + 1;
-          }
+          const startMs=Math.max(hold.pressMs,e.sourceMs);
+          const endMs=last?hold.releaseMs:Math.max(hold.pressMs,entrances[i+1].sourceMs),endSource=last?'word-release':'next-entrance';
+          if(endMs<=startMs)wordIssues.push('collapsed-syllables');
           marks.push({ id: `${u.wordId}-syllable-${i + 1}`, syllableId: `${u.wordId}-syllable-${i + 1}`, wordId: u.wordId, phraseId,
-            startMs: e.sourceMs, endMs, endSource, eventId: e.synthetic ? null : e.id, startSource: e.synthetic ? 'word-press' : 'syllable-entrance' });
+            startMs, endMs, endSource, eventId: e.synthetic ? null : e.id, startSource: e.synthetic ? 'word-press' : startMs!==e.sourceMs?'word-start-bound':'syllable-entrance' });
         });
         wordIssues.forEach(i => issues.add(i));
         words.push({ wordId: u.wordId, text: u.text, held: true, pressMs: hold.pressMs, releaseMs: hold.releaseMs, count: own.length,
@@ -1320,7 +1316,7 @@
           issues.add('release-overlaps-next');
         }
       }
-      const blocking = ['word-not-held', 'order-conflict'];
+      const blocking = ['word-not-held', 'order-conflict','collapsed-syllables'];
       return { phraseId, heldCount: held.length, words, marks, issues: [...issues], ready: !blocking.some(b => issues.has(b)) };
     });
     const unclaimed = take.syllableEvents.filter(e => !claimed.has(e.id));

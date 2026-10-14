@@ -12,12 +12,15 @@
   // their IDs, timing, syllables and effects.
   const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
   const visible = phrase => phrase.words.filter(word => word.excluded !== true);
+  const tokenText=token=>token.startsWith('==')?token.slice(1):token.startsWith('=')&&token.length>1?token.slice(1):token;
+  const whole=token=>token.startsWith('=')&&!token.startsWith('==')&&token.length>1;
+  const encode=word=>word.displayMode==='whole'?'='+word.text:word.text.startsWith('=')?'='+word.text:word.text;
 
   function toText(score) {
     const lead = score.lanes.find(lane => lane.role === 'lead')?.id;
     return score.phrases.filter(phrase => visible(phrase).length).map(phrase => {
       const marker = phrase.laneId === lead ? '' : `[${phrase.laneId}] `;
-      return (marker + visible(phrase).map(word => word.text).join(' ')).trimEnd();
+      return (marker + visible(phrase).map(encode).join(' ')).trimEnd();
     }).join('\n');
   }
 
@@ -82,7 +85,9 @@
   }
 
   function wordEdits(phrase, line, tokens, operations, changes) {
-    const old = visible(phrase), pairs = lcsPairs(old.map(word => word.text), tokens);
+    const old = visible(phrase), pairs = lcsPairs(old.map(word => word.text), tokens.map(tokenText));
+    const displayEdit=(word,token)=>{if((word.displayMode==='whole')!==whole(token)){operations.push({type:'setWordDisplayMode',wordId:word.id,mode:whole(token)?'whole':'syllables'});changes.push({line,phraseId:phrase.id,kind:'display',wordId:word.id,from:word.displayMode==='whole'?'whole word':'syllables',to:whole(token)?'whole word':'syllables'});}};
+    for(const [oi,ti]of pairs)displayEdit(old[oi],tokens[ti]);
     if (pairs.length === old.length && pairs.length === tokens.length) return;
     // Hunks are the gaps between consecutive matched anchors.
     const anchors = [[-1, -1], ...pairs, [old.length, tokens.length]];
@@ -93,8 +98,8 @@
       if (!removed.length && !added.length) continue;
       if (removed.length && removed.length === added.length) {
         removed.forEach((word, n) => {
-          operations.push({ type: 'setWordText', wordId: word.id, text: added[n] });
-          changes.push({ line, phraseId: phrase.id, kind: 'respell', wordId: word.id, from: word.text, to: added[n] });
+          operations.push({ type: 'setWordText', wordId: word.id, text: tokenText(added[n]) });displayEdit(word,added[n]);
+          changes.push({ line, phraseId: phrase.id, kind: 'respell', wordId: word.id, from: word.text, to: tokenText(added[n]) });
         });
       } else if (removed.length && added.length) {
         operations.push({ type: 'replaceWords', phraseId: phrase.id, wordIds: removed.map(word => word.id), text: added.join(' ') });
@@ -111,7 +116,8 @@
       }
     }
     for (const { word, before, after } of insertions.values()) {
-      const text = [...before, word.text, ...after].join(' ');
+      const at=pairs.find(([oi])=>old[oi].id===word.id)?.[1];
+      const text = [...before, at===undefined?encode(word):tokens[at], ...after].join(' ');
       operations.push({ type: 'replaceWords', phraseId: phrase.id, wordIds: [word.id], text });
       changes.push({ line, phraseId: phrase.id, kind: 'insert', from: word.text, to: text });
     }
@@ -123,7 +129,7 @@
     const phrases = score.phrases.filter(phrase => visible(phrase).length);
     const parsed = linesOf(text).map(line => line.trim() ? parseLine(line, score, null) : null);
     const lineIndexes = parsed.map((entry, i) => entry ? i : -1).filter(i => i >= 0);
-    const pairs = alignLines(phrases.map(phrase => visible(phrase).map(word => word.text)), lineIndexes.map(i => parsed[i].tokens));
+    const pairs = alignLines(phrases.map(phrase => visible(phrase).map(word => word.text)), lineIndexes.map(i => parsed[i].tokens.map(tokenText)));
     const operations = [], changes = [], inserts = [];
     const matchedPhrase = new Map(pairs.map(([pi, li]) => [lineIndexes[li], phrases[pi]]));
     const matchedSet = new Set(pairs.map(([pi]) => pi));

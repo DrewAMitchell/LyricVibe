@@ -1017,8 +1017,8 @@ test('word pass claims recorded syllables by press and ends the last syllable at
   const p=tap.associateWordHolds(take).phrases[0];
   assert.equal(p.ready,true); assert.deepEqual(p.issues,[]);
   assert.deepEqual(p.marks.map(m=>[m.wordId,m.startMs,m.endMs,m.endSource]),[
-    ['w1',100,400,'next-entrance'],['w1',400,820,'word-release'],
-    ['w2',1000,1300,'next-entrance'],['w2',1300,2100,'word-release']]);
+    ['w1',160,400,'next-entrance'],['w1',400,820,'word-release'],
+    ['w2',1040,1300,'next-entrance'],['w2',1300,2100,'word-release']]);
   // Raw syllable entrances never move.
   assert.deepEqual(take.syllableEvents.map(e=>e.sourceMs),[100,400,1000,1300]);
 });
@@ -1036,8 +1036,9 @@ test('word pass flags a syllable after release, count differences and unheld wor
   take=tap.stopWordHolds(take);
   const r=tap.associateWordHolds(take);
   const p=r.phrases[0];
-  assert.deepEqual(p.words.map(w=>[w.wordId,w.count,w.issues]),[['a',2,['syllable-after-release','count-differs','release-before-last-syllable']],['b',1,[]]]);
-  assert.deepEqual(p.marks.filter(m=>m.wordId==='a').map(m=>[m.startMs,m.endMs,m.endSource]),[[100,900,'next-entrance'],[900,2000,'provisional-next-press']]);
+  assert.deepEqual(p.words.map(w=>[w.wordId,w.count,w.issues]),[['a',1,['syllable-after-release']],['b',1,[]]]);
+  assert.deepEqual(p.marks.filter(m=>m.wordId==='a').map(m=>[m.startMs,m.endMs,m.endSource]),[[100,300,'word-release']]);
+  assert.ok(r.unclaimed.some(e=>e.sourceMs===900));
   assert.equal(p.ready,true);
   assert.equal(r.phrases[1].heldCount,0); assert.equal(r.phrases[1].ready,false);
   // A partially held phrase blocks only itself.
@@ -1166,4 +1167,11 @@ test('tap tempo fits period and phase, tolerating jitter and a skipped beat', ()
   assert.equal(tap.estimateTempo([1000,1500,2000]),null);
   assert.equal(tap.estimateTempo([0,5000,10000,15000]),null); // 12 BPM is out of range
   assert.throws(()=>tap.estimateTempo([1.5,2,3,4]),/whole milliseconds/);
+});
+
+test('word-held syllables stay inside the optional word bounds, preserve raw taps and reject collapsed starts',()=>{
+ const units=[{wordId:'oh',phraseId:'p',text:'Oh',minMs:0,maxMs:3000,expectedCount:1}],events=[80,180,600].map((sourceMs,i)=>({id:'e'+i,sourceMs}));
+ let t=tap.beginWordHolds(units,events);t=tap.pressWord(t,100);t=tap.releaseWord(t,500);
+ const r=tap.associateWordHolds(t),p=r.phrases[0];assert.ok(p.ready);assert.deepEqual(p.marks.map(m=>[m.startMs,m.endMs]),[[100,180],[180,500]]);assert.equal(p.marks[0].startSource,'word-start-bound');assert.deepEqual(r.unclaimed.map(e=>e.sourceMs),[600]);assert.deepEqual(t.syllableEvents,events);
+ t={...t,syllableEvents:[{id:'a',sourceMs:60},{id:'b',sourceMs:90}]};const collapsed=tap.associateWordHolds(t).phrases[0];assert.equal(collapsed.ready,false);assert.ok(collapsed.issues.includes('collapsed-syllables'));
 });

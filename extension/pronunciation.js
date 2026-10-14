@@ -155,6 +155,12 @@
       const candidate = candidates.find(item => item.count === count && Array.isArray(item.parts) && item.parts.length === count && item.parts.every(part => typeof part === 'string' && part.length) && item.parts.join('') === segmentationText);
       if (candidate) return { parts: [...candidate.parts], method: candidate.method, estimated: true };
     }
+    // A repeated sung interjection can have more entrances than written letters.
+    // This is spelling for observed taps, not a dictionary count or audio claim.
+    if(count>1&&/^(?:oh|ah|ooh|aah|uh|eh|mm|hmm)[!?.,-]*$/i.test(text)){
+      const stem=text.replace(/[!?.,-]+$/,'');
+      if(!spokenText||new RegExp('^(?:'+stem+')+$','i').test(spokenText))return {parts:Array.from({length:count},()=>stem),method:'repeated-vocalization',estimated:true};
+    }
     const parts = fallbackParts(segmentationText, count);
     if (!parts.length) return { parts: [], method: 'orthographic-count-fallback', estimated: true, reason: 'count-exceeds-graphemes' };
     return { parts, method: 'orthographic-count-fallback', estimated: true };

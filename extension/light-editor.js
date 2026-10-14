@@ -22,7 +22,7 @@
     button.addEventListener('click',()=>{if(button.disabled)return;input.checked=!input.checked;input.dispatchEvent(new Event('change',{bubbles:true}));syncToggle(id);});
     label.insertAdjacentElement('afterend',button);stateToggles.set(id,button);syncToggle(id);
   }
-  ['loop','follow','excluded'].forEach(installStateToggle);
+  ['loop','follow','excluded','whole-word'].forEach(installStateToggle);
   async function request(type, extra={}) {
     const result = await chrome.runtime.sendMessage({type,tabId,mediaKey,expectedRevision:state.score?.revision,lyricsHash:state.score?.lyrics.contentHash,token:state.draft?.token,previewRevision:state.draft?.previewRevision,...extra});
     if (!result?.ok) throw Error(result?.error?.message || 'The video connection is unavailable.');
@@ -34,7 +34,7 @@
   }
   function buttons() {
     const ready=!!state.draft;
-    for(const id of ['play','pause','audition','use-times','earlier','later','excluded','loop','follow','target','start','end','replace-through','replacement','replace-words','phrase-track'])$(id).disabled=state.busy||!ready;
+    for(const id of ['play','pause','audition','use-times','earlier','later','excluded','whole-word','loop','follow','target','start','end','replace-through','replacement','replace-words','phrase-track'])$(id).disabled=state.busy||!ready;
     for(const b of $('tracks').querySelectorAll('button'))b.disabled=state.busy||state.dirty||b.dataset.empty==='true';
     for(const b of $('pronunciation-choices').querySelectorAll('button'))b.disabled=state.busy||state.dirty||b.getAttribute('aria-pressed')==='true';
     const indices=phraseIndices(),position=indices.indexOf(state.phrase);
@@ -87,7 +87,7 @@
   }
   function fields() {
     const w=word(),item=target();if(!w||!item)return;
-    $('selected-word').textContent=w.text;$('excluded').checked=!!w.excluded;
+    $('selected-word').textContent=w.text;$('excluded').checked=!!w.excluded;$('whole-word').checked=w.displayMode==='whole';
     if(!state.dirty){$('start').value=item.startMs;$('end').value=item.endMs;}
   }
   function render() {
@@ -170,6 +170,7 @@
   for(const id of ['start','end'])$(id).oninput=()=>{if(!state.dirty)state.editRevision=state.draft.previewRevision;state.dirty=true;buttons();};
   $('target').onchange=()=>{state.dirty=false;fields();};
   $('use-times').onclick=()=>run(()=>commitTimes(Number($('start').value),Number($('end').value)));
+  $('whole-word').onchange=()=>run(async()=>{try{await tune({operation:{type:'setWordDisplayMode',wordId:word().id,mode:$('whole-word').checked?'whole':'syllables'}});}finally{fields();}});
   $('excluded').onchange=()=>run(async()=>{try{await tune({operation:{type:'setWordExcluded',wordId:word().id,excluded:$('excluded').checked}});}finally{fields();}});
   $('replace-words').onclick=()=>run(async()=>{
     const p=phrase(),from=p.words.findIndex(w=>w.id===word().id),to=p.words.findIndex(w=>w.id===$('replace-through').value),text=$('replacement').value.trim();

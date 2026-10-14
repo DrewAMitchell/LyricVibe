@@ -99,10 +99,10 @@
     // Apply against a private copy so a failed batch cannot leave a partial preview.
     let score = clone(draft.score);
     for (const submitted of operations) {
-      if (!submitted || !['setBeatCue', 'deleteBeatCue', 'setPhrasePersistence', 'setPhraseTiming', 'setPhraseLane', 'insertPhrase', 'setWordText', 'setWordSyllables', 'setSyllableTiming', 'setSyllableLock', 'setWordEffect', 'setSyllableEffect', 'setWordExcluded', 'replaceWords', 'setPhraseSyllableTimings', 'setPhraseSyllablePerformance'].includes(submitted.type)) fail('INVALID_OPERATION', 'Only phrase timing and lane, syllable segmentation and performance, timing and locks, appearance effects, word exclusion, contiguous text replacement, and phrase syllable capture may be changed in this preview.');
+      if (!submitted || !['setWordDisplayMode', 'setBeatCue', 'deleteBeatCue', 'setPhrasePersistence', 'setPhraseTiming', 'setPhraseLane', 'insertPhrase', 'setWordText', 'setWordSyllables', 'setSyllableTiming', 'setSyllableLock', 'setWordEffect', 'setSyllableEffect', 'setWordExcluded', 'replaceWords', 'setPhraseSyllableTimings', 'setPhraseSyllablePerformance'].includes(submitted.type)) fail('INVALID_OPERATION', 'Only phrase timing and lane, syllable segmentation and performance, timing and locks, appearance effects, word exclusion, contiguous text replacement, and phrase syllable capture may be changed in this preview.');
       const op = clone(submitted);
       let wordId = op.wordId;
-      const effectOnly = ['setBeatCue','deleteBeatCue','setPhrasePersistence'].includes(op.type) || op.type === 'setWordEffect' || op.type === 'setSyllableEffect' || op.type === 'setPhraseLane';
+      const effectOnly = ['setWordDisplayMode','setBeatCue','deleteBeatCue','setPhrasePersistence'].includes(op.type) || op.type === 'setWordEffect' || op.type === 'setSyllableEffect' || op.type === 'setPhraseLane';
       if (op.type === 'replaceWords' && !allowProtected && Array.isArray(op.wordIds) && op.wordIds.some(id => draft.protectedIds.includes(id))) fail('MANUAL_PROTECTED', 'Enable editing saved timings before replacing words in this protected phrase.');
       if (op.type === 'setPhraseSyllableTimings' && !allowProtected && Array.isArray(op.marks)) {
         const syllableIds = new Set(op.marks.map(mark => mark?.syllableId));
