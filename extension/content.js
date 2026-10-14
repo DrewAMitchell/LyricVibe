@@ -1031,6 +1031,14 @@
     media.currentTime=tapping.armSeekMs/1000;
     if(media.paused)void media.play().catch(()=>{});
   }
+  // Back like a media player: a held unit restarts; more than 1s into the next unit, it restarts;
+  // otherwise (e.g. right after a rewind) it steps to the previous unit and clears it for rewriting.
+  function backTarget(take){
+    if(take.pendingStartMs!==null)return take.index;
+    const unit=take.units[take.index],start=unit?.estimatedStartMs??unit?.minMs,now=getMediaTimeMs()-state.score.offsetMs;
+    if(unit&&Number.isFinite(start)&&now>start+1000)return take.index;
+    return take.index-1;
+  }
   function repositionTap(index) {
     const take=tapping.take;
     if(timing.busy||!take||!['armed','complete'].includes(take.status)||getMedia()?.paused||take.mode==='syllable'||tapping.binding!==tapBinding())return false;
@@ -1038,7 +1046,7 @@
       const updated=LvTapTiming.reposition(take,index), removed=take.marks.length-updated.marks.length;
       if(tapping.heldInput==='keyboard')tapping.cancelledSpace=true;
       tapping.heldInput=null;tapping.take={...updated,status:'armed'};tapping.correctionUndo=[];tapping.reviewId=null;
-      const rewinding=index<take.index||index===take.index&&take.pendingStartMs!==null;
+      const rewinding=index<=take.index;
       if(rewinding){
         // Rewind to the lead-in, but never before the last kept mark (the next mark must follow it).
         const unit=updated.units[index],lead=(unit.estimatedStartMs??unit.minMs??0)-800,floor=updated.lastMs!=null?updated.lastMs+1:0;
@@ -1078,7 +1086,7 @@
     return true;
   }
   function skipWordHold(delta){const take=tapping.take;if(!wordTake(take)||timing.busy)return;try{tapping.take=LvTapTiming.skipWords(take,delta);if(delta<0&&take.status==='armed'){const unit=tapping.take.units[tapping.take.index];rewindPlaybackForTake(Math.max((tapping.take.lastMs??unit.minMs)-600,0));}tapping.streamWordId=null;state.scoreSignature='';refreshTimingPanel();renderScore(getMediaTimeMs());}catch(error){setSyncNotice(error.message,'error');}}
-  syncButton('tap-back').addEventListener('click',()=>wordTake(tapping.take)?skipWordHold(-1):streamTake(tapping.take)?recoverStream(-1):repositionTap((tapping.take?.index??0)-(tapping.take?.pendingStartMs!=null?0:1)));
+  syncButton('tap-back').addEventListener('click',()=>wordTake(tapping.take)?skipWordHold(-1):streamTake(tapping.take)?recoverStream(-1):(tapping.take?repositionTap(backTarget(tapping.take)):null));
   syncButton('tap-skip').addEventListener('click',()=>wordTake(tapping.take)?skipWordHold(1):streamTake(tapping.take)?recoverStream(1):repositionTap((tapping.take?.index??0)+1));
   syncButton('tap-reassign-back').addEventListener('click',()=>recoverStream(-1,true));
   syncButton('tap-reassign-next').addEventListener('click',()=>recoverStream(1,true));
@@ -2906,6 +2914,13 @@
     if (tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete') && timing.draft && !syncPanel.hidden) {renderCaptureScore();return;}
     const score = syllableTakeScore() || (timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score);
     const active = LvScore.activeAt(score, mediaMs);
+    // Lead-in: an empty lane shows its next phrase dimmed up to 2s early, so a rewind is never a blank screen.
+    const atMs = mediaMs - score.offsetMs;
+    for (const lane of score.lanes) {
+      if (active.phrases.some(p => p.laneId === lane.id)) continue;
+      const next = score.phrases.find(p => p.laneId === lane.id && p.startMs > atMs && p.startMs - atMs <= 2000 && p.words.some(w => !w.excluded));
+      if (next) active.phrases.push({ ...JSON.parse(JSON.stringify(next)), words: JSON.parse(JSON.stringify(next.words.filter(w => !w.excluded))), activeWords: [], activeSyllables: [], opacity: 1, leadIn: true });
+    }
     if (timing.view === 'proposed' && performanceTake.binding === tapBinding()) {
       const operations = new Map(performanceTake.marks.map(m => [m.targetId,m.operation]));
       for (const phrase of active.phrases) for (const word of phrase.words) {
@@ -2957,7 +2972,7 @@
       for (let index = 0; index < phrase.words.length; index++) {
         const word = phrase.words[index];
         const span = line.children[index];
-        span.style.visibility = mediaMs - score.offsetMs >= word.startMs ? 'visible' : 'hidden';
+        span.style.visibility = 'visible'; span.classList.toggle('lvx-score-ahead', mediaMs - score.offsetMs < word.startMs);
         const wordCurrent = phrase.activeWords.includes(word.id), wordPresence = LvScore.presenceAt(word, mediaMs - score.offsetMs);
         span.classList.toggle('lvx-score-current', wordCurrent);
         // Recency trail: sung words keep a fading glow so short final syllables stay readable.
@@ -2967,7 +2982,7 @@
         for (const syllable of word.syllables || []) {
           const part = [...span.children].find(el => el.dataset.syllable === syllable.id);
           if (!part) continue;
-          part.style.visibility = mediaMs - score.offsetMs >= syllable.startMs ? 'visible' : 'hidden';
+          part.style.visibility = 'visible'; part.classList.toggle('lvx-score-ahead', mediaMs - score.offsetMs < syllable.startMs);
           const syllableCurrent = (phrase.activeSyllables || []).includes(syllable.id), syllablePresence = LvScore.presenceAt(syllable, mediaMs - score.offsetMs);
           part.classList.toggle('lvx-score-current', syllableCurrent);
           part.style.setProperty('--lvx-presence', syllablePresence);
@@ -3394,7 +3409,7 @@
     }
     if(tapping.take&&['armed','complete'].includes(tapping.take.status)&&!getMedia()?.paused&&tapping.take.mode!=='syllable'&&!inputTarget&&!event.altKey&&!event.ctrlKey&&!event.metaKey&&['ArrowLeft','ArrowRight'].includes(event.key)){
       event.preventDefault();event.stopImmediatePropagation();
-      if(event.type==='keydown'&&!event.repeat)repositionTap(tapping.take.index+(event.key==='ArrowLeft'?(tapping.take.pendingStartMs!==null?0:-1):1));
+      if(event.type==='keydown'&&!event.repeat)repositionTap(event.key==='ArrowLeft'?backTarget(tapping.take):tapping.take.index+1);
       return;
     }
     // Finish a press we own even if focus or modifier state changed while held.

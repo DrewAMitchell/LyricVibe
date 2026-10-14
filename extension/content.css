@@ -2328,3 +2328,6 @@
 #lvx-root .lvx-score-word.lvx-score-recent{opacity:calc(.72 + .28 * var(--lvx-presence,0))}
 #lvx-root .lvx-score-syllable.lvx-score-recent{color:color-mix(in srgb,#baf479 calc(var(--lvx-presence,0) * 100%),#c9d4dc)}
 #lvx-root .lvx-sync-protected{display:none!important} /* Explicit edits always allowed; Undo/Discard revert. */
+/* Not yet sung: dimmed, not hidden (lead-in ghost and the rest of the line). One level only, never compounded. */
+#lvx-root .lvx-score-word.lvx-score-ahead{opacity:.35}
+#lvx-root .lvx-score-word:not(.lvx-score-ahead) .lvx-score-syllable.lvx-score-ahead{opacity:.35}
