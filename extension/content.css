@@ -2438,3 +2438,11 @@
 #lvx-root .lvx-save-wrap[data-blocked=true]:hover .lvx-save-tooltip,#lvx-root .lvx-save-wrap[data-blocked=true]:focus-within .lvx-save-tooltip{display:block}
 #lvx-root .lvx-save-wrap:focus-visible{outline:1px solid #dfb1ae;outline-offset:3px;border-radius:6px}
 @media(prefers-reduced-motion:reduce){#lvx-root .lvx-beat-target{scale:1!important}}
+
+/* Source-owned speed stays reachable while recording. */
+#lvx-root .lvx-hud:has(.lvx-speed-group){max-width:min(1160px,calc(100vw - 48px));flex-wrap:wrap}
+#lvx-root .lvx-speed-group{flex-shrink:0;white-space:nowrap}
+#lvx-root .lvx-playback-speed{height:28px;min-width:65px;padding:2px 5px;border:1px solid #48533e;border-radius:5px;background:#161c14;color:#e5eddc;font:11px system-ui,sans-serif}
+#lvx-root .lvx-speed-group>button{padding:4px 6px;min-width:32px;font-variant-numeric:tabular-nums}
+#lvx-root .lvx-speed-group>button[aria-pressed=true]{background:#38472a;color:#d8efbb}
+@media(max-width:900px){#lvx-root.lvx-sync-open .lvx-sync-panel{bottom:118px}}

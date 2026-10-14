@@ -3,6 +3,7 @@
      CONSTANTS & CONFIG
      ══════════════════════════════════════ */
   const DEFAULT_SYNC_OFFSET_MS = -80;
+  const PLAYBACK_RATES=[.25,.5,.75,1,1.25,1.5,2];
   const SYNC_NUDGE_MS = 80;
   const THEMES = ['samay', 'flow', 'fire', 'neon', 'glass', 'hype', 'soft', 'clean', 'retro', 'elegant', 'aurora', 'matrix', 'vinyl', 'cosmic'];
   const THEME_LABELS = {
@@ -252,7 +253,12 @@
   tempoButton.title='Tap here or press T. The first tap sets beat 1. Beat clicker has exact BPM and Click controls; Sections opens duration blocks.';
   tempoButton.addEventListener('click',()=>void tapTempo());
   const statusGroup = document.createElement('span'); statusGroup.className = 'lvx-hud-status'; statusGroup.append(hudLabel, hudText);
-  hud.append(statusGroup, offsetGroup, editGroup, themeButton, tempoButton, endGroup);
+  const speedGroup=document.createElement('span');speedGroup.className='lvx-hud-group lvx-speed-group';
+  const speedSelect=document.createElement('select');speedSelect.className='lvx-playback-speed';speedSelect.setAttribute('aria-label','YouTube playback speed');speedSelect.title='Change playback speed now; takes keep original song time.';
+  for(const rate of PLAYBACK_RATES){const option=document.createElement('option');option.value=String(rate);option.textContent=rate+'×';speedSelect.append(option);}
+  for(const [rate,label]of [[.5,'½×'],[1,'1×']]){const button=document.createElement('button');button.type='button';button.textContent=label;button.dataset.playbackRate=rate;button.title=rate===1?'Real-time speed':'Half speed';button.onclick=()=>setPlaybackSpeed(rate);speedGroup.append(button);}
+  speedGroup.append(speedSelect);speedSelect.onchange=()=>setPlaybackSpeed(Number(speedSelect.value));
+  hud.append(statusGroup, offsetGroup, editGroup, themeButton, tempoButton, speedGroup, endGroup);
 
   /* Display picker: one tile per theme, animated with this video's own lyrics. */
   const themePicker = document.createElement('div');
@@ -388,7 +394,7 @@
       <div class="lvx-capture-phases" role="group" aria-label="Syncing phase"><button data-phase="phrase">1 · Phrases</button><button data-phase="syllable">2 · Syllables</button><button data-phase="word">Words · optional</button></div>
       <p class="lvx-sync-hint">Hold Space while each word is sung. On the next pass, tap at syllable changes inside its saved boundaries.</p>
       <div class="lvx-perform-cue"><small>READY</small><strong class="lvx-perform-phrase"></strong><div class="lvx-upcoming-phrases" aria-label="Upcoming lyrics"></div><span class="lvx-perform-instruction">Then start performing</span><p class="lvx-estimated-phrase" aria-live="off"></p><p class="lvx-cue-legend">Blue follows your recording cue</p><div class="lvx-live-recovery" hidden><button data-sync="tap-back">← Back one</button><button data-sync="tap-skip">Skip one →</button><button data-sync="tap-reassign-back">Last tap ← word</button><button data-sync="tap-reassign-next">Last tap → word</button><small>Left / Right moves the cue; Ctrl + Left / Right reassigns the last tap. The song keeps playing.</small></div></div>
-      <label class="lvx-practice-speed">YouTube practice speed <select data-sync="tap-speed" aria-label="Practice playback speed"><option value="0.5">½× · Half speed</option><option value="0.25">¼× · Quarter speed</option><option value="0.75">¾× · Slower</option><option value="1">1× · Normal</option></select></label>
+      <label class="lvx-practice-speed">YouTube practice speed <select data-sync="tap-speed" aria-label="Practice playback speed"><option value="0.5">½× · Half speed</option><option value="0.25">¼× · Quarter speed</option><option value="0.75">¾× · Slower</option><option value="1">1× · Normal</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
       <label class="lvx-syllable-flow">Syllable pass <select data-sync="tap-syllable-flow"><option value="events">Tap freely · assign afterward</option><option value="words">Word pass · hold each word over your syllable taps</option><option value="phrase-stream">Suggested word cursor · legacy</option><option value="continuous">Fixed word frames · optional</option><option value="phrase">Phrase practice · prepared spelling</option></select></label>
       <div class="lvx-tap-actions lvx-perform-actions"><button data-sync="tap-arm">▶ Start take</button><button data-sync="tap-stop">■ Stop</button><button data-sync="capture-forward" title="Jump to the next lead-in without skipping a lyric (Shift+→)">⏩ Next lead-in</button><button data-sync="retime-flag" title="Flag the phrase you just performed for retiming (F)">⚑ Flag phrase · F</button><button data-sync="tap-mark">Next lyric · Space</button><button data-sync="tap-release">Release · Enter</button></div>
       <div class="lvx-tap-words" hidden aria-hidden="true"></div>
@@ -537,6 +543,20 @@
   }
 
   const tempo={mediaKey:null,taps:[],estimate:null,map:null,history:[],revision:0,sessionStartMs:null,write:Promise.resolve()};
+  let observedRate=null,observedRateMedia=null;
+  function observePlaybackRate(media=getMedia()){
+    const rate=media?.playbackRate;if(!Number.isFinite(rate)||rate<=0||media===observedRateMedia&&rate===observedRate)return;
+    observedRate=rate;observedRateMedia=media;state.playbackRate=rate;
+    for(const select of [speedSelect,syncButton('tap-speed')]){if(![...select.options].some(o=>Number(o.value)===rate)){const o=document.createElement('option');o.value=String(rate);o.textContent=rate+'×';select.append(o);}select.value=String(rate);}
+    for(const button of speedGroup.querySelectorAll('[data-playback-rate]'))button.setAttribute('aria-pressed',String(Number(button.dataset.playbackRate)===rate));
+    if(tapping.take?.status==='armed')tapping.rate=rate;
+    if(performanceTake.armed)performanceTake.rate=rate;
+    cancelBeatClicks();
+  }
+  function setPlaybackSpeed(rate){
+    const media=getMedia();if(!media||!Number.isFinite(rate)||rate<.25||rate>4||isAdvertisement()||youtubeMediaState()?.clockUsable===false){setSyncNotice('Wait for the main video, then choose speed from ¼× to 4×.');return false;}
+    media.preservesPitch=true;media.playbackRate=rate;observePlaybackRate(media);return true;
+  }
   const beatClick={enabled:false,userSet:false,audio:null,nodes:new Set(),scheduled:new Set(),map:null,rate:null,lastSource:null,lastWall:null};
   function cancelBeatClicks(keepManual=false){for(const node of beatClick.nodes){if(keepManual&&node.lvManual)continue;try{node.stop();}catch{}beatClick.nodes.delete(node);}beatClick.scheduled.clear();beatClick.map=tempo.map;beatClick.lastSource=null;}
   async function enableBeatAudio(){beatClick.audio ||= new AudioContext();if(beatClick.audio.state==='suspended')await beatClick.audio.resume();}
@@ -681,7 +701,7 @@
     const continuous=continuousPass();
     syncButton('tap-syllable-flow').parentElement.hidden=mode!=='syllable';
     syncButton('tap-syllable-flow').disabled=timing.busy||tapPending();
-    syncButton('tap-speed').parentElement.hidden=take?.status==='armed';
+    syncButton('tap-speed').parentElement.hidden=false;
     if(take?.status==='armed')syncButton('tap-syllable-flow').parentElement.hidden=true;
     for (const button of syncPanel.querySelectorAll('[data-phase]')) { button.setAttribute('aria-pressed',String(button.dataset.phase === mode)); button.disabled = timing.busy || tapPending() || tapping.splitDirty; }
     const words = syncPanel.querySelector('.lvx-tap-words'); words.replaceChildren(); words.hidden=true; words.setAttribute('aria-hidden','true');
@@ -712,7 +732,7 @@
     syncButton('tap-snap').disabled = timing.busy || tapPending();
     syncButton('tap-bpm').disabled = timing.busy || tapPending() || !syncButton('tap-snap').checked;
     syncButton('tap-click').disabled=mode==='syllable';
-    syncButton('tap-speed').disabled = timing.busy || take?.status === 'armed' || performanceTake.armed;
+    syncButton('tap-speed').disabled = timing.busy;
     syncButton('tap-arm').disabled = !sourceMatches || timing.busy || !word || (mode!=='syllable'&&word.excluded) || !timingPhrase()?.words.some(w=>!w.excluded) || timing.dirty || (mode!=='syllable'&&tapping.splitDirty) || effectPending() || tapping.take?.status === 'armed' || tapping.take?.status === 'complete';
     syncButton('tap-arm').textContent = (eventPass()||phraseStream())?(take?.status==='stopped'?'▶ Continue syllable pass':'▶ Start syllable pass'):continuous?'▶ Start continuous pass':mode==='syllable'?'▶ Start phrase take':tapping.take?.status === 'stopped' ? '▶ Continue take' : '▶ Start take';
     if(wordPass())syncButton('tap-arm').textContent=wordTake(take)&&take.status==='stopped'?'▶ Record from playhead':'▶ Start word pass';
@@ -1194,8 +1214,8 @@
       const take = retained ? { ...retained, status:'armed' } : wordPass()?LvTapTiming.beginWordHolds(units,syllableSource):eventPass()?LvTapTiming.beginEvents(units):LvTapTiming.begin(units, { mode, cadence:phraseStream()?'phrase-stream':continuousSyllables()?'word-frames':mode === 'syllable' ? 'entrances' : syncButton('tap-cadence').value === 'hold' ? 'pairs' : syncButton('tap-cadence').value, bpm: continuousPass()?null:syncButton('tap-snap').checked ? Number(syncButton('tap-bpm').value) : null, ...(!continuousPass()&&syncButton('tap-snap').checked&&tempo.map?{tempoMap:tempo.map,tempoOffsetMs:state.score.offsetMs}:{}) });
       tapping.correctionUndo = []; tapping.cancelledSpace=false;
       timing.busy = true; refreshTimingPanel();
-      const practiceRate = Number(syncButton('tap-speed').value);
-      if (![.25,.5,.75,1].includes(practiceRate)) throw Error('Choose quarter, half, slower or normal practice speed.');
+      const practiceRate = media.playbackRate;
+      if (!Number.isFinite(practiceRate)||practiceRate<=0) throw Error('Choose a valid playback speed.');
       media.preservesPitch = true; media.playbackRate = practiceRate;
       if(mode==='syllable'&&tapping.audio){await tapping.audio.close();tapping.audio=null;}
       if (mode!=='syllable'&&syncButton('tap-click').checked) {
@@ -1224,6 +1244,7 @@
   }
   function markTapTime(event = {}) {
     const take = tapping.take, media = getMedia();
+    observePlaybackRate(media);
     if (!take || take.status !== 'armed' || event.repeat) return;
     if (event.shiftKey) { setSyncNotice('Note change within the held unit. Use plain Space to mark its release; the selected unit has not advanced.'); return; }
     if (tapping.binding !== tapBinding() || !media || media.paused || media.seeking || isAdvertisement() || youtubeMediaState()?.clockUsable === false || media.playbackRate !== tapping.rate || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source)) { stopTapTake('Take stopped because playback or its source changed. Completed marks are retained.'); return; }
@@ -1613,6 +1634,7 @@
   syncButton('tap-spoken').addEventListener('input',()=>{tapping.splitDirty=true;refreshTapPanel();});
   function effectSourceReady() {
     const media = getMedia();
+    observePlaybackRate(media);
     return media && !media.paused && !media.seeking && !isAdvertisement() && youtubeMediaState()?.clockUsable !== false && media.playbackRate === performanceTake.rate && performanceTake.binding === tapBinding() && LvScore.mediaKey({url:location.href}) === LvScore.mediaKey(state.score.source);
   }
   function activeEffectTarget() {
@@ -2035,8 +2057,7 @@
         media.play().then(() => sendResponse({ ok: true }), error => sendResponse({ ok: false, error: { code: 'PLAY_DENIED', message: error.message } }));
         return true;
       } else if (message.action === 'setRate') {
-        if(![.25,.5,.75,1].includes(message.rate)){sendResponse({ok:false,error:{code:'RATE_INVALID',message:'Choose quarter, half, slower or normal speed.'}});return;}
-        media.preservesPitch=true;media.playbackRate=message.rate;
+        if(!setPlaybackSpeed(message.rate)){sendResponse({ok:false,error:{code:'RATE_INVALID',message:'Choose speed from ¼× to 4× on the main video.'}});return;}
       } else if (message.action === 'clearLoop') state.auditionLoop = null;
       else if (message.action === 'setLoop') {
         const loop = message.loop;
@@ -2152,7 +2173,10 @@
   window.addEventListener('keydown', handleTapKeys, true);
   window.addEventListener('keyup', handleTapKeys, true);
   window.addEventListener('blur', () => { if (tapping.heldInput) stopTapTake('Take stopped because focus changed. Unfinished word unchanged; completed words retained.'); });
+  syncButton('tap-speed').addEventListener('change',()=>setPlaybackSpeed(Number(syncButton('tap-speed').value)));
+  observePlaybackRate();
   for (const eventName of ['seeking', 'pause', 'ratechange', 'ended']) document.addEventListener(eventName, event => {
+    if(eventName==='ratechange'&&event.target===getMedia()){observePlaybackRate(event.target);return;}
     if(eventName==='seeking'&&event.target===getMedia()){
       const internal=timing.busy||Number.isFinite(tapping.armSeekMs)&&Math.abs(event.target.currentTime*1000-tapping.armSeekMs)<100||performance.now()<(tapping.takeSeekUntil||0);
       tapping.armSeekMs=null;
@@ -3100,6 +3124,7 @@
           return;
         }
         const media = getMedia();
+        observePlaybackRate(media);
         const ad = isAdvertisement() || youtubeMediaState()?.clockUsable === false;
         if (performanceTake.armed && ad) stopEffects('Effects stopped because the main-video clock is unavailable. Gestures retained.');
         if (tapping.take?.status === 'armed' && performance.now() >= (tapping.takeSeekUntil || 0) && (ad || media?.paused || media?.seeking || media?.playbackRate !== tapping.rate || tapping.binding !== tapBinding())) stopTapTake('Take stopped because playback changed. Completed marks are retained.');
@@ -3128,7 +3153,7 @@
         if (!syncPanel.hidden) syncPanel.querySelector('.lvx-sync-clock').textContent = `${(mediaMs / 1000).toFixed(3)}s · ${media?.paused ? 'paused' : 'playing'}`;
         if (performance.now() - state.lastClockSent > 100) {
           state.lastClockSent = performance.now();
-          chrome.runtime.sendMessage({ type: 'LV_SCORE_PLAYBACK', mediaKey: key, mediaMs, paused: media?.paused ?? true, durationMs: Math.round((media?.duration || 0) * 1000) }).catch(() => {});
+          chrome.runtime.sendMessage({ type: 'LV_SCORE_PLAYBACK', mediaKey: key, mediaMs, playbackRate:media?.playbackRate||1, paused: media?.paused ?? true, durationMs: Math.round((media?.duration || 0) * 1000) }).catch(() => {});
         }
         if (state.trackDurationMs > 0) progressFill.style.width = `${clamp(mediaMs / state.trackDurationMs * 100, 0, 100)}%`;
         state.rafId = requestAnimationFrame(tick);

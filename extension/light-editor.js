@@ -206,6 +206,7 @@
     try{const c=await chrome.tabs.sendMessage(tabId,{type:'LV_ANALYSIS_CLOCK'});if(c.mediaKey!==mediaKey||c.isAd)throw Error('Source changed or advertisement active.');
       const now=c.currentTimeMs-(state.draft?.score.offsetMs||0),head=$('playhead');
       const followLane=state.trackId==='all'?phrase()?.laneId:state.trackId,laneInfo=state.draft?.score.lanes.find(l=>l.id===followLane),laneActive=state.draft?.score.phrases.some(p=>p.laneId===followLane&&now>=p.startMs&&now<p.endMs&&p.words.some(w=>!w.excluded));
+      if(Number.isFinite(c.playbackRate)&&c.playbackRate>0){const select=$('speed');if(![...select.options].some(o=>Number(o.value)===c.playbackRate))select.add(new Option(c.playbackRate+'×',String(c.playbackRate)));select.value=String(c.playbackRate);}
       $('clock').textContent=`${(c.currentTimeMs/1000).toFixed(3)}s · ${c.paused?'paused':'playing'}${laneInfo?' · '+trackLabel(laneInfo)+(!c.paused&&!laneActive?' rest':''):''}`;
       if(state.draft&&!c.paused&&$('follow').checked&&!$('loop').checked&&!state.busy&&!state.dirty&&!document.activeElement?.closest('aside')&&document.activeElement?.id!=='phrase-track'&&!document.querySelector('.lane button:active')){
         const rows=state.draft.score.phrases,current=phrase(),lane=current?.laneId;
