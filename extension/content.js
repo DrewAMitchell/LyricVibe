@@ -1498,7 +1498,7 @@
       if(!phrases.length)throw Error(wordTake(take)?'Hold every word of a phrase to use it. All taps are retained.':'Resolve the highlighted counts first. All raw events are retained.');
       await archiveEvents();
       setSyncNotice(`Preparing ${phrases.length} phrases for the preview…`);
-      const failures=[];let applied=0;
+      const failures=[],prepared=[],combined=[];let validated=timing.draft.score;
       // Each phrase is an independent recoverable edit. A spelling or validation
       // failure elsewhere must not discard successfully performed phrases.
       for(const p of phrases){
@@ -1512,13 +1512,20 @@
             if(startMs!==phrase.startMs||endMs!==phrase.endMs)operations.unshift({type:'setPhraseTiming',phraseId:p.phraseId,startMs,endMs});
           }
           if(tapping.take!==take||tapping.binding!==tapBinding())throw Error('The take changed while spelling. Marks remain backed up.');
-          const result=await timingRequest('LV_TIMING_TUNE',{operations,allowProtected:true});timing.draft=result.preview;tapping.binding=tapBinding();
-          tapping.eventApplied=[...(tapping.eventApplied||[]),p.phraseId];applied++;timing.auditioned=false;state.scoreSignature='';
+          // Validate privately per phrase, then publish all valid phrases in one
+          // undoable edit (the preview keeps a bounded undo history).
+          let candidate=validated;for(const op of operations)candidate=LvScore.applyOperation(candidate,op,candidate.revision);
+          validated=candidate;combined.push(...operations);prepared.push(p.phraseId);
         }catch(error){failures.push({phraseId:p.phraseId,message:error.message});}
+      }
+      if(combined.length){
+        if(tapping.take!==take||tapping.binding!==tapBinding())throw Error('The take changed during review; no new phrases were applied.');
+        const result=await timingRequest('LV_TIMING_TUNE',{operations:combined,allowProtected:true});timing.draft=result.preview;tapping.binding=tapBinding();
+        tapping.eventApplied=[...(tapping.eventApplied||[]),...prepared];timing.auditioned=false;state.scoreSignature='';
       }
       tapping.eventErrors=failures;
       await archiveEvents();
-      setSyncNotice(`${applied} phrases added to preview.${failures.length?' '+failures.length+(failures.length===1?' phrase remains in the take: ':' phrases remain in the take: ')+failures.map(f=>f.message).join('; '):''} Save timings keeps the preview. Raw events and unresolved phrases are backed up locally.`,failures.length?'warn':undefined);
+      setSyncNotice(`${prepared.length} phrases added to preview.${failures.length?' '+failures.length+(failures.length===1?' phrase remains in the take: ':' phrases remain in the take: ')+failures.map(f=>f.message).join('; '):''} Save timings keeps the preview. Raw events and unresolved phrases are backed up locally.`,failures.length?'warn':undefined);
     }catch(error){setSyncNotice(error.message,'error');}finally{timing.busy=false;refreshTimingPanel();}
   }
   syncButton('events-review').addEventListener('click',useEventAssignments);
