@@ -175,7 +175,7 @@
 #lvx-root .lvx-tap-panel .lvx-live-recovery button { padding:6px 8px; min-height:44px; }
 
 /* ── THEME VARIABLES ── */
-#lvx-root {
+#lvx-root, #lvx-root .lvx-theme-tile[data-theme="samay"] {
   --lvx-color-main:    #F2EDD7;
   --lvx-color-accent:  #E52222;
   --lvx-font-main:     Impact, "Arial Black", serif;
@@ -192,7 +192,7 @@
 /* ── FLOW: full-screen lyrics-learning teleprompter ──
    Five lyric lines use the whole stage: two faintly behind, the
    current line in the middle, and two faintly ahead. */
-#lvx-root[data-lvx-theme="flow"] {
+#lvx-root[data-lvx-theme="flow"], #lvx-root .lvx-theme-tile[data-theme="flow"] {
   --lvx-color-main:    #F2EDD7;
   --lvx-color-accent:  #E52222;
   --lvx-font-main:     "DM Sans", Arial, sans-serif;
@@ -209,7 +209,7 @@
 }
 
 /* ── HYPEBEAST: pure white, Bebas Neue, tight tracking ── */
-#lvx-root[data-lvx-theme="hype"] {
+#lvx-root[data-lvx-theme="hype"], #lvx-root .lvx-theme-tile[data-theme="hype"] {
   --lvx-color-main:    #FFFFFF;
   --lvx-color-accent:  #FFFFFF;
   --lvx-font-main:     "Bebas Neue", Impact, sans-serif;
@@ -223,7 +223,7 @@
 }
 
 /* ── SOFT: pastel, lowercase, thin DM Sans ── */
-#lvx-root[data-lvx-theme="soft"] {
+#lvx-root[data-lvx-theme="soft"], #lvx-root .lvx-theme-tile[data-theme="soft"] {
   --lvx-color-main:    #FFB4C2;
   --lvx-color-accent:  #C9B8FF;
   --lvx-font-main:     "DM Sans", sans-serif;
@@ -237,7 +237,7 @@
 }
 
 /* ── NEON: cyan + magenta, glow ── */
-#lvx-root[data-lvx-theme="neon"] {
+#lvx-root[data-lvx-theme="neon"], #lvx-root .lvx-theme-tile[data-theme="neon"] {
   --lvx-color-main:    #00FFEA;
   --lvx-color-accent:  #FF2D78;
   --lvx-font-main:     "Syne", "Space Grotesk", sans-serif;
@@ -251,7 +251,7 @@
 }
 
 /* ── CLEAN: white only, no bg, minimal ── */
-#lvx-root[data-lvx-theme="clean"] {
+#lvx-root[data-lvx-theme="clean"], #lvx-root .lvx-theme-tile[data-theme="clean"] {
   --lvx-color-main:    #FFFFFF;
   --lvx-color-accent:  rgba(255,255,255,0.55);
   --lvx-font-main:     "Unbounded", Impact, sans-serif;
@@ -265,7 +265,7 @@
 }
 
 /* ── RETRO: gold + amber, Orbitron font ── */
-#lvx-root[data-lvx-theme="retro"] {
+#lvx-root[data-lvx-theme="retro"], #lvx-root .lvx-theme-tile[data-theme="retro"] {
   --lvx-color-main:    #FFD700;
   --lvx-color-accent:  #FF8C00;
   --lvx-font-main:     "Orbitron", "Syne", sans-serif;
@@ -279,7 +279,7 @@
 }
 
 /* ── GLASS: frosted glass, subtle white ── */
-#lvx-root[data-lvx-theme="glass"] {
+#lvx-root[data-lvx-theme="glass"], #lvx-root .lvx-theme-tile[data-theme="glass"] {
   --lvx-color-main:    rgba(255,255,255,0.95);
   --lvx-color-accent:  rgba(255,255,255,0.6);
   --lvx-font-main:     "DM Sans", sans-serif;
@@ -293,7 +293,7 @@
 }
 
 /* ── FIRE: red + orange aggressive ── */
-#lvx-root[data-lvx-theme="fire"] {
+#lvx-root[data-lvx-theme="fire"], #lvx-root .lvx-theme-tile[data-theme="fire"] {
   --lvx-color-main:    #FF4500;
   --lvx-color-accent:  #FF6347;
   --lvx-font-main:     Impact, "Arial Black", sans-serif;
@@ -307,7 +307,7 @@
 }
 
 /* ── ELEGANT: Playfair Display, serif elegance ── */
-#lvx-root[data-lvx-theme="elegant"] {
+#lvx-root[data-lvx-theme="elegant"], #lvx-root .lvx-theme-tile[data-theme="elegant"] {
   --lvx-color-main:    #E8D5B7;
   --lvx-color-accent:  #B8860B;
   --lvx-font-main:     "Playfair Display", Georgia, serif;
@@ -321,7 +321,7 @@
 }
 
 /* ── AURORA: Northern lights, pastel green/purple ── */
-#lvx-root[data-lvx-theme="aurora"] {
+#lvx-root[data-lvx-theme="aurora"], #lvx-root .lvx-theme-tile[data-theme="aurora"] {
   --lvx-color-main:    #7FFFD4;
   --lvx-color-accent:  #DA70D6;
   --lvx-font-main:     "Syne", "DM Sans", sans-serif;
@@ -335,7 +335,7 @@
 }
 
 /* ── MATRIX: Green terminal, digital rain ── */
-#lvx-root[data-lvx-theme="matrix"] {
+#lvx-root[data-lvx-theme="matrix"], #lvx-root .lvx-theme-tile[data-theme="matrix"] {
   --lvx-color-main:    #00FF41;
   --lvx-color-accent:  #008F11;
   --lvx-font-main:     "Orbitron", "Courier New", monospace;
@@ -349,7 +349,7 @@
 }
 
 /* ── VINYL: Warm sepia, vintage feel ── */
-#lvx-root[data-lvx-theme="vinyl"] {
+#lvx-root[data-lvx-theme="vinyl"], #lvx-root .lvx-theme-tile[data-theme="vinyl"] {
   --lvx-color-main:    #F5DEB3;
   --lvx-color-accent:  #CD853F;
   --lvx-font-main:     "Playfair Display", Georgia, serif;
@@ -363,7 +363,7 @@
 }
 
 /* ── COSMIC: Deep space purples, starfield ── */
-#lvx-root[data-lvx-theme="cosmic"] {
+#lvx-root[data-lvx-theme="cosmic"], #lvx-root .lvx-theme-tile[data-theme="cosmic"] {
   --lvx-color-main:    #E0B0FF;
   --lvx-color-accent:  #4169E1;
   --lvx-font-main:     "Unbounded", "Syne", sans-serif;
@@ -380,7 +380,7 @@
    Inherits SAMAY's cream/red/Impact visual identity.
    PULSE is a MOTION style, not a new look — all differentiation
    comes from per-word CSS animations driven by JS heuristics. */
-#lvx-root[data-lvx-theme="pulse"] {
+#lvx-root[data-lvx-theme="pulse"], #lvx-root .lvx-theme-tile[data-theme="pulse"] {
   --lvx-color-main:    #F2EDD7;
   --lvx-color-accent:  #E52222;
   --lvx-font-main:     Impact, "Arial Black", serif;
@@ -2338,3 +2338,43 @@
 #lvx-root .lvx-score-phrase[data-progress="take"]{outline:2px solid rgba(80,220,230,.95);box-shadow:0 0 18px 4px rgba(80,220,230,.35)}
 #lvx-root .lvx-score-phrase[data-mixed="true"]::after{content:"";position:absolute;top:-6px;right:-6px;width:7px;height:7px;border-radius:50%;background:#a4ce7d}
 #lvx-root [data-sync="pause"],#lvx-root .lvx-sync-loop{display:none!important} /* YouTube's own controls cover pause; looping is replaced by Back/rewind. */
+
+/* ── Themes reach score playback (synced songs): the score renderer reads the theme variables. ── */
+#lvx-root .lvx-score-phrase{font-family:var(--lvx-font-main);text-transform:var(--lvx-text-case);letter-spacing:var(--lvx-main-tracking)}
+#lvx-root .lvx-score-word{color:var(--lvx-color-main)}
+#lvx-root .lvx-score-word.lvx-score-current{color:var(--lvx-color-main);text-shadow:var(--lvx-glow-main)}
+#lvx-root .lvx-score-syllable{color:color-mix(in srgb,var(--lvx-color-main) 82%,#7f7f7f)}
+#lvx-root .lvx-score-syllable.lvx-score-current{color:var(--lvx-color-accent);text-shadow:var(--lvx-glow-accent)}
+#lvx-root .lvx-score-word:not(.lvx-score-current),#lvx-root .lvx-score-syllable:not(.lvx-score-current){text-shadow:0 0 calc(var(--lvx-presence,0) * 12px) color-mix(in srgb,var(--lvx-color-accent) calc(var(--lvx-presence,0) * 60%),transparent)}
+#lvx-root .lvx-score-syllable.lvx-score-recent{color:color-mix(in srgb,var(--lvx-color-accent) calc(var(--lvx-presence,0) * 100%),color-mix(in srgb,var(--lvx-color-main) 82%,#7f7f7f))}
+
+/* ── Floating bar: grouped, readable, fades when idle ── */
+#lvx-root .lvx-hud{gap:6px;padding:6px 8px;border-radius:12px;max-width:min(860px,calc(100vw - 48px));text-transform:none;font-weight:700;letter-spacing:.01em;flex-wrap:nowrap}
+#lvx-root .lvx-hud-status{display:inline-flex;align-items:center;gap:7px;min-width:0;flex:1 1 140px;padding:0 4px}
+#lvx-root .lvx-hud-label{font-size:11px;letter-spacing:.12em;text-transform:uppercase}
+#lvx-root .lvx-hud-text{min-width:0;font-weight:600;color:rgba(255,255,255,.78)}
+#lvx-root .lvx-hud-group{display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:9px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1)}
+#lvx-root .lvx-hud-group > button,#lvx-root .lvx-hud .lvx-theme-btn{border:0;border-radius:7px;background:transparent;color:rgba(255,255,255,.85);padding:5px 9px;font:inherit;font-size:12px;letter-spacing:.02em;min-height:28px}
+#lvx-root .lvx-hud-group > button:hover,#lvx-root .lvx-hud .lvx-theme-btn:hover{background:rgba(255,255,255,.14);color:#fff}
+#lvx-root .lvx-hud-offset .lvx-offset-control{font-size:0;gap:3px}
+#lvx-root .lvx-hud-offset .lvx-offset-input{width:64px;text-align:center;font-size:12px;padding:3px 4px;background:transparent;border-color:transparent}
+#lvx-root .lvx-hud-offset .lvx-offset-control::after{content:"ms";font-size:10px;color:rgba(255,255,255,.55)}
+#lvx-root .lvx-hud .lvx-theme-btn[data-theme]{border:1px solid color-mix(in srgb,var(--lvx-color-accent) 55%,transparent);color:var(--lvx-color-main)}
+#lvx-root .lvx-hud .lvx-theme-btn[data-theme]::before{content:"";display:inline-block;width:9px;height:9px;margin-right:6px;border-radius:50%;background:linear-gradient(135deg,var(--lvx-color-main),var(--lvx-color-accent));vertical-align:-1px}
+
+/* ── Display picker: tiles preview each theme with this video's lyrics ── */
+#lvx-root .lvx-theme-picker{position:absolute;left:24px;top:66px;z-index:5;width:min(760px,calc(100vw - 48px));max-height:calc(100vh - 110px);overflow:auto;padding:12px;border-radius:14px;background:rgba(8,10,12,.92);border:1px solid rgba(255,255,255,.14);backdrop-filter:blur(16px);pointer-events:auto;box-shadow:0 18px 50px rgba(0,0,0,.5)}
+#lvx-root .lvx-theme-picker[hidden]{display:none}
+#lvx-root .lvx-theme-picker-head{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.6);margin:0 2px 10px}
+#lvx-root .lvx-theme-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px}
+#lvx-root .lvx-theme-tile{display:flex;flex-direction:column;gap:6px;padding:6px;border-radius:11px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);cursor:pointer;text-align:left;color:#fff;font:inherit}
+#lvx-root .lvx-theme-tile:hover,#lvx-root .lvx-theme-tile:focus-visible{border-color:var(--lvx-color-accent);transform:translateY(-1px)}
+#lvx-root .lvx-theme-tile[aria-pressed="true"]{border-color:var(--lvx-color-accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--lvx-color-accent) 45%,transparent)}
+#lvx-root .lvx-tile-stage{display:flex;align-items:center;justify-content:center;height:86px;padding:8px;border-radius:8px;background:var(--lvx-bg-overlay);overflow:hidden}
+#lvx-root .lvx-tile-line{font-family:var(--lvx-font-main);text-transform:var(--lvx-text-case);letter-spacing:var(--lvx-main-tracking);font-size:15px;line-height:1.25;text-align:center;color:var(--lvx-color-main)}
+#lvx-root .lvx-tile-word{display:inline-block;opacity:.4;animation-name:lvx-tile-karaoke;animation-iteration-count:infinite;animation-timing-function:ease-out}
+#lvx-root .lvx-tile-name{font-size:11px;letter-spacing:.1em;color:rgba(255,255,255,.75);padding:0 2px}
+@keyframes lvx-tile-karaoke{0%{opacity:.4;color:var(--lvx-color-main);text-shadow:none;transform:none}6%{opacity:1;color:var(--lvx-color-accent);text-shadow:var(--lvx-glow-accent);transform:scale(1.06)}22%{opacity:1;color:var(--lvx-color-main);text-shadow:var(--lvx-glow-main);transform:none}85%{opacity:1;color:var(--lvx-color-main)}100%{opacity:.4;color:var(--lvx-color-main);text-shadow:none}}
+@media (prefers-reduced-motion:reduce){#lvx-root .lvx-tile-word{animation:none;opacity:1}}
+#lvx-root .lvx-hud-group-label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.6);padding:0 4px 0 6px}
+#lvx-root .lvx-auto-sync[hidden]{display:none}

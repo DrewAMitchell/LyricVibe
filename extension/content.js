@@ -129,18 +129,19 @@
   const themeButton = document.createElement('button');
   themeButton.className = 'lvx-theme-btn';
   themeButton.textContent = 'SAMAY';
-  themeButton.title = 'Cycle theme (T)';
-  themeButton.addEventListener('click', () => cycleTheme());
+  themeButton.title = 'Choose a lyric display style (previews use this video\u2019s lyrics)';
+  themeButton.setAttribute('aria-haspopup', 'dialog');
+  themeButton.addEventListener('click', () => toggleThemePicker());
 
   const syncEarlier = document.createElement('button');
   syncEarlier.className = 'lvx-sync-btn';
-  syncEarlier.textContent = '[ ←';
+  syncEarlier.textContent = '−';
   syncEarlier.title = 'Lyrics earlier ([)';
   syncEarlier.addEventListener('click', () => nudgeSync(-SYNC_NUDGE_MS));
 
   const syncLater = document.createElement('button');
   syncLater.className = 'lvx-sync-btn';
-  syncLater.textContent = '→ ]';
+  syncLater.textContent = '+';
   syncLater.title = 'Lyrics later (])';
   syncLater.addEventListener('click', () => nudgeSync(SYNC_NUDGE_MS));
 
@@ -185,9 +186,15 @@
 
   const quickSyncButton = document.createElement('button');
   quickSyncButton.className = 'lvx-quick-sync-btn';
-  quickSyncButton.textContent = '⟳ SYNC';
-  quickSyncButton.title = 'Preview catalog timing and fine-tune this video';
-  quickSyncButton.addEventListener('click', () => quickSyncLyrics());
+  quickSyncButton.textContent = '✎ Edit timing';
+  quickSyncButton.title = 'Open the timing sidebar: record and refine this video\u2019s lyric timing';
+  quickSyncButton.addEventListener('click', () => state.score ? openTimingReview() : setHud('Edit timing needs this video\u2019s timed lyrics. Wait for them to load.', true, false));
+  // Auto-calibrating the offset applies only to lyrics without a timed score; it lives with the Sync offset.
+  const autoSyncButton = document.createElement('button');
+  autoSyncButton.className = 'lvx-sync-btn lvx-auto-sync';
+  autoSyncButton.textContent = '⟳';
+  autoSyncButton.title = 'Auto-calibrate the offset for lyrics without a timed score';
+  autoSyncButton.addEventListener('click', () => quickSyncLyrics());
 
   const helpButton = document.createElement('button');
   helpButton.className = 'lvx-help-btn';
@@ -197,15 +204,74 @@
 
   const editButton = document.createElement('button');
   editButton.className = 'lvx-theme-btn';
-  editButton.textContent = 'EDIT TIMING';
-  editButton.setAttribute('aria-label', 'Open lyric timing editor');
+  editButton.textContent = 'Editor ↗';
+  editButton.title = 'Open the full timeline editor in its own window';
+  editButton.setAttribute('aria-label', 'Open the full timeline editor');
   editButton.addEventListener('click', () => {
     chrome.runtime.sendMessage({ type: 'LV_EDITOR_OPEN', mediaKey: globalThis.LvScore?.mediaKey({ url: location.href }) }).then(result => {
       if (!result?.ok) setHud(result?.error?.message || 'Editor could not open', true, true);
     }).catch(error => setHud(error.message, true, true));
   });
 
-  hud.append(hudLabel, hudText, offsetControl, syncEarlier, syncLater, quickSyncButton, editButton, themeButton, helpButton, stopButton);
+  // Bar: status · timing offset · edit · display · help/close, as visual groups.
+  const offsetGroup = document.createElement('span'); offsetGroup.className = 'lvx-hud-group lvx-hud-offset';
+  offsetGroup.title = 'Sync: offset of the lyric track against the music. − earlier, + later ([ and ] keys); type ms or scroll';
+  const syncLabel = document.createElement('span'); syncLabel.className = 'lvx-hud-group-label'; syncLabel.textContent = 'Sync';
+  offsetGroup.append(syncLabel, syncEarlier, offsetControl, syncLater, autoSyncButton);
+  const editGroup = document.createElement('span'); editGroup.className = 'lvx-hud-group'; editGroup.append(quickSyncButton, editButton);
+  const endGroup = document.createElement('span'); endGroup.className = 'lvx-hud-group'; endGroup.append(helpButton, stopButton);
+  const statusGroup = document.createElement('span'); statusGroup.className = 'lvx-hud-status'; statusGroup.append(hudLabel, hudText);
+  hud.append(statusGroup, offsetGroup, editGroup, themeButton, endGroup);
+
+  /* Display picker: one tile per theme, animated with this video's own lyrics. */
+  const themePicker = document.createElement('div');
+  themePicker.className = 'lvx-theme-picker'; themePicker.hidden = true;
+  themePicker.setAttribute('role', 'dialog'); themePicker.setAttribute('aria-label', 'Lyric display style');
+  function themePreviewWords() {
+    const score = typeof timing !== 'undefined' && timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score;
+    if (score) {
+      const now = getMediaTimeMs() - score.offsetMs;
+      const visible = p => p.words.some(w => !w.excluded);
+      const phrase = score.phrases.find(p => visible(p) && now >= p.startMs && now < p.endMs) || score.phrases.find(p => visible(p) && p.startMs >= now) || score.phrases.find(visible);
+      if (phrase) return phrase.words.filter(w => !w.excluded).slice(0, 6).map(w => w.text);
+    }
+    const line = state.lines?.[Math.max(0, state.currentIndex)]?.text;
+    return (line || 'Your lyrics, your style').split(/\s+/).slice(0, 6);
+  }
+  function buildThemePicker() {
+    const words = themePreviewWords();
+    themePicker.replaceChildren();
+    const heading = document.createElement('div'); heading.className = 'lvx-theme-picker-head';
+    heading.textContent = 'Display style · previews use this video\u2019s lyrics';
+    themePicker.append(heading);
+    const grid = document.createElement('div'); grid.className = 'lvx-theme-grid'; themePicker.append(grid);
+    for (const name of THEMES) {
+      const tile = document.createElement('button');
+      tile.type = 'button'; tile.className = 'lvx-theme-tile'; tile.dataset.theme = name;
+      tile.setAttribute('aria-pressed', String(state.theme === name));
+      const stageEl = document.createElement('span'); stageEl.className = 'lvx-tile-stage';
+      const line = document.createElement('span'); line.className = 'lvx-tile-line';
+      const cycle = words.length * 0.32 + 1.2;
+      words.forEach((text, i) => {
+        const word = document.createElement('span'); word.className = 'lvx-tile-word'; word.textContent = text;
+        word.style.animationDelay = `${(i * 0.32).toFixed(2)}s`; word.style.animationDuration = `${cycle.toFixed(2)}s`;
+        line.append(word, document.createTextNode(' '));
+      });
+      stageEl.append(line);
+      const label = document.createElement('span'); label.className = 'lvx-tile-name'; label.textContent = THEME_LABELS[name] || name.toUpperCase();
+      tile.append(stageEl, label);
+      tile.addEventListener('click', () => { applyTheme(name); setHud(`Display: ${THEME_LABELS[name]}`, false, false); toggleThemePicker(false); });
+      grid.append(tile);
+    }
+  }
+  function toggleThemePicker(force) {
+    const open = force ?? themePicker.hidden;
+    if (open) buildThemePicker();
+    themePicker.hidden = !open; themeButton.setAttribute('aria-expanded', String(open));
+    if (open) themePicker.querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
+  }
+  themePicker.addEventListener('keydown', event => { if (event.key === 'Escape') { event.stopPropagation(); toggleThemePicker(false); themeButton.focus(); } });
+  document.addEventListener('pointerdown', event => { if (!themePicker.hidden && !themePicker.contains(event.target) && event.target !== themeButton) toggleThemePicker(false); }, true);
 
   /* Next-line preview (bottom center) */
   const preview = document.createElement('div');
@@ -237,8 +303,8 @@
     '    <span class="lvx-shortcut-desc">Nudge sync earlier / later</span>',
     '  </div>',
     '  <div class="lvx-shortcut-row">',
-    '    <span class="lvx-key-badge">⟳ SYNC</span>',
-    '    <span class="lvx-shortcut-desc">Reset manual sync and auto-calibrate this song</span>',
+    '    <span class="lvx-key-badge">⟳</span>',
+    '    <span class="lvx-shortcut-desc">Auto-calibrate Sync for lyrics without a timed score</span>',
     '  </div>',
     '  <div class="lvx-shortcut-row">',
     '    <span class="lvx-key-badge">+</span><span class="lvx-shortcut-sep">/</span><span class="lvx-key-badge">−</span>',
@@ -264,7 +330,7 @@
   const syncPanel = document.createElement('section');
   syncPanel.className = 'lvx-sync-panel'; syncPanel.hidden = true; syncPanel.tabIndex = -1;
   syncPanel.setAttribute('aria-label', 'Sync this video');
-  syncPanel.innerHTML = `<header><div><span class="lvx-sync-eyebrow">TIMING REVIEW</span><h2>Sync this video</h2></div><button data-sync="close" aria-label="Close timing preview">✕</button></header>
+  syncPanel.innerHTML = `<header><div><span class="lvx-sync-eyebrow">TIMING REVIEW</span><h2>Edit timing</h2></div><button data-sync="close" aria-label="Close timing preview">✕</button></header>
     <button data-sync="light-editor" class="lvx-light-editor-open">↗ Open lightweight editor</button>
     <p class="lvx-sync-save-status" role="status"></p>
     <p class="lvx-sync-notice" role="status" aria-live="polite">Load a timing preview to begin.</p>
@@ -273,7 +339,7 @@
     <p class="lvx-sync-phrase"></p><div class="lvx-sync-range"></div>
     <div class="lvx-sync-transport"><button data-sync="audition">▶ Audition at 1×</button><button data-sync="pause">Ⅱ Pause</button><output class="lvx-sync-clock" aria-label="Source playback time" aria-live="off">0.000s</output></div>
     <label class="lvx-sync-loop"><input type="checkbox" data-sync="loop"> Loop this phrase</label>
-    <details class="lvx-tap-panel"><summary>Sync by ear <span>phrase → syllables · words optional</span></summary>
+    <details class="lvx-tap-panel"><summary>Record by ear <span>phrase → syllables · words optional</span></summary>
       <div class="lvx-capture-phases" role="group" aria-label="Syncing phase"><button data-phase="phrase">1 · Phrases</button><button data-phase="syllable">2 · Syllables</button><button data-phase="word">Words · optional</button></div>
       <p class="lvx-sync-hint">Hold Space while each word is sung. On the next pass, tap at syllable changes inside its saved boundaries.</p>
       <div class="lvx-perform-cue"><span class="lvx-beat-pulse" hidden aria-hidden="true"></span><small>READY</small><strong class="lvx-perform-phrase"></strong><div class="lvx-upcoming-phrases" aria-label="Upcoming lyrics"></div><span class="lvx-perform-instruction">Then start performing</span><p class="lvx-estimated-phrase" aria-live="off"></p><p class="lvx-cue-legend">Blue follows your recording cue</p><div class="lvx-live-recovery" hidden><button data-sync="tap-back">← Back one</button><button data-sync="tap-skip">Skip one →</button><button data-sync="tap-reassign-back">Last tap ← word</button><button data-sync="tap-reassign-next">Last tap → word</button><small>Left / Right moves the cue; Ctrl + Left / Right reassigns the last tap. The song keeps playing.</small></div></div>
@@ -1608,7 +1674,7 @@
     event.stopPropagation();
     if (event.key === 'Escape') { event.preventDefault(); closeTimingReview(); }
   });
-  root.append(stage, preview, progress, hud, shortcutsPanel, syncPanel);
+  root.append(stage, preview, progress, hud, themePicker, shortcutsPanel, syncPanel);
   function mountRoot() {
     const surface = document.fullscreenElement;
     if (surface && !['VIDEO', 'AUDIO'].includes(surface.tagName)) surface.appendChild(root);
@@ -2789,6 +2855,7 @@
 
     function tick() {
       if (!state.active) return;
+      autoSyncButton.hidden = Boolean(state.score);
 
       const mediaMs = getMediaTimeMs();
       if (state.score) {
@@ -4017,7 +4084,8 @@
     } else {
       root.setAttribute('data-lvx-theme', name);
     }
-    themeButton.textContent = THEME_LABELS[name] || name.toUpperCase();
+    themeButton.textContent = `${THEME_LABELS[name] || name.toUpperCase()} ▾`; themeButton.dataset.theme = name;
+    if (!themePicker.hidden) buildThemePicker();
     try {
       chrome.storage.local.set({ lvxTheme: name });
     } catch (_) {}
@@ -4060,7 +4128,7 @@
 
   function show() {
     if (!root.isConnected) {
-      root.append(stage, preview, progress, hud, shortcutsPanel);
+      root.append(stage, preview, progress, hud, themePicker, shortcutsPanel);
       mountRoot();
     }
   }
