@@ -2421,3 +2421,20 @@
 @media(max-width:600px){#lvx-root .lvx-hud .lvx-tempo-button{flex-basis:126px;width:126px}#lvx-root .lvx-hud:has(.lvx-tempo-button) .lvx-hud-group-label{display:none}#lvx-root .lvx-placement-fields{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:760px){#lvx-root.lvx-sync-open .lvx-score-phrase{font-size:min(24px,var(--lvx-max-font,128px))}}
 @media(prefers-reduced-motion:reduce){#lvx-root .lvx-hud .lvx-tempo-button[data-on=true]{background:transparent;color:#d4e8c4}}
+#lvx-root .lvx-clicker-controls{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:10px 0}
+#lvx-root .lvx-clicker-controls label{display:inline-flex;align-items:center;gap:5px}
+#lvx-root .lvx-clicker-controls input[type=number]{width:68px}
+#lvx-root .lvx-hud .lvx-tempo-button[data-on=true][data-downbeat=true]{background:#65512d;border-color:#e2c287}
+#lvx-root .lvx-beat-settings{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
+#lvx-root .lvx-beat-settings label,#lvx-root .lvx-gap-setting{display:grid;gap:4px;font-size:12px}
+#lvx-root .lvx-beat-settings input,#lvx-root .lvx-gap-setting input{min-width:0;width:100%;padding:6px;color:#e3edd4;background:#10130f;border:1px solid #4c5345;border-radius:4px}
+#lvx-root .lvx-beat-settings[data-beats=false]>label:not(:first-child){display:none}
+#lvx-root .lvx-interval-target[hidden]{display:none!important}
+#lvx-root .lvx-beat-target{scale:var(--lvx-beat-scale,1);filter:brightness(var(--lvx-beat-bright,1)) hue-rotate(var(--lvx-beat-hue,0deg))}
+#lvx-root .lvx-save-wrap{display:inline-flex;position:relative;flex:1;min-width:0}
+#lvx-root .lvx-save-wrap>button{width:100%}
+#lvx-root .lvx-save-wrap[data-blocked=true]>button{border-color:#dfb1ae;outline:1px solid #dfb1ae55;opacity:1}
+#lvx-root .lvx-save-tooltip{display:none;position:absolute;bottom:calc(100% + 10px);right:0;width:min(300px,calc(100vw - 64px));padding:10px 12px;border:1px solid #dfb1ae;border-radius:7px;background:#242020;color:#f1dfdc;font:12px/1.45 system-ui,sans-serif;white-space:normal;z-index:20;box-shadow:0 4px 18px #0009}
+#lvx-root .lvx-save-wrap[data-blocked=true]:hover .lvx-save-tooltip,#lvx-root .lvx-save-wrap[data-blocked=true]:focus-within .lvx-save-tooltip{display:block}
+#lvx-root .lvx-save-wrap:focus-visible{outline:1px solid #dfb1ae;outline-offset:3px;border-radius:6px}
+@media(prefers-reduced-motion:reduce){#lvx-root .lvx-beat-target{scale:1!important}}

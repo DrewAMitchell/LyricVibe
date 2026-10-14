@@ -43,6 +43,8 @@
     $('save').disabled=state.busy||!ready||!state.auditioned||state.dirty;
     $('undo').disabled=state.busy||!state.draft?.undoScores?.length;
     $('save-status').textContent=!ready?'Saved · reopen Sync to continue':state.dirty?'Use exact times first':state.auditioned?'Ready to save this iteration':'Audition preview before saving';
+    const blocked=$('save').disabled,reason=state.busy?'Updating preview…':!ready?'Reopen Sync to prepare this video’s preview.':state.dirty?'Use exact times for your typed changes first.':!state.auditioned?'Audition preview at 1× before saving.':'Ready to save this iteration.';
+    $('save-wrap').dataset.blocked=String(blocked);$('save-wrap').tabIndex=blocked?0:-1;$('save-wrap').setAttribute('aria-label',blocked?'Save unavailable: '+reason:'Save timings');$('save-reason').textContent=blocked?reason:'';
   }
   function setDraft(draft) {
     state.draft=draft;state.auditioned=false;

@@ -168,7 +168,7 @@
     if (message.type === 'LV_LIGHT_EDITOR_OPEN') {
       const { key } = await liveIdentity(tabId, message.mediaKey);
       if (!sourceOverlayBound(sender, tabId, key)) throw fail('SOURCE_REQUIRED', 'Open the lightweight editor from this video’s extension overlay.');
-      await chrome.windows.create({ type: 'popup', url: chrome.runtime.getURL(`light-editor.html?sourceTab=${tabId}&mediaKey=${encodeURIComponent(key)}`), width: 1100, height: 650 });
+      await chrome.windows.create({ type: 'popup', url: chrome.runtime.getURL(`light-editor.html?sourceTab=${tabId}&mediaKey=${encodeURIComponent(key)}${message.mode==='tempo'?'&mode=tempo':''}`), width: 1100, height: 650 });
       return { ok: true };
     }
     if (message.type === 'LV_NATIVE_ANALYSIS_STOP' || message.type === 'LV_NATIVE_ANALYSIS_STATUS') {
@@ -179,6 +179,10 @@
         : { ok: true, analysis: await root.LvAnalysis.analysisStatus() };
     }
     const { key } = await liveIdentity(tabId, message.mediaKey);
+    if(message.type==='LV_TEMPO_GET'||message.type==='LV_TEMPO_SET'){
+      if(!editorSourceBound(sender,tabId,key))throw fail('EDITOR_REQUIRED','Tempo sections require the editor bound to this source tab.');
+      return chrome.tabs.sendMessage(tabId,{...message,mediaKey:key});
+    }
     if (['LV_SCORE_SEEK', 'LV_SCORE_TRANSPORT'].includes(message.type)) return chrome.tabs.sendMessage(tabId, { ...message, mediaKey: key });
     if (message.type.startsWith('LV_NATIVE_ANALYSIS_')) {
       if (!editorSourceBound(sender, tabId, key)) throw fail('EDITOR_REQUIRED', 'Native analysis controls require the editor opened for this source tab.');
@@ -323,6 +327,7 @@
     });
   }
   const types = new Set(['LV_ANALYSIS_CACHE_CLEAR_REQUEST', 'LV_EDITOR_OPEN', 'LV_LIGHT_EDITOR_OPEN', 'LV_SCORE_GET', 'LV_SCORE_OPERATION', 'LV_SCORE_IMPORT', 'LV_NATIVE_ALIGNMENT_IMPORT', 'LV_SCORE_UNDO', 'LV_SCORE_SEEK', 'LV_SCORE_TRANSPORT', 'LV_SCORE_REVIEW_APPLY', 'LV_ANALYSIS_START', 'LV_ANALYSIS_STOP', 'LV_ANALYSIS_STATUS', 'LV_NATIVE_ANALYSIS_START', 'LV_NATIVE_ANALYSIS_STOP', 'LV_NATIVE_ANALYSIS_STATUS', 'LV_ALIGNMENT_PROPOSALS']);
+  types.add('LV_TEMPO_GET');types.add('LV_TEMPO_SET');
   for (const type of ['LV_TIMING_PREPARE', 'LV_TIMING_CURRENT', 'LV_TIMING_TUNE', 'LV_TIMING_UNDO', 'LV_TIMING_APPLY', 'LV_TIMING_CANCEL']) types.add(type);
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!types.has(message?.type)) return;

@@ -252,6 +252,7 @@
       if (!phrase || typeof phrase.id !== "string" || !phrase.id || ids.has(phrase.id) || !laneMap.has(phrase.laneId)) bad("invalid phrase id or unknown lane");
       ids.add(phrase.id);
       if (typeof phrase.startMs !== "number" || !Number.isFinite(phrase.startMs) || phrase.startMs < 0 || typeof phrase.endMs !== "number" || !Number.isFinite(phrase.endMs) || phrase.endMs < 0 || phrase.endMs < phrase.startMs || typeof phrase.endEstimated !== "boolean" || typeof phrase.fadeOutMs !== "number" || !Number.isFinite(phrase.fadeOutMs) || phrase.fadeOutMs < 0 || !Array.isArray(phrase.words)) bad("invalid phrase timing or fields");
+      if(phrase.persistBeats!==undefined&&(!Number.isFinite(phrase.persistBeats)||phrase.persistBeats<0||phrase.persistBeats>64))bad('phrase persistence must be 0–64 beats');
       for (const word of phrase.words) {
         if (!word || typeof word.id !== "string" || !word.id || ids.has(word.id) || typeof word.text !== "string" || !word.text.trim()) bad("invalid or duplicate word");
         ids.add(word.id);
@@ -271,6 +272,21 @@
             if (syllable.reveal !== undefined && !validReveal(syllable.reveal)) bad("invalid syllable reveal");
           }
         }
+      }
+    }
+    if(score.beatCues!==undefined){
+      if(!Array.isArray(score.beatCues)||score.beatCues.length>5000)bad('beat cues must be a bounded list');
+      const cueIds=new Set();
+      for(const cue of score.beatCues){
+        if(!cue||typeof cue.id!=='string'||!cue.id||cueIds.has(cue.id)||!Number.isFinite(cue.beat)||!Number.isFinite(cue.durationBeats)||cue.durationBeats<=0||cue.durationBeats>64||!['pulse','breath','color'].includes(cue.effect)||!Number.isFinite(cue.strength)||cue.strength<0||cue.strength>1||cue.provenance!=='manual')bad('invalid beat cue');
+        cueIds.add(cue.id);const target=cue.target;
+        if(!target||!['screen','active','lane','phrase','word','syllable'].includes(target.kind))bad('invalid beat target');
+        if(['lane','phrase','word','syllable'].includes(target.kind)&&!ids.has(target.id))bad('unknown beat target');
+        if(target.kind==='lane'&&!laneMap.has(target.id))bad('beat lane target must be a lane');
+        if(target.kind==='phrase'&&!score.phrases.some(p=>p.id===target.id))bad('beat phrase target must be a phrase');
+        if(target.kind==='word'&&!score.phrases.some(p=>p.words.some(w=>w.id===target.id)))bad('beat word target must be a word');
+        if(target.kind==='syllable'&&!score.phrases.some(p=>p.words.some(w=>(w.syllables||[]).some(s=>s.id===target.id))))bad('beat syllable target must be a syllable');
+        for(const field of ['rawSourceMs','snappedSourceMs'])if(cue[field]!==undefined&&(!Number.isSafeInteger(cue[field])||cue[field]<0))bad('beat observations must be whole source milliseconds');
       }
     }
     return score;
@@ -309,7 +325,15 @@
     if (!operation || typeof operation !== "object" || typeof operation.type !== "string") fail("INVALID_OPERATION", "operation must have a type");
     const next = clone(score);
     const op = operation;
-    if (op.type === "setWordTiming") {
+    if(op.type==='setBeatCue'){
+      if(!op.cue||typeof op.cue.id!=='string')fail('INVALID_OPERATION','Provide a beat cue');
+      next.beatCues=[...(next.beatCues||[]).filter(c=>c.id!==op.cue.id),clone(op.cue)];
+    }else if(op.type==='deleteBeatCue'){
+      if(!(next.beatCues||[]).some(c=>c.id===op.cueId))fail('UNKNOWN_ID','Unknown beat cue');
+      next.beatCues=next.beatCues.filter(c=>c.id!==op.cueId);
+    }else if(op.type==='setPhrasePersistence'){
+      const phrase=next.phrases.find(p=>p.id===op.phraseId);if(!phrase)fail('UNKNOWN_ID','Unknown phrase');if(!Number.isFinite(op.beats)||op.beats<0||op.beats>64)fail('INVALID_OPERATION','Persistence must be 0–64 beats.');phrase.persistBeats=op.beats;
+    }else if (op.type === "setWordTiming") {
       const { phrase, word } = locateWord(next, op.wordId);
       finiteNonnegative(op.startMs, "startMs"); finiteNonnegative(op.endMs, "endMs");
       if (op.endMs < op.startMs || op.startMs < phrase.startMs || op.endMs > phrase.endMs) fail("INVALID_TIME", "word timing must fit within its phrase");
@@ -514,6 +538,16 @@
       if (!validReveal(op.reveal)) fail("INVALID_REVEAL", "reveal must be null or a supported sweep configuration");
       syllable.reveal = op.reveal === null ? null : clone(op.reveal);
     } else fail("INVALID_OPERATION", `unknown operation type: ${op.type}`);
+    // Text replacement can remove a target. Keep its beat gesture on the surviving
+    // parent rather than making the lyric correction impossible to save.
+    if(['replaceWords','setWordText','setWordSyllables','setPhraseSyllablePerformance'].includes(op.type))for(const cue of next.beatCues||[]){
+      const target=cue.target;if(!['word','syllable'].includes(target.kind))continue;
+      const present=next.phrases.some(p=>p.words.some(w=>target.kind==='word'?w.id===target.id:(w.syllables||[]).some(s=>s.id===target.id)));if(present)continue;
+      const parent=score.phrases.find(p=>p.words.some(w=>target.kind==='word'?w.id===target.id:(w.syllables||[]).some(s=>s.id===target.id)));
+      if(!parent)continue;
+      const word=parent.words.find(w=>(w.syllables||[]).some(s=>s.id===target.id));
+      cue.target=word&&next.phrases.some(p=>p.words.some(w=>w.id===word.id))?{kind:'word',id:word.id}:{kind:'phrase',id:parent.id};
+    }
     next.revision++;
     return validateScore(next);
   }
@@ -558,19 +592,19 @@
     return validateScore(next);
   }
 
-  function activeAt(score, mediaMs) {
+  function activeAt(score, mediaMs, {displayEnds={}}={}) {
     validateScore(score); finiteNonnegative(mediaMs, "mediaMs");
     const at = mediaMs - score.offsetMs;
     const phrases = [];
     for (const phrase of score.phrases) {
-      const start = phrase.startMs, end = phrase.endMs;
-      if (at < start || at > end) continue;
-      const fade = Math.min(phrase.fadeOutMs, Math.max(0, end - start));
+      const start = phrase.startMs, requestedEnd=displayEnds[phrase.id],end=Number.isFinite(requestedEnd)&&requestedEnd>=phrase.endMs?requestedEnd:phrase.endMs;
+      if (at < start || at > end || (end>phrase.endMs&&at>=end)) continue;
+      const fade = phrase.persistBeats>0?0:Math.min(phrase.fadeOutMs, Math.max(0, end - start));
       const opacity = fade > 0 && at > end - fade ? Math.max(0, (end - at) / fade) : 1;
       const visibleWords = phrase.words.filter(w => !w.excluded);
       if (!visibleWords.length) continue;
       const activeWords = visibleWords.filter(w => at >= w.startMs && at <= w.endMs);
-      phrases.push({ ...clone(phrase), words: clone(visibleWords), activeWords: activeWords.map(w => w.id), activeSyllables: activeWords.flatMap(w => (w.syllables || []).filter(syllable => at >= syllable.startMs && at <= syllable.endMs).map(syllable => syllable.id)), opacity });
+      phrases.push({ ...clone(phrase),...(end>phrase.endMs?{displayEndMs:end,persisted:at>phrase.endMs}:{}),words: clone(visibleWords), activeWords: activeWords.map(w => w.id), activeSyllables: activeWords.flatMap(w => (w.syllables || []).filter(syllable => at >= syllable.startMs && at <= syllable.endMs).map(syllable => syllable.id)), opacity });
     }
     return { phrases };
   }

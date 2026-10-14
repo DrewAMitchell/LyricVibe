@@ -1176,6 +1176,7 @@
   function validateTempoMap(map) {
     if (!map || map.version !== 1 || !integerTime(map.anchorMs) || !Array.isArray(map.segments) || !map.segments.length || map.segments.length > 256) fail('INVALID_TEMPO_MAP', 'Tempo needs an anchor and 1–256 sections.');
     let prior = -1;
+    if(map.beatsPerBar!==undefined&&(!Number.isSafeInteger(map.beatsPerBar)||map.beatsPerBar<1||map.beatsPerBar>12))fail('INVALID_TEMPO_MAP','Beats per bar must be 1–12.');
     for (const s of map.segments) {
       if (!s || typeof s!=='object' || Array.isArray(s) || !integerTime(s.startMs) || s.startMs <= prior || !Number.isFinite(s.bpm) || s.bpm < 20 || s.bpm > 400 || !['step','linear'].includes(s.transition) || !['manual','tapped','estimated'].includes(s.provenance) || (s.taps!==undefined&&(!Array.isArray(s.taps)||s.taps.length>64||s.taps.some(t=>!integerTime(t))))) fail('INVALID_TEMPO_MAP', 'Tempo sections need increasing source times, 20–400 BPM, a transition and provenance; optional raw taps are bounded whole milliseconds.');
       prior = s.startMs;
