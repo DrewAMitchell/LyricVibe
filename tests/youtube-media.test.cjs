@@ -69,3 +69,16 @@ test('catalog lookup uses verified native duration rather than rounded YouTube m
   assert.equal(ad.lookupDurationMs,167000);
   assert.equal(ad.clockUsable,false);
 });
+
+test('in-tab navigation with a stale duration tag uses the player display when it agrees with the media', () => {
+  // Observed 2026-10-13: Sample Track after navigating from Tokens on the Desk in the same tab.
+  const stale = { url: 'https://www.youtube.com/watch?v=FIXTURE0002', canonicalUrl: 'https://www.youtube.com/watch?v=FIXTURE0002', isoDuration: 'PT2M27S', playerClassName: 'html5-video-player ad-created paused-mode', mediaDurationSec: 134.901, mediaCurrentTimeSec: 2.03, playerDurationText: '2:14' };
+  assert.equal(media.inspect({ ...stale, playerDurationText: undefined }).reason, 'YOUTUBE_MEDIA_DURATION_MISMATCH');
+  const fixed = media.inspect(stale);
+  assert.equal(fixed.clockUsable, true); assert.equal(fixed.contentDurationMs, 134000);
+  // A disagreeing display, an active ad, or short media stays gated.
+  assert.equal(media.inspect({ ...stale, playerDurationText: '2:27' }).clockUsable, false);
+  assert.equal(media.inspect({ ...stale, playerClassName: 'ad-showing' }).reason, 'YOUTUBE_AD_ACTIVE');
+  assert.equal(media.inspect({ ...stale, mediaDurationSec: 15.421, playerDurationText: '0:15' }).reason, 'YOUTUBE_MEDIA_DURATION_MISMATCH');
+  assert.equal(media.parseClockMs('1:02:03'), 3723000); assert.equal(media.parseClockMs('abc'), null);
+});

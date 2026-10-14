@@ -315,7 +315,8 @@
   const captureActions=syncButton('tap-arm').parentElement;
   captureActions.before(syncPanel.querySelector('.lvx-phrase-syllables'),syncPanel.querySelector('.lvx-tap-words'),syllableFields);
   syncPanel.querySelector('.lvx-perform-cue').after(syncPanel.querySelector('.lvx-live-recovery'));
-  const setSyncNotice = text => { syncNotice.textContent = text; };
+  // tone: '' for status, 'warn' for attention, 'error' for anything that blocks you (red box).
+  const setSyncNotice = (text, tone = '') => { syncNotice.textContent = text; syncNotice.dataset.tone = tone; };
   const timingTapPending = () => Boolean(tapping.take && (tapping.take.status === 'armed' || !rawTake(tapping.take) && (tapCount(tapping.take) || tapping.take.pendingStartMs !== null || tapping.take.actionHistory?.length)));
   const effectPending = () => performanceTake.armed || performanceTake.marks.length > 0;
   const tapPending = () => timingTapPending() || effectPending();
@@ -370,7 +371,7 @@
       const report=LvTapTiming.associateWordHolds(tapping.take),ready=report.phrases.filter(p=>p.heldCount&&p.ready).length,flagged=report.phrases.filter(p=>p.heldCount&&p.issues.length).length;
       setSyncNotice(`Word pass ready: ${tapping.take.holds.length} words claimed ${events.length-report.unclaimed.length} of ${events.length} syllable taps · ${ready} phrases ready · ${flagged} with amber flags. Review below, then Use held phrases. Export keeps a copy.`);
       return true;
-    }catch(error){setSyncNotice(error.message);return false;}
+    }catch(error){setSyncNotice(error.message,'error');return false;}
     finally{timing.busy=false;state.scoreSignature='';refreshTimingPanel();syncPanel.querySelector('.lvx-event-review:not([hidden])')?.scrollIntoView({block:'nearest'});}
   }
   // Whole-transcript text editing over the unsaved preview.
@@ -420,7 +421,7 @@
       timing.draft=response.preview;timing.auditioned=false;state.scoreSignature='';
       transcript.dirty=false;transcript.shownFor=null;syncPanel.querySelector('.lvx-transcript-editor').close();
       setSyncNotice(`${result.changes.length} lyric changes are in the preview${extra.length?` · ${extra.length} words kept their syllable timings`:''}${notes.length?' · '+notes.join('; '):''}. Undo preview reverts; Save timings keeps them.`);
-    }catch(error){setSyncNotice(error.message);}finally{timing.busy=false;refreshTimingPanel();}
+    }catch(error){setSyncNotice(error.message,'error');}finally{timing.busy=false;refreshTimingPanel();}
   }
 
   // Tap tempo: raw beat taps (source clock) fit to a beat grid, persisted per video.
@@ -489,7 +490,7 @@
       tapping.eventApplied=(tapping.eventApplied||[]).filter(id=>id!==phraseId);
       setSyncNotice(`Retiming phrase ${phraseOrdinal(phraseId)}: hold Space for each word. It stops after the phrase; other phrases are unchanged.`);
       await armTapTake();
-    }catch(error){setSyncNotice(error.message);}
+    }catch(error){setSyncNotice(error.message,'error');}
   }
   // Pause or Stop ends editing for the moment, so the take goes straight into the preview.
   async function finishStoppedTake(){
@@ -685,7 +686,7 @@
       const startMs=Math.max(0,phrase.startMs+score.offsetMs-350),endMs=phrase.endMs+score.offsetMs+350;
       media.playbackRate=Number(syncButton('tap-speed').value);media.currentTime=startMs/1000;state.auditionLoop=syncButton('loop').checked?{startMs,endMs}:null;
       timing.view='proposed';await media.play();setSyncNotice('Playing your phrase take. Retake, correct a shared boundary below, or Keep phrase & next.');
-    }catch(error){setSyncNotice(error.message);}
+    }catch(error){setSyncNotice(error.message,'error');}
   }
   async function keepSyllableAndNext(){const phrase=timingPhrase();await useTapTake();if(tapping.take)return;getMedia()?.pause();state.auditionLoop=null;const next=timing.draft?.score.phrases.findIndex((p,i)=>i>timing.phraseIndex&&p.laneId===phrase.laneId&&p.words.some(w=>!w.excluded));if(next>=0){timing.phraseIndex=next;tapping.wordId=timingPhrase().words.find(w=>!w.excluded)?.id;}refreshTimingPanel();setSyncNotice(next>=0?'Phrase kept in preview. Next phrase is ready. Save timings whenever you want.':'Last phrase kept in preview. Save timings when ready.');}
   function followTapUnit() {
@@ -840,7 +841,7 @@
       const updated=LvTapTiming.adjust(take,{id:tapping.reviewId,edge:syncButton('correct-edge').value,deltaMs});
       tapping.correctionUndo.push(take); tapping.correctionUndo=tapping.correctionUndo.slice(-128); tapping.take=updated;
       refreshTimingPanel(); setSyncNotice(`Recorded mark adjusted ${deltaMs>0?'later':'earlier'} by ${Math.abs(deltaMs)} ms. Preview and saved track unchanged until you use the take.`);
-    } catch(error) { setSyncNotice(error.message); }
+    } catch(error) { setSyncNotice(error.message,'error'); }
   }
   function correctMarkExact() {
     const take=tapping.take, mark=take?.marks.find(m=>m.id===tapping.reviewId);
@@ -854,7 +855,7 @@
       else for (const edge of start>=mark.endMs ? ['end','start'] : ['start','end']) if(deltas[edge]) next=LvTapTiming.adjust(next,{id:mark.id,edge,deltaMs:deltas[edge]});
       tapping.correctionUndo.push(take); tapping.correctionUndo=tapping.correctionUndo.slice(-128); tapping.take=next;
       syncButton('correct-save').focus(); refreshTimingPanel(); setSyncNotice('Exact recorded times updated. Use take in preview when ready.');
-    } catch(error) { setSyncNotice(error.message); }
+    } catch(error) { setSyncNotice(error.message,'error'); }
   }
   async function hearCorrectedMark() {
     const mark=tapping.take?.marks.find(m=>m.id===tapping.reviewId), media=getMedia();
@@ -862,7 +863,7 @@
     media.pause();
     const startMs=Math.max(0,mark.startMs+state.score.offsetMs-350), endMs=Math.min(state.score.source.durationMs,mark.endMs+state.score.offsetMs+350);
     state.auditionLoop={startMs,endMs}; media.preservesPitch=true; media.playbackRate=Number(syncButton('tap-speed').value); media.currentTime=startMs/1000;
-    try { await media.play(); setSyncNotice('Looping this recorded mark at practice speed. Pause to stop; corrections remain buffered.'); } catch(error) {setSyncNotice(error.message);}
+    try { await media.play(); setSyncNotice('Looping this recorded mark at practice speed. Pause to stop; corrections remain buffered.'); } catch(error) {setSyncNotice(error.message,'error');}
   }
   syncButton('correct-mark').addEventListener('change',()=>{tapping.reviewId=syncButton('correct-mark').value;refreshMarkCorrection();});
   syncButton('correct-earlier').addEventListener('click',()=>correctMark(-10));
@@ -969,7 +970,7 @@
       if(wordTake(take))setSyncNotice('Hold Space while each word is sung; release when it ends. Your syllable taps stay fixed. Stop anytime; held phrases can go to the preview.');
       if(eventTake(take))setSyncNotice('Tap each syllable you hear. Timestamps are captured without assigning words. Stop to review grouping; editor sounds are muted.');
       if(streamTake(take))setSyncNotice('Tap the syllables as they arrive. Old word times are ignored. Left / Right moves the next cue; Ctrl + Left / Right changes the last tap’s word without seeking.');
-    } catch (error) { setSyncNotice(error.message); }
+    } catch (error) { setSyncNotice(error.message,'error'); }
     finally { timing.busy = false; refreshTimingPanel(); if (tapping.take?.status === 'armed') { renderScore(getMediaTimeMs()); syncButton('tap-mark').focus({preventScroll:true});syncPanel.querySelector('.lvx-perform-cue').scrollIntoView({block:'start'}); } }
   }
   function markTapTime(event = {}) {
@@ -998,7 +999,7 @@
         setSyncNotice(`Phrase ${phraseOrdinal(id)} retimed. Review it below, then Use held phrases. Other phrases are unchanged.`);
       }
       if(wordTake(tapping.take)&&tapping.take.status==='complete'){getMedia()?.pause();setSyncNotice(`All ${tapping.take.holds.length} words held. Review below, then Use held phrases.`);}
-    } catch (error) { setSyncNotice(error.message); }
+    } catch (error) { setSyncNotice(error.message,'error'); }
   }
   function repositionTap(index) {
     const take=tapping.take;
@@ -1010,7 +1011,7 @@
       followTapUnit();state.scoreSignature='';refreshTimingPanel();renderScore(getMediaTimeMs());
       setSyncNotice(`${take.mode==='phrase'?'Phrase':'Word'} ${index+1}: ${updated.units[index].text}. ${removed?`${removed} later mark${removed===1?'':'s'} cleared for rerecording. `:''}The song keeps playing; skipped lyrics keep existing timing.`);
       return true;
-    }catch(error){setSyncNotice(error.message);return false;}
+    }catch(error){setSyncNotice(error.message,'error');return false;}
   }
   function recoverStream(direction,reassign=false){
     const take=tapping.take,media=getMedia();
@@ -1020,7 +1021,7 @@
       followTapUnit();state.scoreSignature='';refreshTimingPanel();
       const last=tapping.take.marks.at(-1),target=tapping.take.units.find(u=>u.wordId===(reassign?last?.wordId:tapping.take.units[tapping.take.index]?.wordId));
       setSyncNotice(reassign?`Last tap now belongs to “${target?.text}”. Its timestamp is unchanged; playback continues.`:`Next cue: “${target?.text}”. Existing taps and playback position are unchanged.`);
-    }catch(error){setSyncNotice(error.message);}
+    }catch(error){setSyncNotice(error.message,'error');}
   }
   function restoreBufferedTake(packet){
     if(timing.busy||tapPending()||timing.dirty||tapping.splitDirty||!timing.draft||!getMedia()?.paused)throw Error('Restore requires an empty, paused editor with no pending text.');
@@ -1039,7 +1040,7 @@
     setSyncNotice(`${take.marks.length} buffered taps restored exactly. Review, continue, or seek back to retake a phrase.`);
     return true;
   }
-  function skipWordHold(delta){const take=tapping.take;if(!wordTake(take)||timing.busy)return;try{tapping.take=LvTapTiming.skipWords(take,delta);tapping.streamWordId=null;state.scoreSignature='';refreshTimingPanel();renderScore(getMediaTimeMs());}catch(error){setSyncNotice(error.message);}}
+  function skipWordHold(delta){const take=tapping.take;if(!wordTake(take)||timing.busy)return;try{tapping.take=LvTapTiming.skipWords(take,delta);tapping.streamWordId=null;state.scoreSignature='';refreshTimingPanel();renderScore(getMediaTimeMs());}catch(error){setSyncNotice(error.message,'error');}}
   syncButton('tap-back').addEventListener('click',()=>wordTake(tapping.take)?skipWordHold(-1):streamTake(tapping.take)?recoverStream(-1):repositionTap((tapping.take?.index??0)-1));
   syncButton('tap-skip').addEventListener('click',()=>wordTake(tapping.take)?skipWordHold(1):streamTake(tapping.take)?recoverStream(1):repositionTap((tapping.take?.index??0)+1));
   syncButton('tap-reassign-back').addEventListener('click',()=>recoverStream(-1,true));
@@ -1069,7 +1070,7 @@
       setSyncNotice(take.mode === 'phrase' ? 'Phrases added to preview. Keep refining, or save this iteration.' : 'Take added to preview. Save timings to keep it for this video.');
       if(frameTake(take))setSyncNotice('Tapped syllables added to preview; word edges and untapped words kept. Text cuts are suggestions: inspect them in the lightweight editor. Save timings when ready.');
       if(streamTake(take))setSyncNotice('Phrase-guided syllables added to preview. Word edges now come from your taps. Untapped words and an unfinished trailing word keep their earlier data. Save timings when ready.');
-    } catch (error) { setSyncNotice(error.message); }
+    } catch (error) { setSyncNotice(error.message,'error'); }
     finally { timing.busy = false; refreshTimingPanel(); }
   }
   async function continuousSyllableOperations(take,onProgress=null) {
@@ -1221,7 +1222,7 @@
       tapping.eventApplied=[...(tapping.eventApplied||[]),...phrases.map(p=>p.phraseId)];timing.auditioned=false;state.scoreSignature='';
       await archiveEvents();
       setSyncNotice(`${phrases.length} reviewed phrases added to preview. Raw events and original word references are backed up locally. Export to keep a portable copy. Save timings whenever you like; the take stays here for more review. Unresolved phrases are unchanged.`);
-    }catch(error){setSyncNotice(error.message);}finally{timing.busy=false;refreshTimingPanel();}
+    }catch(error){setSyncNotice(error.message,'error');}finally{timing.busy=false;refreshTimingPanel();}
   }
   syncButton('events-review').addEventListener('click',useEventAssignments);
   syncButton('events-export').addEventListener('click',()=>{
@@ -1240,7 +1241,7 @@
       const result = await timingRequest('LV_TIMING_TUNE', { operation, allowProtected:syncButton('protected').checked });
       timing.draft = result.preview; tapping.splitDirty = false; timing.auditioned = false; state.scoreSignature = '';
       setSyncNotice('Syllable spelling added to the preview. Their equal initial divisions are estimates; tap while listening to set their boundaries.');
-    } catch (error) { setSyncNotice(error.message); }
+    } catch (error) { setSyncNotice(error.message,'error'); }
     finally { timing.busy = false; refreshTimingPanel(); }
   }
   async function suggestTapSyllables(){
@@ -1256,7 +1257,7 @@
       syncButton('tap-spoken').value=suggestion.spokenText;syncButton('tap-split').value=suggestion.parts.join('|');tapping.splitDirty=true;
       hint.textContent=`${suggestion.parts.length} syllables · dictionary count, suggested spelling cuts. Edit if sung differently, then Set syllables.`;
       setSyncNotice('Suggestion only. Your display text, saved score and timings are unchanged.');
-    }catch(error){setSyncNotice(error.message);}
+    }catch(error){setSyncNotice(error.message,'error');}
     finally{timing.busy=false;refreshTimingPanel();}
   }
   for (const name of ['tap-mode','tap-cadence','tap-scope','tap-syllable-flow']) syncButton(name).addEventListener('change',()=>{if(name==='tap-mode'&&syncButton(name).value==='syllable')syncButton('loop').checked=!continuousPass();refreshTapPanel();});
@@ -1300,7 +1301,7 @@
   syncButton('syllable-retake').addEventListener('click',()=>{getMedia()?.pause();state.auditionLoop=null;discardTapTake();void armTapTake();});
   syncButton('syllable-hear').addEventListener('click',hearSyllableTake);
   syncButton('syllable-next').addEventListener('click',keepSyllableAndNext);
-  syncButton('phrase-suggest').addEventListener('click',async()=>{if(timing.busy||tapping.take)return;timing.busy=true;refreshTimingPanel();try{await preparePhraseSyllables();setSyncNotice('Dictionary suggestions prepared in preview. Inspect the | cuts, then Start phrase take. Unknown words remain unsplit.');}catch(error){setSyncNotice(error.message);}finally{timing.busy=false;refreshTimingPanel();}});
+  syncButton('phrase-suggest').addEventListener('click',async()=>{if(timing.busy||tapping.take)return;timing.busy=true;refreshTimingPanel();try{await preparePhraseSyllables();setSyncNotice('Dictionary suggestions prepared in preview. Inspect the | cuts, then Start phrase take. Unknown words remain unsplit.');}catch(error){setSyncNotice(error.message,'error');}finally{timing.busy=false;refreshTimingPanel();}});
   syncButton('tap-discard').addEventListener('click', restartTranscript);
   syncButton('tap-segment').addEventListener('click', setTapSyllables);
   syncButton('tap-suggest').addEventListener('click',suggestTapSyllables);
@@ -1346,7 +1347,7 @@
       performanceTake.armed = true; performanceTake.binding = binding; performanceTake.laneId = phrase.laneId; performanceTake.rate = media.playbackRate;
       timing.view = 'proposed'; timing.auditioned = false; state.scoreSignature = '';
       setSyncNotice('Effect keys are live for this vocal track: 1 Pulse, 2 Tilt, 3 Shake, 0 Clear. Pause or Stop to add them to the preview.');
-    } catch (error) { setSyncNotice(error.message); }
+    } catch (error) { setSyncNotice(error.message,'error'); }
     finally { timing.busy = false; refreshTimingPanel(); syncButton('effect-stop').focus(); }
   }
   function markEffect(type, event = {}) {
@@ -1371,7 +1372,7 @@
       const result = await timingRequest('LV_TIMING_TUNE',{operations});
       timing.draft = result.preview; discardEffects(); timing.auditioned = false;
       setSyncNotice('Effects added to the preview. Save timings keeps them.');
-    } catch (error) { setSyncNotice(error.message); }
+    } catch (error) { setSyncNotice(error.message,'error'); }
     finally { timing.busy = false; refreshTimingPanel(); }
   }
   syncButton('effect-start').addEventListener('click', startEffects);
@@ -1427,7 +1428,7 @@
       const result = current.preview ? current : await timingRequest('LV_TIMING_PREPARE', { fromSaved: true });
       timing.draft = result.preview; timing.phraseIndex = 0; timing.view = 'proposed'; timing.dirty = false; timing.auditioned = false;
       setSyncNotice(current.preview ? 'Resumed your unsaved preview. Record or refine timings, then audition and Save timings.' : 'Your saved lyrics and timings are ready. Record or refine a take, then audition and Save timings.');
-    } catch (error) { setSyncNotice(error.message); }
+    } catch (error) { setSyncNotice(error.message,'error'); }
     finally { timing.busy = false; refreshTimingPanel(); }
   }
   function discardTimingLocal() {
@@ -1471,7 +1472,7 @@
       const result = await timingRequest('LV_TIMING_TUNE', { changes, allowProtected: syncButton('protected').checked });
       timing.draft = result.preview; timing.dirty = false; timing.auditioned = false; state.scoreSignature = '';
       setSyncNotice('Preview updated. Nothing saved. Audition the proposed timing again before applying.');
-    } catch (error) { setSyncNotice(error.message); }
+    } catch (error) { setSyncNotice(error.message,'error'); }
     finally { timing.busy = false; refreshTimingPanel(); }
   }
   async function auditionTiming() {
@@ -1496,7 +1497,7 @@
       const result = await timingRequest('LV_TIMING_APPLY');
       state.score = result.score; state.syncOffsetMs = result.score.offsetMs;
       discardTimingLocal(); setSyncNotice('Timings saved. Undo saved change restores the previous score and timing source.');
-    } catch (error) { setSyncNotice(error.message); }
+    } catch (error) { setSyncNotice(error.message,'error'); }
     finally { timing.busy = false; refreshTimingPanel(); }
   }
   syncButton('close').addEventListener('click', closeTimingReview);
@@ -1520,7 +1521,7 @@
       const result = await timingRequest('LV_TIMING_PREPARE', { fromSaved: true });
       timing.draft = result.preview; timing.view = 'proposed';
       setSyncNotice('Proposed changes discarded. You are editing your saved score again.');
-    } catch (error) { setSyncNotice(error.message); }
+    } catch (error) { setSyncNotice(error.message,'error'); }
     finally { timing.busy = false; refreshTimingPanel(); }
   });
   syncButton('light-editor').addEventListener('click', async()=>{
@@ -1531,7 +1532,7 @@
       if(timingTapPending())return;
     }
     try{await timingRequest('LV_LIGHT_EDITOR_OPEN');setSyncNotice('Lightweight editor opened. It shares this preview and controls this YouTube video.');}
-    catch(error){setSyncNotice(error.message);}
+    catch(error){setSyncNotice(error.message,'error');}
     refreshTimingPanel();
   });
   syncButton('export').addEventListener('click', () => {
@@ -1544,7 +1545,7 @@
     if (timing.busy || timing.draft) return;
     timing.busy = true; refreshTimingPanel();
     try { const result = await timingRequest('LV_SCORE_UNDO'); state.score = result.score; state.syncOffsetMs = result.score.offsetMs; state.scoreSignature = ''; setSyncNotice('Previous saved score restored.'); }
-    catch (error) { setSyncNotice(error.message); }
+    catch (error) { setSyncNotice(error.message,'error'); }
     finally { timing.busy = false; refreshTimingPanel(); }
   });
   syncPanel.addEventListener('keydown', event => {
@@ -1617,12 +1618,12 @@
       if(!timing.draft){
         if(tapPending()||timing.dirty||tapping.splitDirty)return;
         if(message.preview?.baseRevision!==state.score?.revision||message.preview?.baseHash!==state.score?.lyrics.contentHash)return;
-        try{LvScore.validateScore(message.preview.score);timing.draft=message.preview;timing.phraseIndex=Math.min(timing.phraseIndex,timing.draft.score.phrases.length-1);timing.auditioned=false;state.scoreSignature='';refreshTimingPanel();}catch(error){setSyncNotice(error.message);}return;
+        try{LvScore.validateScore(message.preview.score);timing.draft=message.preview;timing.phraseIndex=Math.min(timing.phraseIndex,timing.draft.score.phrases.length-1);timing.auditioned=false;state.scoreSignature='';refreshTimingPanel();}catch(error){setSyncNotice(error.message,'error');}return;
       }
       if(timing.draft.token!==message.preview?.token)return;
       if(message.preview.previewRevision<=timing.draft.previewRevision)return;
       if(tapPending()||timing.dirty||tapping.splitDirty){setSyncNotice('The preview changed in the lightweight editor. Your input is retained; finish or discard it before reopening Sync.');return;}
-      try{LvScore.validateScore(message.preview.score);timing.draft=message.preview;timing.auditioned=false;state.scoreSignature='';refreshTimingPanel();setSyncNotice('Preview updated in the lightweight editor. Saved timings remain unchanged.');}catch(error){setSyncNotice(error.message);}
+      try{LvScore.validateScore(message.preview.score);timing.draft=message.preview;timing.auditioned=false;state.scoreSignature='';refreshTimingPanel();setSyncNotice('Preview updated in the lightweight editor. Saved timings remain unchanged.');}catch(error){setSyncNotice(error.message,'error');}
       return;
     }
     if(message.type==='LV_TIMING_PREVIEW_CLOSED'){
@@ -1640,6 +1641,9 @@
       if (message.mediaKey !== LvScore.mediaKey({ url: location.href })) return;
       try {
         LvScore.validateScore(message.score);
+        // A different video in the same tab: park the old preview (it stays stored for its video) and follow the new one.
+        const switched = Boolean(timing.draft && LvScore.mediaKey(timing.draft.score.source) !== message.mediaKey);
+        if (switched) { discardTimingLocal(); transcript.dirty = false; transcript.shownFor = null; }
         if (timing.draft && (message.score.revision !== timing.draft.baseRevision || message.score.lyrics.contentHash !== timing.draft.baseHash)) {
           const retainedTake = tapping.take, retainedBinding = tapping.binding, retainedEffects = {...performanceTake,marks:[...performanceTake.marks]};
           discardTimingLocal();
@@ -1656,6 +1660,7 @@
         state.trackKey = message.mediaKey;
         state.syncOffsetMs = message.score.offsetMs;
         if (!syncPanel.hidden) refreshTimingPanel();
+        if (switched && !syncPanel.hidden) void openTimingReview();
         stage.style.setProperty('--lvx-score-scale', state.fontScale);
         preview.textContent = '';
         show();
@@ -2182,7 +2187,7 @@
   function youtubeMediaState() {
     if (!['www.youtube.com', 'youtube.com', 'm.youtube.com'].includes(location.hostname) || !globalThis.LvYoutubeMedia) return null;
     const media = getMedia();
-    return LvYoutubeMedia.inspect({ url: location.href, canonicalUrl: document.querySelector('link[rel="canonical"]')?.href, isoDuration: document.querySelector('meta[itemprop="duration"]')?.content, playerClassName: document.querySelector('#movie_player')?.className, mediaDurationSec: media?.duration, mediaCurrentTimeSec: media?.currentTime, mediaPaused: media?.paused, mediaSeeking: media?.seeking });
+    return LvYoutubeMedia.inspect({ url: location.href, canonicalUrl: document.querySelector('link[rel="canonical"]')?.href, isoDuration: document.querySelector('meta[itemprop="duration"]')?.content, playerDurationText: document.querySelector('#movie_player .ytp-time-duration')?.textContent, playerClassName: document.querySelector('#movie_player')?.className, mediaDurationSec: media?.duration, mediaCurrentTimeSec: media?.currentTime, mediaPaused: media?.paused, mediaSeeking: media?.seeking });
   }
 
   /* ══════════════════════════════════════
@@ -2737,7 +2742,7 @@
           if (tapping.take?.status === 'armed') stopTapTake('Take stopped: the video changed. Completed marks are retained.');
           stage.textContent = '';
           state.auditionLoop = null;
-          if (!syncPanel.hidden) { setSyncNotice('The video changed. Close this preview and reopen Sync for the current video.'); refreshTimingPanel(); }
+          if (!syncPanel.hidden && !syncNotice.textContent.startsWith('The video changed')) { setSyncNotice('The video changed. Sync switches to this video as soon as its lyrics load; the other video’s unsaved preview is kept for when you go back.','warn'); refreshTimingPanel(); }
           state.rafId = requestAnimationFrame(tick);
           return;
         }
