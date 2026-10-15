@@ -268,6 +268,25 @@
   /* Display picker: one tile per theme, animated with this video's own lyrics. */
   const themePicker = document.createElement('div');
   themePicker.className = 'lvx-theme-picker'; themePicker.hidden = true;
+  let choreography={mode:'classic',upsideDown:false},previewPlaying=false,previewFrame=0,previewTime=1600,previewLast=0,previewTheme=state.theme;
+  const choreographyPlans=new WeakMap(),choreographyMeasure=document.createElement('canvas').getContext('2d');
+  function setChoreography(value){choreography={mode:['classic','fall','puzzle'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
+  function previewTick(now){
+    if(themePicker.hidden||!previewPlaying||document.hidden){previewFrame=0;previewLast=0;return;}
+    if(previewLast)previewTime+=Math.min(now-previewLast,100);previewLast=now;renderStylePreview(true);previewFrame=requestAnimationFrame(previewTick);
+  }
+  function renderStylePreview(activeOnly=false){
+    for(const tile of themePicker.querySelectorAll('.lvx-theme-tile')){
+      const selected=tile.dataset.theme===previewTheme;if(activeOnly&&!selected)continue;tile.dataset.previewing=String(selected);
+      if(activeOnly&&(tile.offsetTop+tile.offsetHeight<themePicker.scrollTop||tile.offsetTop>themePicker.scrollTop+themePicker.clientHeight))continue;
+      if(choreography.mode==='classic')continue;
+      const line=tile.querySelector('.lvx-tile-line'),words=[...line.children].map((n,i)=>({text:n.textContent,startMs:500+i*450,endMs:950+i*450,syllables:[...n.children].map((part,j)=>({id:part.dataset.syllable,text:part.textContent,startMs:500+i*450+j*450/n.children.length}))}));
+      const clock=selected?previewTime%(words.length*450+1600):words.length*450+700;
+      choreographLine(line,words,clock,tile.querySelector('.lvx-tile-stage').clientWidth-16,110,14);
+    }
+  }
+  function setPreviewPlaying(value){previewPlaying=value;cancelAnimationFrame(previewFrame);previewFrame=0;previewLast=0;themePicker.dataset.playing=String(value);const b=themePicker.querySelector('[data-preview-play]');if(b){b.textContent=value?'Pause preview':'Play preview';b.setAttribute('aria-pressed',String(value));}renderStylePreview();if(value&&!themePicker.hidden)previewFrame=requestAnimationFrame(previewTick);}
+  document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelAnimationFrame(previewFrame);previewFrame=0;previewLast=0;themePicker.dataset.playing='false';}else if(previewPlaying&&!themePicker.hidden)setPreviewPlaying(true);});
   themePicker.setAttribute('role', 'dialog'); themePicker.setAttribute('aria-label', 'Lyric display style');
   function themePreviewWords() {
     const score = typeof timing !== 'undefined' && timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score;
@@ -275,10 +294,10 @@
       const now = getMediaTimeMs() - score.offsetMs;
       const visible = p => p.words.some(w => !w.excluded);
       const phrase = score.phrases.find(p => visible(p) && now >= p.startMs && now < p.endMs) || score.phrases.find(p => visible(p) && p.startMs >= now) || score.phrases.find(visible);
-      if (phrase) return phrase.words.filter(w => !w.excluded).slice(0, 6).map(w => w.text);
+      if (phrase) return phrase.words.filter(w => !w.excluded).slice(0, 6);
     }
     const line = state.lines?.[Math.max(0, state.currentIndex)]?.text;
-    return (line || 'Your lyrics, your style').split(/\s+/).slice(0, 6);
+    return (line || 'Your lyrics, your style').split(/\s+/).slice(0, 6).map(text=>({text}));
   }
   function buildThemePicker() {
     bounds.hidden=true;
@@ -287,6 +306,10 @@
     const heading = document.createElement('div'); heading.className = 'lvx-theme-picker-head';
     heading.textContent = 'Display style · previews use this video\u2019s lyrics';
     themePicker.append(heading);
+    const motionControls=document.createElement('div');motionControls.className='lvx-motion-controls';
+    motionControls.innerHTML='<label>Motion <select aria-label="Lyric choreography"><option value="classic">Classic</option><option value="fall">Falling words</option><option value="puzzle">Word puzzle</option></select></label><label><input type="checkbox"> Allow upside-down words</label><button type="button" data-preview-play>Play preview</button><span>Hover or focus a style to compare. Only one preview plays.</span>';
+    const motionSelect=motionControls.querySelector('select'),upside=motionControls.querySelector('input');motionSelect.value=choreography.mode;upside.checked=choreography.upsideDown;upside.disabled=choreography.mode!=='puzzle';
+    motionSelect.onchange=()=>{setChoreography({...choreography,mode:motionSelect.value});buildThemePicker();};upside.onchange=()=>{setChoreography({...choreography,upsideDown:upside.checked});renderStylePreview();};motionControls.querySelector('button').onclick=()=>setPreviewPlaying(!previewPlaying);themePicker.append(motionControls);
     const bloomLabel=document.createElement('label');bloomLabel.className='lvx-bloom-setting';
     const bloomToggle=document.createElement('input');bloomToggle.type='checkbox';bloomToggle.checked=bloomEnabled;
     bloomToggle.onchange=()=>{bloomEnabled=bloomToggle.checked;refreshBeatPulse(getMediaTimeMs());chrome.storage.local.set({lvxBloomEnabled:bloomEnabled}).catch(error=>setHud('Bloom changed in this tab; preference could not save: '+error.message,true,true));};
@@ -305,8 +328,9 @@
       const stageEl = document.createElement('span'); stageEl.className = 'lvx-tile-stage';
       const line = document.createElement('span'); line.className = 'lvx-tile-line';
       const cycle = words.length * 0.32 + 1.2;
-      words.forEach((text, i) => {
-        const word = document.createElement('span'); word.className = 'lvx-tile-word'; word.textContent = text;
+      words.forEach((item, i) => {
+        const word = document.createElement('span'); word.className = 'lvx-tile-word';
+        if(choreography.mode==='puzzle'&&item.displayMode!=='whole'&&item.syllables?.length&&(!item.spokenText||item.spokenText===item.text)){item.syllables.forEach((part,j)=>{const node=document.createElement('span');node.dataset.syllable='preview-'+i+'-'+j;node.textContent=part.text;node.style.display='inline-block';word.append(node);});}else word.textContent=item.text;
         word.style.animationDelay = `${(i * 0.32).toFixed(2)}s`; word.style.animationDuration = `${cycle.toFixed(2)}s`;
         line.append(word, document.createTextNode(' '));
       });
@@ -314,13 +338,16 @@
       const label = document.createElement('span'); label.className = 'lvx-tile-name'; label.textContent = THEME_LABELS[name] || name.toUpperCase();
       tile.append(stageEl, label);
       tile.addEventListener('click', () => { applyTheme(name); setHud(`Display: ${THEME_LABELS[name]}`, false, false); toggleThemePicker(false); });
+      const compare=()=>{previewTheme=name;previewTime=previewPlaying?0:1600;previewLast=0;renderStylePreview();};tile.addEventListener('pointerenter',compare);tile.addEventListener('focus',compare);
       grid.append(tile);
     }
+    themePicker.dataset.motion=choreography.mode;setPreviewPlaying(previewPlaying);
   }
   function toggleThemePicker(force) {
     const open = force ?? themePicker.hidden;
     if (open) buildThemePicker();
     themePicker.hidden = !open; themeButton.setAttribute('aria-expanded', String(open));
+    if(open)setPreviewPlaying(previewPlaying);else setPreviewPlaying(false);
     if(!open)bounds.hidden=true;
     if (open) themePicker.querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
   }
@@ -1990,7 +2017,8 @@
 
   /* Load saved preferences (theme, font scale, lite mode) */
   try {
-    chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement','lvxBloomEnabled'], (result) => {
+    chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement','lvxBloomEnabled','lvxChoreography'], (result) => {
+      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={mode:['classic','fall','puzzle'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true};}
       bloomEnabled=result?.lvxBloomEnabled!==false;
       if(result?.lvxPlacement)try{applyPlacement(result.lvxPlacement);}catch(error){setHud(error.message,true,true);}
       if (result && result.lvxTheme && THEMES.includes(result.lvxTheme)) {
@@ -3260,6 +3288,7 @@
   }
 
   function renderCaptureScore() {
+    stage.classList.remove('lvx-choreography-stage');
     stage.classList.add('lvx-score-stage');
     const phrase=timingPhrase(), take=tapping.take, unit=take.units[take.index];
     if (!phrase) return;
@@ -3310,8 +3339,28 @@
   }
   let beatDisplayCache={score:null,map:null,ends:{}};
   const beatStyledNodes=new Set();
+  function choreographLine(line,words,clock,width,height,maxFont){
+    if(typeof LvChoreography==='undefined'||choreography.mode==='classic')return;
+    const style=getComputedStyle(line),key=[width,height,maxFont,style.fontFamily,style.fontWeight,choreography.mode,choreography.upsideDown,words.map(w=>w.text).join('|')].join(':');
+    let plan=choreographyPlans.get(line);
+    if(plan?.key!==key){
+      const measure=(text,font)=>{choreographyMeasure.font=`${style.fontWeight} ${font}px ${style.fontFamily}`;return choreographyMeasure.measureText(style.textTransform==='uppercase'?text.toUpperCase():text).width+Math.max(0,parseFloat(style.letterSpacing)||0)*text.length;};
+      plan={key,slots:LvChoreography.layout(words,width,height,measure,{...choreography,maxFont})};choreographyPlans.set(line,plan);
+      Object.assign(line.style,{width:width+'px',height:height+'px',position:'relative',maxWidth:'100%'});
+      for(const slot of plan.slots){const node=line.children[slot.index];if(!node)continue;Object.assign(node.style,{position:'absolute',left:(slot.x-slot.width/2)+'px',top:(slot.y-slot.height/2)+'px',width:slot.width+'px',height:slot.height+'px',fontSize:slot.font+'px',lineHeight:'1.3',rotate:slot.angle+'deg'});}
+    }
+    const reduced=bloomMotion.matches;
+    words.forEach((word,i)=>{const node=line.children[i],slot=plan.slots[i];if(!node||!slot)return;const arrival=LvChoreography.arrival(clock,word.startMs,500,reduced),dy=choreography.mode==='fall'?(1-arrival)*-Math.min(height*.42,slot.font*3):0;node.style.translate=`0 ${dy.toFixed(2)}px`;node.style.opacity=clock<word.startMs?String(.15*arrival):'';
+      if(choreography.mode==='puzzle'){
+        const parts=[...node.querySelectorAll('[data-syllable]')];
+        if(!parts.length)node.style.translate=`0 ${(-(1-arrival)*slot.font).toFixed(2)}px`;
+        for(const part of parts){const syllable=word.syllables?.find(s=>s.id===part.dataset.syllable);if(!syllable)continue;const start=Math.max(word.startMs,syllable.startMs),lead=Math.min(350,Math.max(1,start-word.startMs)),a=LvChoreography.arrival(clock,start,lead,reduced);part.style.translate=`0 ${(-(1-a)*slot.font*.85).toFixed(2)}px`;part.style.rotate=((1-a)*90).toFixed(2)+'deg';part.style.opacity=clock<start?String(.12*a):'';}
+      }
+    });
+  }
   function renderScore(mediaMs) {
     if (tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete') && timing.draft && !syncPanel.hidden) {renderCaptureScore();return;}
+    stage.classList.toggle('lvx-choreography-stage',choreography.mode!=='classic');
     const score = syllableTakeScore() || (timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score);
     if(beatDisplayCache.score!==score||beatDisplayCache.map!==tempo.map)beatDisplayCache={score,map:tempo.map,ends:LvBeatTrack.displayEnds(score,tempo.map)};
     const active = LvScore.activeAt(score, mediaMs,{displayEnds:beatDisplayCache.ends});
@@ -3395,9 +3444,11 @@
           applyReveal(part, syllable, mediaMs - score.offsetMs);
         }
       }
+      if(choreography.mode!=='classic')choreographLine(line,phrase.words,atMs,Math.max(1,stage.clientWidth-32),Math.max(1,(stage.clientHeight-32)/Math.max(1,active.phrases.length)-12),Math.min(placement.maxFontPx,laneFont(phrase,score)));
     }
     renderBeatEffects(score,mediaMs);
   }
+  function laneFont(phrase,score){return score.lanes.find(l=>l.id===phrase.laneId)?.role==='backing'?40:80;}
 
   function renderBeatEffects(score,sourceMs){
     const cues=new Map((score.beatCues||[]).map(c=>[c.id,c]));
@@ -4420,6 +4471,7 @@
      TEARDOWN / SHOW
      ══════════════════════════════════════ */
   function teardown() {
+    setPreviewPlaying(false);
     hudSizeObserver.disconnect();
     cancelBeatClicks();if(beatClick.audio){beatClick.audio.close().catch(()=>{});beatClick.audio=null;}
     if (tapping.audio) { tapping.audio.close().catch(() => {}); tapping.audio = null; }

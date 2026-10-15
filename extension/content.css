@@ -2484,3 +2484,17 @@
 #lvx-root .lvx-bloom-setting{display:flex;align-items:center;gap:8px;min-height:36px;margin-bottom:10px;color:#e1e9ee;font:12px/1.4 system-ui,sans-serif}
 #lvx-root .lvx-bloom-setting input{accent-color:#c7dda8;width:18px;height:18px}
 @media(prefers-reduced-motion:reduce){#lvx-root .lvx-hud:has(.lvx-speed-group),#lvx-root .lvx-sync-panel,#lvx-root .lvx-theme-picker,#lvx-root .lvx-shortcuts-panel{box-shadow:0 5px 22px #000b}}
+
+/* Choreography reserves each word's footprint; cues still use the saved clock. */
+#lvx-root .lvx-choreography-stage{padding:16px;gap:12px;overflow:hidden}
+#lvx-root .lvx-choreography-stage .lvx-score-phrase{flex-shrink:0;text-wrap:nowrap}
+#lvx-root .lvx-choreography-stage .lvx-score-word{white-space:nowrap;transform-origin:center;transition:none}
+#lvx-root .lvx-motion-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px;font:12px system-ui,sans-serif;color:#e1e9ee}
+#lvx-root .lvx-motion-controls label{display:flex;align-items:center;gap:6px}
+#lvx-root .lvx-motion-controls select,#lvx-root .lvx-motion-controls button{padding:8px;background:#17232c;color:#f4f7fa;border:1px solid #8195a3;border-radius:5px;min-height:36px;font:inherit}
+#lvx-root .lvx-motion-controls span{color:#c0cdd5;font-size:11px}
+#lvx-root .lvx-theme-picker .lvx-tile-word{animation-play-state:paused}
+#lvx-root .lvx-theme-picker[data-playing=true] .lvx-theme-tile[data-previewing=true] .lvx-tile-word{animation-play-state:running}
+#lvx-root .lvx-theme-picker:not([data-motion=classic]) .lvx-tile-word{animation:none}
+#lvx-root .lvx-theme-picker:not([data-motion=classic]) .lvx-tile-stage{height:126px}
+#lvx-root .lvx-theme-tile[data-previewing=true] .lvx-tile-name{color:#e5f2d7;text-decoration:underline;text-underline-offset:3px}
