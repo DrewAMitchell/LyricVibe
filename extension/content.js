@@ -1790,11 +1790,13 @@
     syncButton('next').disabled = timing.busy || !draft || timing.phraseIndex >= draft.score.phrases.length - 1;
     for (const name of ['audition', 'tune', 'reset']) syncButton(name).disabled = timing.busy || !draft;
     syncButton('apply').disabled = timing.busy || !draft || timing.dirty || tapping.splitDirty || tapping.take?.status==='armed' || performanceTake.armed || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source);
-    const saveReason = timing.busy ? 'Updating preview…' : !draft ? 'Open a preview to refine this recording.' : LvScore.mediaKey({url:location.href})!==LvScore.mediaKey(state.score.source)?'Return to this preview’s video before saving.':timing.dirty?'Use your typed word times first: Exact word timings → Use these times.':tapping.splitDirty?'Use Set syllables for your typed spelling first.':tapping.take?.status==='armed'||performanceTake.armed?'Stop the recording pass before saving.':timing.saveError||captureSaveWarning()||'Ready to save this iteration. Unmatched capture remains backed up.';
+    const saveReason = timing.busy ? 'Updating preview…' : !draft ? timing.openError||'Choose Prepare preview & open editor to start editing this video.' : LvScore.mediaKey({url:location.href})!==LvScore.mediaKey(state.score.source)?'Return to this preview’s video before saving.':timing.dirty?'Use your typed word times first: Exact word timings → Use these times.':tapping.splitDirty?'Use Set syllables for your typed spelling first.':tapping.take?.status==='armed'||performanceTake.armed?'Stop the recording pass before saving.':timing.saveError||captureSaveWarning()||'Ready to save this iteration. Unmatched capture remains backed up.';
     syncButton('apply').setAttribute('aria-description', saveReason);
     syncPanel.querySelector('.lvx-sync-save-status').textContent=saveReason;
     const saveWrap=syncPanel.querySelector('.lvx-save-wrap'),blocked=syncButton('apply').disabled||Boolean(timing.saveError)||Boolean(captureSaveWarning());saveWrap.dataset.blocked=String(blocked);saveWrap.tabIndex=blocked?0:-1;saveWrap.setAttribute('aria-label',blocked?'Save needs attention: '+saveReason:'Save timings');syncPanel.querySelector('.lvx-save-tooltip').textContent=blocked?saveReason:'';
-    syncButton('light-editor').disabled=timing.busy||!draft||timing.dirty||tapping.splitDirty||effectPending();
+    const editorReason=timing.busy?'Updating preview…':timing.dirty?'Use your typed word times first.':tapping.splitDirty?'Use Set syllables for your typed spelling first.':effectPending()?'Use or discard your recorded effects first.':'';
+    syncButton('light-editor').disabled=Boolean(editorReason);syncButton('light-editor').title=editorReason||'Open the editor for this video; resume or prepare its preview automatically.';
+    syncButton('light-editor').textContent=draft?'↗ Open lightweight editor':'↗ Prepare preview & open editor';
     syncButton('export').disabled = !draft && !state.score;
     syncButton('take-export').disabled = !tapping.take;
     syncButton('undo').disabled = timing.busy || Boolean(draft);
@@ -1812,13 +1814,13 @@
     if (timing.busy) return;
     if (!syncPanel.hidden && timing.draft) { syncPanel.focus(); return; }
     timing.priorLoop = state.auditionLoop; syncPanel.hidden = false; timing.busy = true; refreshTimingPanel();
-    setSyncNotice('Opening your saved lyrics and timings…');
+    timing.openError=null;setSyncNotice('Opening your saved lyrics and timings…');
     try {
       const current=await timingRequest('LV_TIMING_CURRENT');
       const result = current.preview ? current : await timingRequest('LV_TIMING_PREPARE', { fromSaved: true });
       timing.draft = result.preview; timing.phraseIndex = 0; timing.view = 'proposed'; timing.dirty = false; timing.auditioned = false;
       setSyncNotice(current.preview ? 'Resumed your unsaved changes. Keep recording or refining; Save timings when you like.' : 'Your saved lyrics and timings are ready. Record or refine a take; Save timings when you like.');
-    } catch (error) { setSyncNotice(error.message,'error'); }
+    } catch (error) { timing.openError=error.message;setSyncNotice(error.message,'error'); }
     finally { timing.busy = false; refreshTimingPanel(); }
   }
   function discardTimingLocal() {
@@ -1924,7 +1926,8 @@
     finally { timing.busy = false; refreshTimingPanel(); }
   });
   syncButton('light-editor').addEventListener('click', async()=>{
-    if(timing.busy||!timing.draft||timing.dirty||tapping.splitDirty||effectPending())return;
+    if(timing.busy||timing.dirty||tapping.splitDirty||effectPending())return;
+    if(!timing.draft){await openTimingReview();if(!timing.draft)return;}
     if(tapping.take){
       getMedia()?.pause();stopTapTake();
       if(tapCount(tapping.take))await useTapTake();else discardTapTake();

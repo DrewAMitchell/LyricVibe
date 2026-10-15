@@ -86,9 +86,15 @@
     return url.searchParams.get('sourceTab') === String(tabId) && url.searchParams.get('mediaKey') === key;
   }
   function sourceOverlayBound(sender, tabId, key) {
-    return sender.id === chrome.runtime.id && sender.tab?.id === tabId &&
-      LvScore.mediaKey({ url: sender.url || sender.tab.url }) === key &&
-      LvScore.mediaKey({ url: sender.tab.url }) === key;
+    // Chrome retains the document URL in sender.url across YouTube SPA navigation.
+    // Bind the top-frame extension caller to its current tab and liveIdentity above.
+    try {
+      const origin=new URL(sender.url || sender.tab?.url);
+      return sender.id===chrome.runtime.id && sender.tab?.id===tabId &&
+        (sender.frameId===undefined || sender.frameId===0) && origin.protocol==='https:' &&
+        ['www.youtube.com','music.youtube.com','youtube.com'].includes(origin.hostname) &&
+        LvScore.mediaKey({url:sender.tab.url || sender.url})===key;
+    } catch { return false; }
   }
   async function refreshDuration(key, record, hints) {
     const durationMs = Math.round((hints.duration || 0) * 1000);
@@ -100,8 +106,7 @@
     return record.score;
   }
   function timingControlBound(sender, tabId, key) {
-    return sender.id === chrome.runtime.id && (editorSourceBound(sender, tabId, key) ||
-      (sender.tab?.id === tabId && LvScore.mediaKey({ url: sender.url || sender.tab.url }) === key));
+    return sender.id === chrome.runtime.id && (editorSourceBound(sender, tabId, key) || sourceOverlayBound(sender,tabId,key));
   }
   async function ensure(tabId, payload) {
     const requested = LvScore.mediaKey(payload.hints || {});
@@ -207,7 +212,7 @@
       if (message.type === 'LV_SCORE_GET') return { ok: true, score: record.score, review: record.review || [], diagnostics: record.diagnostics || null, tabId, mediaKey: key, analysis: await root.LvAnalysis?.analysisStatus() };
       if (message.expectedRevision !== record.score.revision) throw fail('REVISION_CONFLICT', 'The score changed. Reload it before editing.');
       if (message.type.startsWith('LV_TIMING_')) {
-        if (!timingControlBound(sender, tabId, key)) throw fail('SOURCE_REQUIRED', 'Open Sync in this video’s extension overlay.');
+        if (!timingControlBound(sender, tabId, key)) throw fail('SOURCE_REQUIRED', 'This editor is not connected to the current video. Open Edit timing on that video to reconnect.');
         if (message.lyricsHash !== record.score.lyrics.contentHash) throw fail('LYRIC_REVISION_MISMATCH', 'Saved lyric revision changed. Refresh the preview.');
         const previewKey = key;
         if (message.type === 'LV_TIMING_PREPARE') {

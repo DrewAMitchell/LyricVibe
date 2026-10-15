@@ -778,3 +778,13 @@ test('a legacy tab-scoped session preview migrates to durable storage on first r
   assert.ok(h.values[`lvTimingPreview:youtube:${ID_A}`]);
   assert.equal(h.sessionValues[`lvTimingPreview:7:youtube:${ID_A}`],undefined);
 });
+
+test('same-document YouTube navigation can prepare and open the current video, but another frame or stale source cannot', async()=>{
+ const h=makeHarness();await h.ensure();h.tabs.get(1).url='https://www.youtube.com/watch?v='+ID_B;const score=await h.ensure(1,ID_B);
+ const sender={id:'test-extension',frameId:0,url:'https://www.youtube.com/watch?v='+ID_A,tab:{id:1,url:h.tabs.get(1).url}},envelope={tabId:1,mediaKey:'youtube:'+ID_B,expectedRevision:score.revision,lyricsHash:score.lyrics.contentHash};
+ const prepared=await h.dispatch({type:'LV_TIMING_PREPARE',...envelope,fromSaved:true},sender);assert.equal(prepared.ok,true);assert.equal(prepared.preview.score.source.videoId,ID_B);
+ assert.equal((await h.dispatch({type:'LV_LIGHT_EDITOR_OPEN',...envelope},sender)).ok,true);assert.equal(h.popupWindows.length,1);
+ assert.equal((await h.dispatch({type:'LV_TIMING_CURRENT',...envelope},{...sender,frameId:2})).error.code,'SOURCE_REQUIRED');
+ assert.equal((await h.dispatch({type:'LV_TIMING_CURRENT',...envelope,mediaKey:'youtube:'+ID_A},sender)).error.code,'SOURCE_CHANGED');
+ assert.equal((await h.dispatch({type:'LV_TIMING_CURRENT',...envelope},{...sender,url:'https://unrelated.example/'})).error.code,'SOURCE_REQUIRED');
+});
