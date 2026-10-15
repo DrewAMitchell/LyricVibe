@@ -51,10 +51,13 @@ let server,browser;
   await page.evaluate(url=>history.replaceState({},'',url),next);
   const retained=await evaluate(()=>{const q=__qa;q.timing.draft.previewRevision=1;const before=JSON.stringify(q.timing.draft);const score=structuredClone(q.state.score);score.source.videoId='TESTVIDEO02';let reply;for(const fn of __messageListeners)fn({type:'LV_SCORE_UPDATED',mediaKey:'youtube:TESTVIDEO02',score},{},r=>reply=r);return {unchanged:before===JSON.stringify(q.timing.draft),code:reply?.error?.code};});
   assert.deepEqual(retained,{unchanged:true,code:'UNSAVED_SOURCE'});
+  assert.equal(await evaluate(()=>{const q=__qa,before=JSON.stringify(q.timing.draft);for(const fn of __messageListeners)fn({type:'LV_TIMING_PREVIEW_CLOSED',mediaKey:'youtube:TESTVIDEO02'},{},()=>{});return before===JSON.stringify(q.timing.draft)}),true,'another video cannot close retained preview');
   await page.evaluate(url=>history.replaceState({},'',url),source);
+  accept=true;await evaluate(()=>{__qa.transcript.dirty=true;return __qa.closeTimingReview()});
+  assert.equal(await evaluate(()=>__qa.hasUnsavedWork()),false,'explicit discard clears typed lyrics too');
   // Explicit Leave is honored once, without a second prompt from the SPA navigate event.
   await evaluate(()=>{__qa.timing.draft=__fresh();__qa.timing.draft.previewRevision=1});accept=true;
   const leaveDialogs=dialogs.length;await page.locator('#next').click();assert.equal(page.url(),next);assert.equal(dialogs.length,leaveDialogs+1);
-  const proof={observedAt:new Date().toISOString(),basis:'Actual content.js in Chrome isolated world; mocked source media/worker/storage; real navigation and native dialogs.',checks:['clean preview','same-video params','armed take','raw stopped take','used preview','typed times','lyrics','effects','syllable spelling','link blocked before host','ended auto-next blocked','native beforeunload cancel','failed save retained','successful save clean','Back cancelled','close Sync cancelled','unavoidable switch retains draft','explicit leave single prompt'],dialogs};
+  const proof={observedAt:new Date().toISOString(),basis:'Actual content.js in Chrome isolated world; mocked source media/worker/storage; real navigation and native dialogs.',checks:['clean preview','same-video params','armed take','raw stopped take','used preview','typed times','lyrics','effects','syllable spelling','link blocked before host','ended auto-next blocked','native beforeunload cancel','failed save retained','successful save clean','Back cancelled','close Sync cancelled','unavoidable switch retains draft','other-video close ignored','explicit discard clears typed lyrics','explicit leave single prompt'],dialogs};
   fs.writeFileSync(path.join(root,'docs/unsaved-navigation-proof.json'),JSON.stringify(proof,null,2)+'\n');console.log(JSON.stringify(proof));
 })().catch(error=>{console.error(error.stack);process.exitCode=1}).finally(async()=>{await browser?.close();await server?.close()});

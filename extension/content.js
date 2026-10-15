@@ -1921,7 +1921,8 @@
     if (hasUnsavedWork() && !window.confirm('Discard your unsaved take and preview edits and close Sync? Choose Cancel to keep editing, then use Save timings.')) return;
     if (timing.draft) await timingRequest('LV_TIMING_CANCEL').catch(() => {});
     if (tapping.audio) { tapping.audio.close().catch(() => {}); tapping.audio = null; }
-    discardTimingLocal(); syncPanel.hidden = true; refreshTimingPanel();
+    discardTimingLocal(); transcript.dirty = false; transcript.shownFor = null;
+    syncPanel.hidden = true; refreshTimingPanel();
   }
   function navigateTiming(delta) {
     if (tapPending() || tapping.splitDirty) { setSyncNotice('Use the take or set the syllable spelling before changing phrases.'); return false; }
@@ -2126,7 +2127,7 @@
       return;
     }
     if(message.type==='LV_TIMING_PREVIEW_CLOSED'){
-      if(message.mediaKey===LvScore.mediaKey({url:location.href})&&!timing.busy&&!tapPending()&&!timing.dirty){discardTimingLocal();setSyncNotice('Preview closed. Saved timings remain available.');}return;
+      if(message.mediaKey===LvScore.mediaKey({url:location.href})&&message.mediaKey===LvScore.mediaKey(timing.draft?.score.source)&&!timing.busy&&!tapPending()&&!timing.dirty){discardTimingLocal();setSyncNotice('Preview closed. Saved timings remain available.');}return;
     }
 
     if (message.type === 'LV_ANALYSIS_CLOCK') {
