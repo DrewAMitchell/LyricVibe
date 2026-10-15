@@ -121,6 +121,15 @@ test('an untimed fallback is rechecked after cooldown and upgrades after worker 
   assert.equal(result.match.id,222);assert.ok(result.lyrics.synced);
 });
 
+test('track detection does not bypass plain-cache recovery when artist metadata is present', async () => {
+  const h=harness();h.context.want=VIDEO;
+  h.context.seed={...h.payload,hints:VIDEO,lyrics:{synced:'',plain:'Cached offline words'}};
+  h.run("lyricsCache.set(cacheKey('Sample Track','Tëst Artist',want),seed);getPageHints=async()=>want;sendToTab=()=>{};globalThis.published=[];handleRecognitionResult=async(tab,payload)=>published.push(payload)");
+  await h.run('_detectAndSyncInner(1,null,Date.now())');
+  assert.equal(h.context.published[0].match.id,222);
+  assert.ok(h.context.published[0].lyrics.synced);
+});
+
 test('legacy plain cache retries once, survives provider failure and cools down without losing words', async () => {
   const h=harness();h.context.want=VIDEO;
   const fallback={...h.payload,hints:VIDEO,lyrics:{synced:'',plain:'Offline words remain available'}};

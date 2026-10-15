@@ -1083,7 +1083,7 @@
       if (units[units.indexOf(item)+1]?.wordId!==item.wordId && !/[-\u2010\u2011]$/u.test(item.spelling)) container.append(document.createTextNode(' '));
     }
     renderUpcomingLyrics(syncPanel.querySelector('.lvx-upcoming-phrases'),phrase);
-    refreshPerformClock((getMedia()?.currentTime || 0)*1000-state.score.offsetMs);
+    if(state.score)refreshPerformClock((getMedia()?.currentTime || 0)*1000-state.score.offsetMs);
   }
   function appendCaptureReference(span,item,phrase,mark=null) {
     const word=phrase.words.find(w=>w.id===item.wordId);if(!word)return;
@@ -1214,6 +1214,7 @@
   }
   function setCaptureText(selector,value){const element=syncPanel.querySelector(selector);if(element.textContent!==value)element.textContent=value;}
   function refreshPerformClock(now) {
+    if(!state.score)return;
     if(tapping.take?.status==='armed'&&!timing.busy){
       const pinned=tapping.backIndex!==null&&tapping.backIndex!==undefined&&tapping.backAnchorMs!==null&&now+state.score.offsetMs<=tapping.backAnchorMs;
       const followed=pinned?tapping.take:LvTapTiming.followPlayback(tapping.take,Math.max(0,Math.round(now+(rawTake(tapping.take)?state.score.offsetMs:0))),{rewind:tapping.listening});

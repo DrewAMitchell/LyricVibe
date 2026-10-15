@@ -197,6 +197,11 @@ function cacheKey(track, artist, hints) {
     (track || '').toLowerCase().trim(), lookupScope(hints)])}`;
 }
 
+function canUseCachedLyrics(cached) {
+  return !!cached && (!!cached.lyrics?.synced || isApiDegraded('lrclib') ||
+    Date.now() - (cached._lyricsCheckedAt || 0) < 60000);
+}
+
 async function getCachedLyrics(track, artist, hints) {
   const key = cacheKey(track, artist, hints);
 
@@ -519,7 +524,7 @@ async function _detectAndSyncInner(tabId, prevKey, detectStart) {
     const cacheStale = prevKey && currentKey === prevKey;
     if (!cacheStale) {
       const cached = await getCachedLyrics(hints.track, hints.artist, hints);
-      if (cached) {
+      if (canUseCachedLyrics(cached)) {
         if (cached.track && hints.currentTime != null) {
           cached.track.playOffsetMs = Math.round((hints.currentTime || 0) * 1000);
         }
@@ -783,8 +788,7 @@ async function recognize(body) {
   const cached = await getCachedLyrics(detected.title, detected.artist, hints);
   // Untimed outage fallbacks are useful offline, but must not permanently hide
   // recovered timed lyrics. Persist the cooldown through worker suspension.
-  if (cached && (cached.lyrics?.synced || isApiDegraded('lrclib') ||
-      Date.now() - (cached._lyricsCheckedAt || 0) < 60000)) {
+  if (canUseCachedLyrics(cached)) {
     if (cached.track && detected.playOffsetMs != null) {
       cached.track.playOffsetMs = detected.playOffsetMs;
     }
