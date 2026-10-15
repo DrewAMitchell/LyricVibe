@@ -530,6 +530,66 @@
   }
   // Whole-transcript text editing over the unsaved preview.
   const transcript={dirty:false,shownFor:null};
+  // A stopped take and a take already used in the preview are still unsaved.
+  // Keep this independent of tapPending(), which only gates editor operations.
+  function hasUnsavedWork() {
+    return Boolean(timing.dirty || transcript.dirty || tapping.splitDirty || effectPending() ||
+      tapping.take && (tapping.take.status === 'armed' || tapCount(tapping.take) || tapping.take.pendingStartMs != null) ||
+      timing.draft && (timing.draft.previewRevision > 0 || timing.draft.changedWords > 0));
+  }
+  let navigationApproval = null;
+  const navigationWork = () => JSON.stringify([timing.draft?.token, timing.draft?.previewRevision,
+    timing.dirty && syncText.value, transcript.dirty && syncButton('transcript-text').value,
+    tapping.splitDirty && [syncButton('tap-spoken').value, syncButton('tap-split').value], tapping.take, performanceTake.armed, performanceTake.marks]);
+  const navigationSource = () => LvScore.mediaKey(timing.draft?.score.source || state.score?.source);
+  function leavesEditedVideo(url) {
+    const source = navigationSource();
+    return !source || LvScore.mediaKey({url}) !== source;
+  }
+  function approvedNavigation(url) {
+    return navigationApproval && performance.now() < navigationApproval.until &&
+      new URL(url).href === navigationApproval.url && navigationApproval.work === navigationWork();
+  }
+  function confirmUnsavedNavigation(url) {
+    if (!hasUnsavedWork() || !leavesEditedVideo(url) || approvedNavigation(url)) return true;
+    const leave = window.confirm('Leave this video without saving timings? Your current take and edits have not been saved. Choose Cancel to stay, then use Save timings.');
+    if (leave) navigationApproval = {url: new URL(url).href, work: navigationWork(), until: performance.now() + 10000};
+    else {
+      getMedia()?.pause();
+      setSyncNotice('Stayed on this video. Your take and edits are retained. Use Save timings before leaving.','warn');
+    }
+    return leave;
+  }
+  window.addEventListener('beforeunload', event => {
+    if (!hasUnsavedWork() || approvedNavigation(navigationApproval?.url || location.href)) return;
+    event.preventDefault(); event.returnValue = '';
+  });
+  // Catch links before YouTube mutates its player/DOM, including Next in a playlist.
+  window.addEventListener('click', event => {
+    if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const link = event.composedPath().find(node => node?.tagName === 'A' && node.href);
+    if (!link || link.download || link.target && link.target !== '_self') return;
+    const url = new URL(link.href, location.href);
+    if (url.origin !== location.origin) return; // Native beforeunload owns document exits.
+    if (!confirmUnsavedNavigation(url.href)) { event.preventDefault(); event.stopImmediatePropagation(); }
+  }, true);
+  // History API updates also emit navigate, covering programmatic SPA transitions.
+  window.navigation?.addEventListener('navigate', event => {
+    if (navigationApproval && event.destination.url !== navigationApproval.url) navigationApproval = null;
+    if (!event.destination.sameDocument || event.hashChange || event.downloadRequest || !hasUnsavedWork() || !leavesEditedVideo(event.destination.url)) return;
+    if (event.cancelable && !confirmUnsavedNavigation(event.destination.url)) event.preventDefault();
+  });
+  // An unsaved take should never silently roll into the next playlist video.
+  window.addEventListener('ended', event => {
+    if (event.target !== getMedia() || !hasUnsavedWork()) return;
+    event.stopImmediatePropagation();
+    getMedia()?.pause();
+    if (tapping.take?.status === 'armed') stopTapTake();
+    if (performanceTake.armed) stopEffects();
+    syncPanel.hidden = false;
+    setSyncNotice('Playback ended. Auto-next is paused while your take is unsaved. Use Save timings, or choose the next video and confirm leaving.','warn');
+    refreshTimingPanel();
+  }, true);
   function transcriptReview(){
     const list=syncPanel.querySelector('.lvx-transcript-changes'),area=syncButton('transcript-text');list.replaceChildren();
     if(!timing.draft)return null;
@@ -1858,6 +1918,7 @@
   }
   async function closeTimingReview() {
     if (timing.busy) return;
+    if (hasUnsavedWork() && !window.confirm('Discard your unsaved take and preview edits and close Sync? Choose Cancel to keep editing, then use Save timings.')) return;
     if (timing.draft) await timingRequest('LV_TIMING_CANCEL').catch(() => {});
     if (tapping.audio) { tapping.audio.close().catch(() => {}); tapping.audio = null; }
     discardTimingLocal(); syncPanel.hidden = true; refreshTimingPanel();
@@ -2081,6 +2142,15 @@
         LvScore.validateScore(message.score);
         // A different video in the same tab: park the old preview (it stays stored for its video) and follow the new one.
         const switched = Boolean(timing.draft && LvScore.mediaKey(timing.draft.score.source) !== message.mediaKey);
+        // Some site/player transitions cannot be cancelled. Never let their
+        // delayed score response silently destroy the still-open local take.
+        if (switched && hasUnsavedWork() && !approvedNavigation(location.href)) {
+          getMedia()?.pause(); syncPanel.hidden = false;
+          setSyncNotice('The video changed before timings were saved. Your take and edits are retained in this tab. Return to the previous video to save, or explicitly discard the changes.','warn');
+          refreshTimingPanel();
+          sendResponse({ok:false,error:{code:'UNSAVED_SOURCE',message:'Return to the edited video to save its retained take.'}});
+          return;
+        }
         if (switched) { discardTimingLocal(); transcript.dirty = false; transcript.shownFor = null; }
         if (timing.draft && (message.score.revision !== timing.draft.baseRevision || message.score.lyrics.contentHash !== timing.draft.baseHash)) {
           const retainedTake = tapping.take, retainedBinding = tapping.binding, retainedEffects = {...performanceTake,marks:[...performanceTake.marks]};
