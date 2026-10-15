@@ -882,9 +882,10 @@
 
   // Event capture deliberately stores only source-clock observations. Lexical
   // ownership and syllable segmentation are a later, reviewable operation.
-  function beginEvents(units, { kind = 'syllable-entrance' } = {}) {
+  function beginEvents(units, { kind = 'syllable-entrance', inputMode = 'tap' } = {}) {
     if (!Array.isArray(units) || !units.length || units.length > 5000) fail('INVALID_UNITS', 'Provide 1–5000 event units.');
     if (typeof kind !== 'string' || !kind.trim()) fail('INVALID_KIND', 'Event kind must be a nonempty string.');
+    if (!['tap','hold'].includes(inputMode)) fail('INVALID_INPUT_MODE','Syllable input must be tap or hold.');
     const ids = new Set();
     const safeUnits = units.map(unit => {
       if (!unit || typeof unit !== 'object' || typeof unit.id !== 'string' || !unit.id.trim() || ids.has(unit.id) ||
@@ -895,7 +896,7 @@
       }
       ids.add(unit.id); return clone(unit);
     });
-    return { status: 'armed', cadence: 'performance-events', mode: 'syllable', kind,
+    return { status: 'armed', cadence: 'performance-events', mode: 'syllable', kind, inputMode,
       units: safeUnits, events: [], marks: [], index: 0, pendingStartMs: null, lastMs: null, actionHistory: [] };
   }
   function markEvent(take, scoreMs) {
@@ -911,10 +912,24 @@
   }
   function stopEvents(take) {
     if (!take || take.cadence !== 'performance-events') fail('CADENCE_UNSUPPORTED', 'Expected a performance-events take.');
-    return take.status === 'stopped' ? take : { ...take, status: 'stopped' };
+    return take.status === 'stopped' ? take : { ...take, status: 'stopped', pendingStartMs:null };
+  }
+  function pressEventHold(take, scoreMs) {
+    if(take?.inputMode!=='hold')fail('CADENCE_UNSUPPORTED','Expected syllable holds.');
+    if(take.pendingStartMs!==null)fail('ALREADY_HELD','Release the current syllable first.');
+    markEvent(take,scoreMs); // Validate without committing an unfinished duration.
+    return {...take,pendingStartMs:scoreMs};
+  }
+  function releaseEventHold(take, scoreMs) {
+    if(take?.inputMode!=='hold')fail('CADENCE_UNSUPPORTED','Expected syllable holds.');
+    if(take.pendingStartMs===null)fail('NOT_HELD','Press at the syllable beginning first.');
+    if(!integerTime(scoreMs)||scoreMs<=take.pendingStartMs)fail('INVALID_TIME','Release must be after the syllable beginning.');
+    const next=markEvent({...take,pendingStartMs:null},take.pendingStartMs);
+    return {...next,lastMs:scoreMs,events:next.events.map((e,i)=>i===next.events.length-1?{...e,releaseMs:scoreMs}:e)};
   }
   function undoEvent(take) {
     if (!take || take.cadence !== 'performance-events') fail('CADENCE_UNSUPPORTED', 'Expected a performance-events take.');
+    if(take.pendingStartMs!==null)return {...take,pendingStartMs:null};
     if (!take.actionHistory?.length) return take;
     const previous = take.actionHistory.at(-1);
     return { ...take, events: previous.events, index: previous.index, lastMs: previous.lastMs,
@@ -930,7 +945,7 @@
     const events = take.events.filter(e => e.sourceMs < cutoff);
     const snapshot = { events: take.events, index: take.index, lastMs: take.lastMs };
     return { ...take, events, index: take.units.findIndex(u => u.phraseId === phraseId),
-      lastMs: events.length ? events.at(-1).sourceMs : null,
+      lastMs: events.length ? events.at(-1).releaseMs??events.at(-1).sourceMs : null,
       actionHistory: [...(take.actionHistory || []), snapshot].slice(-128) };
   }
   function associateEvents(take, { counts = {}, gapRatio = 2.5, gapMinMs = 450 } = {}) {
@@ -992,7 +1007,8 @@
           // word end inside that window is kept; otherwise the end stays
           // provisional for word-boundary cleanup.
           let endMs = next ? next.sourceMs : end, endSource = next ? 'next-entrance' : 'phrase-end';
-          if (last) {
+          if (Number.isSafeInteger(e.releaseMs)&&e.releaseMs>e.sourceMs) {endMs=e.releaseMs;endSource='syllable-release';}
+          else if (last) {
             const manualEnd = u.referenceManual && Number.isSafeInteger(u.referenceEndMs) && u.referenceEndMs > e.sourceMs && u.referenceEndMs <= endMs;
             if (manualEnd) { endMs = u.referenceEndMs; endSource = 'manual-word-boundary'; }
             else endSource = next ? 'provisional-next-entrance' : 'provisional-phrase-end';
@@ -1011,6 +1027,7 @@
         const median = intervals[Math.floor((intervals.length-1)/2)];
         const threshold = Math.max(gapMinMs, Math.round(median * gapRatio));
         for (let i = 1; i < assigned.length; i++) {
+          if(Number.isSafeInteger(assigned[i-1].releaseMs))continue; // A measured release already distinguishes sustain from silence.
           const gapMs = assigned[i].sourceMs - assigned[i-1].sourceMs;
           if (gapMs < threshold) continue;
           const before = marks.find(m => m.eventId === assigned[i-1].id), after = marks.find(m => m.eventId === assigned[i].id);
@@ -1295,7 +1312,9 @@
         entrances.forEach((e, i) => {
           const last = i === entrances.length - 1;
           const startMs=Math.max(hold.pressMs,e.sourceMs);
-          const endMs=last?hold.releaseMs:Math.max(hold.pressMs,entrances[i+1].sourceMs),endSource=last?'word-release':'next-entrance';
+          const bound=last?hold.releaseMs:Math.min(hold.releaseMs,Math.max(hold.pressMs,entrances[i+1].sourceMs));
+          const measured=Number.isSafeInteger(e.releaseMs)&&e.releaseMs>startMs&&e.releaseMs<=bound;
+          const endMs=measured?e.releaseMs:bound,endSource=measured?'syllable-release':last?'word-release':'next-entrance';
           if(endMs<=startMs)wordIssues.push('collapsed-syllables');
           marks.push({ id: `${u.wordId}-syllable-${i + 1}`, syllableId: `${u.wordId}-syllable-${i + 1}`, wordId: u.wordId, phraseId,
             startMs, endMs, endSource, eventId: e.synthetic ? null : e.id, startSource: e.synthetic ? 'word-press' : startMs!==e.sourceMs?'word-start-bound':'syllable-entrance' });
@@ -1346,9 +1365,9 @@
   function punchIn(take, nowMs, { phraseId = null } = {}) {
     if (!take || !integerTime(nowMs)) fail('INVALID_TIME','Punch-in needs a nonnegative source-clock time.');
     if (take.cadence === 'performance-events') {
-      const events = take.events.filter(event=>event.sourceMs < nowMs);
+      const events = take.events.filter(event=>event.sourceMs < nowMs&&(event.releaseMs??event.sourceMs)<=nowMs);
       const units = take.units.map(unit=>unit.phraseId===phraseId&&nowMs<unit.minMs?{...unit,minMs:nowMs}:unit);
-      return {...take,units,events,lastMs:events.at(-1)?.sourceMs??null,status:'armed',
+      return {...take,units,events,pendingStartMs:null,lastMs:events.at(-1)?.releaseMs??events.at(-1)?.sourceMs??null,status:'armed',
         actionHistory:[...take.actionHistory,{events:take.events,index:take.index,lastMs:take.lastMs,units:take.units}].slice(-128)};
     }
     if (take.cadence === 'word-holds') {
@@ -1368,7 +1387,7 @@
   }
 
   return { begin, mark, release, undo, stop, adjust, reposition, followPlayback, punchIn, moveCursor, reassignLast, restoreWordFrameTake, rewindToPhrase, restorePhraseStreamTake,
-    beginEvents, markEvent, stopEvents, undoEvent, rewindEvents, associateEvents,
+    beginEvents, markEvent, pressEventHold, releaseEventHold, stopEvents, undoEvent, rewindEvents, associateEvents,
     beginWordHolds, pressWord, releaseWord, skipWords, undoWordHold, stopWordHolds, rewindWordHolds, retimePhraseHolds, associateWordHolds, wordHoldsFromPairs, estimateTempo,
     leadInProgress, captureProgress, validateTempoMap, tempoMapFromEstimate, setTempoPoint, removeTempoPoint, tempoAt, tempoTimeAtBeat };
 });

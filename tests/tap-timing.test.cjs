@@ -117,6 +117,39 @@ test('performance events preserve exact raw taps until later count association',
   assert.equal(edited.phrases[0].counts[1].source,'human');
 });
 
+test('syllable holds preserve both boundaries and real rests through grouping and word holds', () => {
+  const units=[{id:'w',wordId:'w',phraseId:'p',text:'three',minMs:0,maxMs:5000,expectedCount:3}];
+  let take=tap.beginEvents(units,{inputMode:'hold'});
+  for(const [start,end] of [[100,300],[500,800],[2800,3300]]){take=tap.pressEventHold(take,start);take=tap.releaseEventHold(take,end);}
+  const raw=structuredClone(take.events),report=tap.associateEvents(tap.stopEvents(take));
+  assert.deepEqual(raw.map(e=>[e.sourceMs,e.releaseMs]),[[100,300],[500,800],[2800,3300]]);
+  assert.deepEqual(report.phrases[0].marks.map(m=>[m.startMs,m.endMs,m.endSource]),[[100,300,'syllable-release'],[500,800,'syllable-release'],[2800,3300,'syllable-release']]);
+  assert.deepEqual(report.phrases[0].gaps,[],'measured releases distinguish a held vowel from dead air');
+  let words=tap.beginWordHolds(units,raw);words=tap.pressWord(words,50);words=tap.releaseWord(words,4000);
+  assert.deepEqual(tap.associateWordHolds(words).phrases[0].marks.map(m=>[m.startMs,m.endMs]),[[100,300],[500,800],[2800,3300]]);
+  assert.deepEqual(take.events,raw);
+});
+
+test('unfinished syllable holds never invent releases and invalid releases are transactional', () => {
+  let take=tap.beginEvents([{id:'w',wordId:'w',phraseId:'p',text:'a',minMs:0,maxMs:5000}],{inputMode:'hold'});
+  take=tap.pressEventHold(take,100);
+  assert.throws(()=>tap.releaseEventHold(take,100),{code:'INVALID_TIME'});
+  assert.equal(take.pendingStartMs,100);assert.equal(take.events.length,0);
+  assert.equal(tap.undoEvent(take).pendingStartMs,null);
+  assert.deepEqual(tap.stopEvents(take).events,[]);assert.equal(tap.stopEvents(take).pendingStartMs,null);
+  take=tap.releaseEventHold(take,400);take=tap.pressEventHold(take,600);
+  assert.deepEqual(tap.undoEvent(take).events.map(e=>[e.sourceMs,e.releaseMs]),[[100,400]]);
+});
+
+test('punching inside a syllable hold replaces its full interval and undo restores both boundaries', () => {
+  let take=tap.beginEvents([{id:'w',wordId:'w',phraseId:'p',text:'a',minMs:0,maxMs:5000}],{inputMode:'hold'});
+  take=tap.pressEventHold(take,100);take=tap.releaseEventHold(take,900);
+  const original=structuredClone(take.events);
+  take=tap.punchIn(take,500,{phraseId:'p'});assert.equal(take.events.length,0);
+  take=tap.pressEventHold(take,500);take=tap.releaseEventHold(take,700);
+  take=tap.undoEvent(tap.undoEvent(take));assert.deepEqual(take.events,original);
+});
+
 test('performance events consider dictionary alternatives and leave extra or ambiguous taps for review', () => {
   let take = tap.beginEvents([
     { id:'a',wordId:'a',phraseId:'p',text:'a',minMs:100,maxMs:500,expectedCount:1,countOptions:[2] },
