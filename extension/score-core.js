@@ -334,7 +334,7 @@
       if(!(next.beatCues||[]).some(c=>c.id===op.cueId))fail('UNKNOWN_ID','Unknown beat cue');
       next.beatCues=next.beatCues.filter(c=>c.id!==op.cueId);
     }else if(op.type==='setPhrasePersistence'){
-      const phrase=next.phrases.find(p=>p.id===op.phraseId);if(!phrase)fail('UNKNOWN_ID','Unknown phrase');if(!Number.isFinite(op.beats)||op.beats<0||op.beats>64)fail('INVALID_OPERATION','Persistence must be 0–64 beats.');phrase.persistBeats=op.beats;
+      const phrase=next.phrases.find(p=>p.id===op.phraseId);if(!phrase)fail('UNKNOWN_ID','Unknown phrase');if(op.beats===null)delete phrase.persistBeats;else{if(!Number.isFinite(op.beats)||op.beats<0||op.beats>64)fail('INVALID_OPERATION','Persistence must be 0–64 beats.');phrase.persistBeats=op.beats;}
     }else if (op.type === "setWordTiming") {
       const { phrase, word } = locateWord(next, op.wordId);
       finiteNonnegative(op.startMs, "startMs"); finiteNonnegative(op.endMs, "endMs");
@@ -606,7 +606,7 @@
     for (const phrase of score.phrases) {
       const start = phrase.startMs, requestedEnd=displayEnds[phrase.id],end=Number.isFinite(requestedEnd)&&requestedEnd>=phrase.endMs?requestedEnd:phrase.endMs;
       if (at < start || at > end || (end>phrase.endMs&&at>=end)) continue;
-      const fade = phrase.persistBeats>0?0:Math.min(phrase.fadeOutMs, Math.max(0, end - start));
+      const fade = phrase.persistBeats>0||end>phrase.endMs?0:Math.min(phrase.fadeOutMs, Math.max(0, end - start));
       const opacity = fade > 0 && at > end - fade ? Math.max(0, (end - at) / fade) : 1;
       const visibleWords = phrase.words.filter(w => !w.excluded);
       if (!visibleWords.length) continue;

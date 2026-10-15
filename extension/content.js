@@ -138,6 +138,13 @@
   const hud = document.createElement('div');
   hud.className = 'lvx-hud';
   let bloomEnabled=true;
+  let linger=LvBeatTrack.lingerSettings();
+  function setLinger(value){
+    linger=LvBeatTrack.lingerSettings(value);state.scoreSignature='';
+    chrome.storage.local.set({lvxLinger:linger}).catch(error=>setHud('Linger changed in this tab; preference could not save: '+error.message,true,true));
+    if(state.score)renderScore(getMediaTimeMs());
+    return {...linger};
+  }
   const bloomMotion=matchMedia('(prefers-reduced-motion: reduce)');
 
   const hudLabel = document.createElement('span');
@@ -314,6 +321,13 @@
     const bloomToggle=document.createElement('input');bloomToggle.type='checkbox';bloomToggle.checked=bloomEnabled;
     bloomToggle.onchange=()=>{bloomEnabled=bloomToggle.checked;refreshBeatPulse(getMediaTimeMs());chrome.storage.local.set({lvxBloomEnabled:bloomEnabled}).catch(error=>setHud('Bloom changed in this tab; preference could not save: '+error.message,true,true));};
     bloomLabel.append(bloomToggle,document.createTextNode('Beat bloom · song BPM or 120 BPM default'));themePicker.append(bloomLabel);
+    const lingerControls=document.createElement('div');lingerControls.className='lvx-linger-controls';
+    lingerControls.innerHTML='<label>Dead-air linger <select aria-label="Dead-air linger"><option value="off">Off · usual fade</option><option value="next">Until next lyric</option><option value="beats">For a number of beats</option></select></label><label data-linger-length>Beats <input aria-label="Linger beats" type="number" min="0.25" max="64" step="0.25"></label><p>Display only, within each vocal lane. Phrase overrides take priority; recorded timings stay fixed.</p><p data-linger-status role="status"></p>';
+    const lingerMode=lingerControls.querySelector('select'),lingerBeats=lingerControls.querySelector('input');lingerMode.value=linger.mode;lingerBeats.value=String(linger.beats);
+    const refreshLinger=()=>{lingerControls.querySelector('[data-linger-length]').hidden=linger.mode!=='beats';lingerControls.querySelector('[data-linger-status]').textContent=linger.mode==='beats'&&!tempo.map?'Set the song BPM to use beat-based linger, or choose Until next lyric.':'';};
+    lingerMode.onchange=()=>{setLinger({...linger,mode:lingerMode.value});refreshLinger();};
+    lingerBeats.onchange=()=>{const n=Number(lingerBeats.value);if(!lingerBeats.value.trim()||!Number.isFinite(n)||n<.25||n>64){lingerBeats.value=String(linger.beats);return;}setLinger({...linger,beats:n});refreshLinger();};
+    refreshLinger();themePicker.append(lingerControls);
     const settings=document.createElement('details');settings.className='lvx-placement-settings';
     settings.innerHTML='<summary>Lyric bounds &amp; text size</summary><p>Move or resize the outline, or enter percentages. Both vocal lanes stay inside it.</p><div class="lvx-placement-fields">'+Object.keys(placementDefaults).map(key=>`<label>${({left:'Left %',top:'Top %',width:'Width %',height:'Height %',maxFontPx:'Max text px'})[key]}<input data-placement="${key}" type="number" min="${key==='maxFontPx'?16:0}" max="${key==='maxFontPx'?200:100}" step="1" value="${placement[key]}"></label>`).join('')+'</div><button data-placement-reset>Reset bounds</button>';
     settings.addEventListener('toggle',()=>{bounds.hidden=!settings.open;});
@@ -448,7 +462,7 @@
       <label class="lvx-sync-loop"><input type="checkbox" data-sync="tap-click"> Audible marks · words only</label>
       </details>
     </details>
-    <details class="lvx-effect-panel"><summary>Perform effects <span>second pass</span></summary><p class="lvx-sync-hint">Play and press a key to add an effect. Beat cues can continue through rests; word-interval effects follow sung words. Timings stay unchanged.</p><div class="lvx-beat-settings"><label>Clock <select data-sync="effect-clock"><option value="beat">Beats</option><option value="interval">Word intervals</option></select></label><label>Target <select data-sync="beat-target"><option value="active">Visible lyrics</option><option value="screen">Screen glow</option><option value="lane">Current vocal lane</option><option value="phrase">This phrase</option><option value="word">Selected word</option><option value="syllable">Selected syllable</option></select></label><label>Length · beats <input data-sync="beat-duration" type="number" min="0.25" max="64" step="0.25" value="4"></label><label class="lvx-sync-loop"><input data-sync="beat-snap" type="checkbox" checked> Snap effect to ¼ beat</label></div><label class="lvx-sync-loop lvx-interval-target">Target <select data-sync="effect-scope"><option value="word">Word</option><option value="syllable">Authored syllable</option></select></label><div class="lvx-tap-actions"><button data-sync="effect-start">▶ Start effect pass</button><button data-sync="effect-stop">■ Stop</button></div><div class="lvx-effect-pads"><button data-effect="pulse">1 · Pulse</button><button data-effect="tilt">2 · Tilt</button><button data-effect="shake">3 · Shake</button><button data-effect="clear">0 · Clear</button></div><p class="lvx-effect-status" role="status">Effects are buffered until you use the pass.</p><div class="lvx-beat-cue-list"></div><label class="lvx-gap-setting">Keep this phrase after singing · beats<input data-sync="gap-beats" type="number" min="0" max="64" step="0.25" value="0"></label><button data-sync="gap-use">Use gap hold in preview</button><p class="lvx-sync-hint">0 keeps the usual fade. A beat hold ends before the next phrase in this vocal lane; sung timings stay fixed.</p><div class="lvx-tap-actions"><button data-sync="effect-use">Use effects in preview</button><button data-sync="effect-undo">↶ Undo effect</button><button data-sync="effect-discard">Discard effects</button></div></details>
+    <details class="lvx-effect-panel"><summary>Perform effects <span>second pass</span></summary><p class="lvx-sync-hint">Play and press a key to add an effect. Beat cues can continue through rests; word-interval effects follow sung words. Timings stay unchanged.</p><div class="lvx-beat-settings"><label>Clock <select data-sync="effect-clock"><option value="beat">Beats</option><option value="interval">Word intervals</option></select></label><label>Target <select data-sync="beat-target"><option value="active">Visible lyrics</option><option value="screen">Screen glow</option><option value="lane">Current vocal lane</option><option value="phrase">This phrase</option><option value="word">Selected word</option><option value="syllable">Selected syllable</option></select></label><label>Length · beats <input data-sync="beat-duration" type="number" min="0.25" max="64" step="0.25" value="4"></label><label class="lvx-sync-loop"><input data-sync="beat-snap" type="checkbox" checked> Snap effect to ¼ beat</label></div><label class="lvx-sync-loop lvx-interval-target">Target <select data-sync="effect-scope"><option value="word">Word</option><option value="syllable">Authored syllable</option></select></label><div class="lvx-tap-actions"><button data-sync="effect-start">▶ Start effect pass</button><button data-sync="effect-stop">■ Stop</button></div><div class="lvx-effect-pads"><button data-effect="pulse">1 · Pulse</button><button data-effect="tilt">2 · Tilt</button><button data-effect="shake">3 · Shake</button><button data-effect="clear">0 · Clear</button></div><p class="lvx-effect-status" role="status">Effects are buffered until you use the pass.</p><div class="lvx-beat-cue-list"></div><label class="lvx-gap-setting">Phrase linger override · beats<input data-sync="gap-beats" type="number" min="0" max="64" step="0.25" value="0"></label><button data-sync="gap-use">Use phrase override</button><button data-sync="gap-default">Use display default</button><p class="lvx-sync-hint">0 disables linger for this phrase. A beat override ends at the next lyric in this lane. Use display default removes the override; sung timings stay fixed.</p><div class="lvx-tap-actions"><button data-sync="effect-use">Use effects in preview</button><button data-sync="effect-undo">↶ Undo effect</button><button data-sync="effect-discard">Discard effects</button></div></details>
     <details><summary>Exact word timings <span>milliseconds</span></summary><p class="lvx-sync-hint">One word per line: word, start, end. These changes affect the preview until you apply.</p><label class="lvx-sync-protected"><input type="checkbox" data-sync="protected"> Edit saved timings in this phrase</label><textarea aria-label="Exact word timings in milliseconds" spellcheck="false" rows="5"></textarea><div class="lvx-sync-text-actions"><button data-sync="tune">Use these times</button><button data-sync="reset">Reset text</button></div></details>
     <div class="lvx-sync-text-actions"><button data-sync="export">↓ Export preview JSON</button><button data-sync="discard-all" class="lvx-danger">Discard all changes</button></div>
     <footer><button data-sync="undo">↶ Undo saved change</button><span class="lvx-save-wrap" tabindex="-1"><span class="lvx-save-tooltip" role="tooltip" id="lvx-save-reason"></span><button data-sync="apply" class="lvx-sync-primary" aria-describedby="lvx-save-reason"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/></svg> Save timings</button></span></footer>`;
@@ -1906,6 +1920,7 @@
     for(const key of ['effect-clock','beat-target','beat-duration'])syncButton(key).disabled=active||performanceTake.marks.length>0;
     syncPanel.querySelector('[data-effect=tilt]').textContent=beats?'2 · Breathe':'2 · Tilt';syncPanel.querySelector('[data-effect=shake]').textContent=beats?'3 · Color':'3 · Shake';
     syncButton('gap-use').disabled=timing.busy||!timing.draft||active||tapping.take?.status==='armed';
+    syncButton('gap-default').disabled=syncButton('gap-use').disabled||timingPhrase()?.persistBeats===undefined;
     if(document.activeElement!==syncButton('gap-beats'))syncButton('gap-beats').value=String(timingPhrase()?.persistBeats||0);
     syncButton('effect-start').disabled = timing.busy || !timing.draft || timing.dirty || tapping.splitDirty || timingTapPending() || active || performanceTake.marks.length > 0;
     syncButton('effect-stop').disabled = !active;
@@ -1976,6 +1991,7 @@
   }
   syncButton('effect-start').addEventListener('click', startEffects);
   syncButton('effect-clock').addEventListener('change',refreshEffectPanel);
+  syncButton('gap-default').onclick=async()=>{if(syncButton('gap-default').disabled)return;timing.busy=true;refreshTimingPanel();try{const r=await timingRequest('LV_TIMING_TUNE',{operation:{type:'setPhrasePersistence',phraseId:timingPhrase().id,beats:null}});timing.draft=r.preview;state.scoreSignature='';setSyncNotice('Phrase now follows the Display linger setting · in preview');}catch(error){setSyncNotice(error.message,'error');}finally{timing.busy=false;refreshTimingPanel();}};
   syncButton('gap-use').onclick=async()=>{if(timing.busy||performanceTake.armed||tapping.take?.status==='armed'||!timing.draft)return;const beats=Number(syncButton('gap-beats').value);if(!syncButton('gap-beats').value.trim()||!Number.isFinite(beats)||beats<0||beats>64){setSyncNotice('Gap hold must be 0–64 beats.');return;}if(beats>0&&!tempo.map){setSyncNotice('Set BPM or tap T first.');return;}timing.busy=true;refreshTimingPanel();try{const r=await timingRequest('LV_TIMING_TUNE',{operation:{type:'setPhrasePersistence',phraseId:timingPhrase().id,beats}});timing.draft=r.preview;state.scoreSignature='';setSyncNotice(`Phrase gap hold: ${beats} beats · in preview`);}catch(error){setSyncNotice(error.message,'error');}finally{timing.busy=false;refreshTimingPanel();}};
   syncButton('effect-stop').addEventListener('click', () => { stopEffects(); getMedia()?.pause(); });
   syncButton('effect-use').addEventListener('click', useEffects);
@@ -2192,6 +2208,7 @@
     hide: teardown,
     hints: getPageHints,
     placement:Object.freeze({getState:()=>({...placement}),set:value=>applyPlacement(value,true)}),
+    linger:Object.freeze({getState:()=>({...linger}),set:setLinger}),
     tempo:Object.freeze({getState:()=>JSON.parse(JSON.stringify({mediaKey:tempo.mediaKey,map:tempo.map,taps:tempo.taps,estimate:tempo.estimate,revision:tempo.revision})),at:ms=>LvTapTiming.tempoAt(tempo.map,ms),tap:tapTempo,setMap:updateTempoMap}),
     sync: Object.freeze({ getState: () => JSON.parse(JSON.stringify(timing)), open: openTimingReview,
       selectPhrase: index => navigateTiming(index - timing.phraseIndex), setView: view => { if (['saved','proposed'].includes(view)) syncButton(view).click(); },
@@ -2206,7 +2223,8 @@
 
   /* Load saved preferences (theme, font scale, lite mode) */
   try {
-    chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement','lvxBloomEnabled','lvxChoreography'], (result) => {
+    chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement','lvxBloomEnabled','lvxChoreography','lvxLinger'], (result) => {
+      linger=LvBeatTrack.lingerSettings(result?.lvxLinger);
       if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={mode:['classic','fall','puzzle'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true};}
       bloomEnabled=result?.lvxBloomEnabled!==false;
       if(result?.lvxPlacement)try{applyPlacement(result.lvxPlacement);}catch(error){setHud(error.message,true,true);}
@@ -3567,7 +3585,7 @@
     if (tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete') && timing.draft && !syncPanel.hidden) {renderCaptureScore();return;}
     stage.classList.toggle('lvx-choreography-stage',choreography.mode!=='classic');
     const score = syllableTakeScore() || (timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score);
-    if(beatDisplayCache.score!==score||beatDisplayCache.map!==tempo.map)beatDisplayCache={score,map:tempo.map,ends:LvBeatTrack.displayEnds(score,tempo.map)};
+    if(beatDisplayCache.score!==score||beatDisplayCache.map!==tempo.map||beatDisplayCache.linger!==linger){const ends=LvBeatTrack.presentationEnds(score,tempo.map,linger);beatDisplayCache={score,map:tempo.map,linger,ends:ends.phrases,units:ends.units};}
     const active = LvScore.activeAt(score, mediaMs,{displayEnds:beatDisplayCache.ends});
     // Lead-in: an empty lane shows its next phrase dimmed up to 2s early, so a rewind is never a blank screen.
     const atMs = mediaMs - score.offsetMs;
@@ -3632,7 +3650,8 @@
         const word = phrase.words[index];
         const span = line.children[index];
         span.style.visibility = 'visible'; span.classList.toggle('lvx-score-ahead', mediaMs - score.offsetMs < word.startMs);
-        const wordCurrent = phrase.activeWords.includes(word.id), wordPresence = LvScore.presenceAt(word, mediaMs - score.offsetMs);
+        const wordCurrent = phrase.activeWords.includes(word.id),wordLingering=atMs>=word.endMs&&atMs<(beatDisplayCache.units[word.id]??word.endMs), wordPresence = wordLingering?1:LvScore.presenceAt(word, atMs);
+        span.dataset.lingering=String(wordLingering);
         span.classList.toggle('lvx-score-current', wordCurrent);
         // Recency trail: sung words keep a fading glow so short final syllables stay readable.
         span.style.setProperty('--lvx-presence', wordPresence);
@@ -3642,7 +3661,8 @@
           const part = [...span.children].find(el => el.dataset.syllable === syllable.id);
           if (!part) continue;
           part.style.visibility = 'visible'; part.classList.toggle('lvx-score-ahead', mediaMs - score.offsetMs < syllable.startMs);
-          const syllableCurrent = (phrase.activeSyllables || []).includes(syllable.id), syllablePresence = LvScore.presenceAt(syllable, mediaMs - score.offsetMs);
+          const syllableCurrent = (phrase.activeSyllables || []).includes(syllable.id),syllableLingering=atMs>=syllable.endMs&&atMs<(beatDisplayCache.units[syllable.id]??syllable.endMs), syllablePresence = syllableLingering?1:LvScore.presenceAt(syllable, atMs);
+          part.dataset.lingering=String(syllableLingering);
           part.classList.toggle('lvx-score-current', syllableCurrent);
           part.style.setProperty('--lvx-presence', syllablePresence);
           part.classList.toggle('lvx-score-recent', !syllableCurrent && syllablePresence > 0);

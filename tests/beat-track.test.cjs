@@ -34,3 +34,37 @@ test('click schedule accents tap-aligned beat 1, respects half-speed and recompu
   const ramp=tempo.validateTempoMap({...map,segments:[{startMs:0,bpm:60,transition:'linear',provenance:'manual'},{startMs:10000,bpm:180,transition:'step',provenance:'manual'}]});
   for(const event of beats.clickSchedule(ramp,5000,1,1000))assert.ok(Math.abs(tempo.tempoAt(ramp,event.sourceMs).beat-event.beat)<1e-6);
 });
+
+test('display default lingers within and between phrases without changing any sung timing',()=>{
+  const s=score(),p=s.phrases[0],w=p.words[0];
+  w.syllables=[{id:'s1',text:'Car',startMs:w.startMs,endMs:w.startMs+100,locked:false,provenance:'manual',confidence:1,effects:[]},{id:'s2',text:'ry',startMs:w.endMs-100,endMs:w.endMs,locked:false,provenance:'manual',confidence:1,effects:[]}];
+  const original=structuredClone(s),ends=beats.presentationEnds(s,null,{mode:'next',beats:4});
+  assert.equal(ends.units.s1,w.endMs-100);
+  assert.equal(ends.phrases[p.id],s.phrases[1].startMs);
+  const rest=core.activeAt(s,8000,{displayEnds:ends.phrases}).phrases.find(x=>x.id===p.id);
+  assert.ok(rest.persisted);assert.equal(rest.opacity,1);assert.deepEqual(rest.activeWords,[]);assert.deepEqual(rest.activeSyllables,[]);
+  assert.deepEqual(s,original);assert.deepEqual(beats.presentationEnds(s,null,{mode:'off'}),{phrases:{},units:{}});
+});
+
+test('phrase overrides disable or replace the display default and reset through the revisioned operation',()=>{
+  let s=score(),p=s.phrases[0];const original=structuredClone(p.words);
+  s=core.applyOperation(s,{type:'setPhrasePersistence',phraseId:p.id,beats:0},s.revision);
+  assert.equal(beats.displayEnds(s,map,{mode:'next'})[p.id],undefined);
+  s=core.applyOperation(s,{type:'setPhrasePersistence',phraseId:p.id,beats:2},s.revision);
+  assert.ok(Math.abs(beats.displayEnds(s,map,{mode:'next'})[p.id]-p.endMs-1000)<1e-6);
+  s=core.applyOperation(s,{type:'setPhrasePersistence',phraseId:p.id,beats:null},s.revision);
+  assert.equal(s.phrases[0].persistBeats,undefined);assert.deepEqual(s.phrases[0].words,original);
+  assert.equal(beats.displayEnds(s,null,{mode:'next'})[p.id],10000);
+});
+
+test('linger uses song tempo and offset, respects overlapping phrases and each vocal lane, and ends with media',()=>{
+  const s=score(),p=s.phrases[0];s.offsetMs=250;
+  const ramp=tempo.validateTempoMap({...map,segments:[{startMs:0,bpm:60,transition:'linear',provenance:'manual'},{startMs:10000,bpm:180,transition:'step',provenance:'manual'}]});
+  const end=beats.displayEnds(s,ramp,{mode:'beats',beats:2})[p.id];
+  assert.ok(Math.abs(tempo.tempoAt(ramp,end+250).beat-tempo.tempoAt(ramp,p.endMs+250).beat-2)<1e-6);
+  assert.deepEqual(beats.displayEnds(s,null,{mode:'beats',beats:2}),{});
+  const last=s.phrases.at(-1);assert.equal(beats.displayEnds(s,null,{mode:'next'})[last.id],19750);
+  const peer={...structuredClone(p),id:'peer',laneId:'backing',startMs:p.endMs-100,endMs:p.endMs+2000};s.phrases.push(peer);
+  assert.equal(beats.displayEnds(s,null,{mode:'next'})[p.id],10000,'another lane does not truncate lead');
+  peer.laneId=p.laneId;assert.equal(beats.displayEnds(s,null,{mode:'next'})[p.id],undefined,'overlapping lyric prevents stale phrase hold');
+});

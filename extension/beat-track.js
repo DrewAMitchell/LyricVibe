@@ -1,15 +1,39 @@
 /* Source-clock beat presentation. No score timing mutation or wall-clock progression. */
 (function(root,factory){const api=factory(typeof module==='object'&&module.exports?require('./tap-timing.js'):root.LvTapTiming);if(typeof module==='object'&&module.exports)module.exports=api;root.LvBeatTrack=api;})(globalThis,function(tempo){
-  function displayEnds(score,map){
-    const ends={};if(!map)return ends;
+  function lingerSettings(value={}){
+    return {mode:['off','next','beats'].includes(value?.mode)?value.mode:'off',beats:Number.isFinite(value?.beats)&&value.beats>=.25&&value.beats<=64?value.beats:4};
+  }
+  function phraseLinger(phrase,settings){return phrase.persistBeats!==undefined?{mode:phrase.persistBeats>0?'beats':'off',beats:phrase.persistBeats}:lingerSettings(settings);}
+  function lingerEnd(end,next,score,map,settings){
+    const sourceEnd=end+score.offsetMs;
+    if(settings.mode==='off'||sourceEnd<0)return end;
+    const until=settings.mode==='next'?Infinity:map?tempo.tempoTimeAtBeat(map,tempo.tempoAt(map,sourceEnd).beat+settings.beats)-score.offsetMs:end;
+    const mediaEnd=Number.isFinite(score.source.durationMs)&&score.source.durationMs>0?score.source.durationMs-score.offsetMs:Number.isFinite(next)?next:Number.isFinite(until)?until:end;
+    return Math.max(end,Math.min(until,next??mediaEnd,mediaEnd));
+  }
+  function displayEnds(score,map,settings){
+    const ends={};
     for(const phrase of score.phrases){
-      if(!(phrase.persistBeats>0))continue;
-      const sourceEnd=phrase.endMs+score.offsetMs;if(sourceEnd<0)continue;
-      const beat=tempo.tempoAt(map,sourceEnd).beat,until=tempo.tempoTimeAtBeat(map,beat+phrase.persistBeats);
-      const next=score.phrases.filter(p=>p.laneId===phrase.laneId&&p.startMs>=phrase.endMs&&p.id!==phrase.id&&p.words.some(w=>!w.excluded)).sort((a,b)=>a.startMs-b.startMs)[0];
-      ends[phrase.id]=Math.max(phrase.endMs,Math.min(until-score.offsetMs,next?.startMs??Infinity,score.source.durationMs?score.source.durationMs-score.offsetMs:Infinity));
+      const peers=score.phrases.filter(p=>p.laneId===phrase.laneId&&p.id!==phrase.id&&p.words.some(w=>!w.excluded));
+      const next=peers.filter(p=>p.startMs>=phrase.endMs).sort((a,b)=>a.startMs-b.startMs)[0];
+      const overlap=peers.some(p=>p.startMs<phrase.endMs&&p.endMs>phrase.endMs);
+      const end=overlap?phrase.endMs:lingerEnd(phrase.endMs,next?.startMs,score,map,phraseLinger(phrase,settings));
+      if(end>phrase.endMs)ends[phrase.id]=end;
     }
     return ends;
+  }
+  function presentationEnds(score,map,settings){
+    const units={},atoms=score.phrases.flatMap(p=>p.words.filter(w=>!w.excluded).flatMap(w=>(w.syllables?.length?w.syllables:[w]).map(u=>({...u,laneId:p.laneId}))));
+    for(const phrase of score.phrases){
+      const policy=phraseLinger(phrase,settings),lane=atoms.filter(u=>u.laneId===phrase.laneId);
+      for(const word of phrase.words.filter(w=>!w.excluded))for(const item of [word,...(word.syllables||[])]){
+        const other=lane.filter(u=>u.id!==item.id),next=other.filter(u=>u.startMs>=item.endMs).sort((a,b)=>a.startMs-b.startMs)[0];
+        if(other.some(u=>u.startMs<item.endMs&&u.endMs>item.endMs))continue;
+        const end=lingerEnd(item.endMs,next?.startMs,score,map,policy);
+        if(end>item.endMs)units[item.id]=end;
+      }
+    }
+    return {phrases:displayEnds(score,map,settings),units};
   }
   function cueAt(cue,map,sourceMs,reducedMotion=false,knownBeat){
     const beat=knownBeat??tempo.tempoAt(map,sourceMs)?.beat;if(beat===undefined||beat<cue.beat||beat>=cue.beat+cue.durationBeats)return null;
@@ -29,5 +53,5 @@
     }
     return events;
   }
-  return {displayEnds,cueAt,clickSchedule};
+  return {displayEnds,presentationEnds,lingerSettings,cueAt,clickSchedule};
 });

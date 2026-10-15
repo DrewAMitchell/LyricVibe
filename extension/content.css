@@ -2501,3 +2501,10 @@
 #lvx-root .lvx-theme-picker:not([data-motion=classic]) .lvx-tile-word{animation:none}
 #lvx-root .lvx-theme-picker:not([data-motion=classic]) .lvx-tile-stage{height:126px}
 #lvx-root .lvx-theme-tile[data-previewing=true] .lvx-tile-name{color:#e5f2d7;text-decoration:underline;text-underline-offset:3px}
+#lvx-root .lvx-linger-controls{display:flex;flex-wrap:wrap;gap:8px 14px;margin:0 0 14px;color:#e1e9ee;font:12px/1.4 system-ui,sans-serif}
+#lvx-root .lvx-linger-controls label{display:flex;align-items:center;gap:8px;min-height:40px}
+#lvx-root .lvx-linger-controls select,#lvx-root .lvx-linger-controls input{min-height:40px;padding:8px;background:#17232c;color:#f4f7fa;border:1px solid #8195a3;border-radius:5px;font:inherit}
+#lvx-root .lvx-linger-controls input{width:74px}
+#lvx-root .lvx-linger-controls p{flex-basis:100%;margin:0;color:#c0cdd5;font-size:11px}
+#lvx-root .lvx-linger-controls p:empty{display:none}
+#lvx-root .lvx-linger-controls [hidden]{display:none!important}
