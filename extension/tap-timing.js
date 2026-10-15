@@ -150,7 +150,7 @@
     return snapshot;
   }
   function withFlowHistory(previous, next) {
-    if (!['flow', 'subdivide', 'entrances', 'word-frames', 'phrase-stream'].includes(previous.cadence)) return next;
+    if (!['pairs', 'flow', 'subdivide', 'entrances', 'word-frames', 'phrase-stream'].includes(previous.cadence)) return next;
     const history = [...(previous.actionHistory || []), flowSnapshot(previous)].slice(-FLOW_HISTORY_LIMIT);
     return { ...next, actionHistory: history };
   }
@@ -446,7 +446,7 @@
     }
     if (firstStart) {
       const next = { ...take, pendingStartMs: acceptedMs, originMs, lastMs: acceptedMs };
-      return take.cadence === 'flow' ? withFlowHistory(take, next) : next;
+      return take.cadence === 'flow' || take.actionHistory?.length ? withFlowHistory(take, next) : next;
     }
     if (acceptedMs <= take.pendingStartMs) fail('INVALID_INTERVAL', 'End tap must be strictly after the start tap.');
     if (take.cadence === 'subdivide') {
@@ -480,7 +480,7 @@
     }
     const next = { ...take, marks, index, pendingStartMs: null, lastMs: acceptedMs,
       status: index === take.units.length ? 'complete' : 'armed' };
-    return take.cadence === 'flow' ? withFlowHistory(take, next) : next;
+    return take.cadence === 'flow' || take.actionHistory?.length ? withFlowHistory(take, next) : next;
   }
 
   function release(take, scoreMs, options = {}) {
@@ -499,12 +499,12 @@
     const index = take.index + 1;
     const next = { ...take, marks, index, pendingStartMs: null, lastMs: acceptedMs,
       status: index === take.units.length ? 'complete' : 'armed' };
-    return take.cadence === 'flow' ? withFlowHistory(take, next) : next;
+    return take.cadence === 'flow' || take.actionHistory?.length ? withFlowHistory(take, next) : next;
   }
 
   function undo(take) {
     if (!take || !['armed', 'complete', 'stopped'].includes(take.status)) fail('INVALID_TAKE', 'Provide a take returned by begin.');
-    if (['flow', 'subdivide', 'entrances', 'word-frames', 'phrase-stream'].includes(take.cadence) && take.actionHistory && take.actionHistory.length) {
+    if (take.actionHistory && take.actionHistory.length) {
       const previous = take.actionHistory[take.actionHistory.length - 1];
       return { ...previous, actionHistory: take.actionHistory.slice(0, -1) };
     }
@@ -918,6 +918,7 @@
     if (!take.actionHistory?.length) return take;
     const previous = take.actionHistory.at(-1);
     return { ...take, events: previous.events, index: previous.index, lastMs: previous.lastMs,
+      units: previous.units || take.units,
       actionHistory: take.actionHistory.slice(0, -1) };
   }
   function rewindEvents(take, phraseId) {
@@ -1323,7 +1324,45 @@
     return { phrases, unclaimed, ready: phrases.every(p => p.heldCount === 0 || p.ready) };
   }
 
-  return { begin, mark, release, undo, stop, adjust, reposition, moveCursor, reassignLast, restoreWordFrameTake, rewindToPhrase, restorePhraseStreamTake,
+  // Listening moves only the cursor. It never creates marks, removes a take,
+  // or advances a word that is currently held by the performer.
+  function followPlayback(take, nowMs, { rewind = false } = {}) {
+    if (!take || take.status !== 'armed' || !integerTime(nowMs) || take.pendingStartMs !== null ||
+        !(take.cadence === 'word-holds' || take.mode === 'word' || take.mode === 'phrase')) return take;
+    const candidates = take.units.map((unit,index)=>({unit,index})).filter(({unit})=>!take.retime||unit.phraseId===take.retime.phraseId);
+    const found = candidates.find(({unit})=>nowMs < (unit.referenceEndMs ?? unit.estimatedEndMs ?? unit.maxMs)) || candidates.at(-1);
+    if (!found) return take;
+    const index = rewind ? found.index : Math.max(take.index,found.index);
+    return index === take.index ? take : {...take,index};
+  }
+
+  // Seek/listen is lossless. Only the first new press replaces the suffix,
+  // with a snapshot so Undo can recover the original recorded evidence.
+  function punchIn(take, nowMs, { phraseId = null } = {}) {
+    if (!take || !integerTime(nowMs)) fail('INVALID_TIME','Punch-in needs a nonnegative source-clock time.');
+    if (take.cadence === 'performance-events') {
+      const events = take.events.filter(event=>event.sourceMs < nowMs);
+      const units = take.units.map(unit=>unit.phraseId===phraseId&&nowMs<unit.minMs?{...unit,minMs:nowMs}:unit);
+      return {...take,units,events,lastMs:events.at(-1)?.sourceMs??null,status:'armed',
+        actionHistory:[...take.actionHistory,{events:take.events,index:take.index,lastMs:take.lastMs,units:take.units}].slice(-128)};
+    }
+    if (take.cadence === 'word-holds') {
+      const earlier = new Set(take.units.slice(0,take.index).map(unit=>unit.wordId));
+      const holds = take.holds.filter(hold=>earlier.has(hold.wordId)&&hold.releaseMs<=nowMs||take.retime&&hold.phraseId!==take.retime.phraseId);
+      const prior = holds.filter(hold=>earlier.has(hold.wordId));
+      return {...take,holds,pendingStartMs:null,lastMs:prior.length?Math.max(...prior.map(h=>h.releaseMs)):null,status:'armed',
+        actionHistory:[...take.actionHistory,holdSnapshot(take)].slice(-256)};
+    }
+    if (take.mode === 'word' || take.mode === 'phrase') {
+      const next=reposition(take,take.index),marks=next.marks.filter(mark=>mark.endMs<=nowMs);
+      return withFlowHistory(take,{...next,marks,lastMs:marks.at(-1)?.endMs??null,status:'armed'});
+    }
+    let next=take;
+    while(next.lastMs!==null&&next.lastMs>=nowMs){const prior=undo(next);if(prior===next)break;next=prior;}
+    return {...next,status:'armed'};
+  }
+
+  return { begin, mark, release, undo, stop, adjust, reposition, followPlayback, punchIn, moveCursor, reassignLast, restoreWordFrameTake, rewindToPhrase, restorePhraseStreamTake,
     beginEvents, markEvent, stopEvents, undoEvent, rewindEvents, associateEvents,
     beginWordHolds, pressWord, releaseWord, skipWords, undoWordHold, stopWordHolds, rewindWordHolds, retimePhraseHolds, associateWordHolds, wordHoldsFromPairs, estimateTempo,
     leadInProgress, captureProgress, validateTempoMap, tempoMapFromEstimate, setTempoPoint, removeTempoPoint, tempoAt, tempoTimeAtBeat };

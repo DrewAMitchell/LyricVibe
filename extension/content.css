@@ -95,6 +95,9 @@
 #lvx-root .lvx-capture-transcript p { color:#edf1e8; font-size:clamp(26px,4vw,56px); line-height:1.65; margin:12px 0 0; font-weight:600; }
 #lvx-root .lvx-capture-transcript span { color:#edf1e8; border-radius:5px; padding:2px; box-decoration-break:clone; -webkit-box-decoration-break:clone; }
 #lvx-root .lvx-capture-transcript .lvx-estimated-playing { color:#f4fbff; background:#244f68; box-shadow:inset 0 -3px #85d2ff; }
+#lvx-root .lvx-perform-cue .lvx-guide-syllable, #lvx-root .lvx-capture-transcript .lvx-guide-syllable { padding:0; border-radius:2px; font:inherit; }
+#lvx-root .lvx-perform-cue .lvx-recorded-event-pulse, #lvx-root .lvx-capture-transcript .lvx-recorded-event-pulse { font-size:12px; line-height:1.5; color:#c4cdbb; margin:8px 0 0; }
+#lvx-root .lvx-recorded-event-pulse[data-playing=true] { color:#85d2ff; text-shadow:0 0 8px #85d2ff80; }
 #lvx-root .lvx-capture-transcript .lvx-next-record { outline:2px solid #e9ce88; outline-offset:2px; }
 #lvx-root .lvx-perform-cue .lvx-recording-current, #lvx-root .lvx-capture-transcript .lvx-recording-current { color:#f4fbff; background:#244f68; box-shadow:inset 0 -3px #85d2ff; }
 #lvx-root .lvx-upcoming-phrases { border-top:1px solid #596152; padding-top:8px; margin-top:10px; text-transform:none; letter-spacing:normal; }

@@ -2,6 +2,40 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const tap = require('../extension/tap-timing.js');
 
+test('playback advances untouched words, locks a held word, and listening preserves marks', () => {
+  const units=[0,1,2].map(i=>({id:'w'+i,wordId:'w'+i,text:'word',minMs:0,maxMs:10000,estimatedStartMs:1000+i*1000,estimatedEndMs:2000+i*1000}));
+  let take=tap.begin(units,{mode:'word',cadence:'pairs'});
+  take=tap.mark(take,1100);take=tap.release(take,1600);
+  const marks=take.marks;
+  take=tap.followPlayback(take,3500);assert.equal(take.index,2);assert.strictEqual(take.marks,marks);
+  take=tap.followPlayback(take,1200,{rewind:true});assert.equal(take.index,0);assert.strictEqual(take.marks,marks);
+  take=tap.punchIn(take,900);take=tap.mark(take,900);
+  assert.strictEqual(tap.followPlayback(take,3500),take,'holding owns cursor');
+  take=tap.undo(take);take=tap.undo(take);assert.deepEqual(take.marks,marks,'undo recovers replaced evidence');
+});
+
+test('syllable punch-in expands an early phrase only on the candidate and undo restores its events and bounds', () => {
+  const units=[{id:'w',wordId:'w',phraseId:'p',text:'word',minMs:1000,maxMs:5000,expectedCount:2}];
+  let take=tap.beginEvents(units);take=tap.markEvent(take,1100);take=tap.markEvent(take,2400);
+  const original=structuredClone(take);
+  let candidate=tap.punchIn(take,500,{phraseId:'p'});
+  assert.deepEqual(take,original);assert.equal(candidate.units[0].minMs,500);assert.equal(candidate.events.length,0);
+  candidate=tap.markEvent(candidate,500);candidate=tap.markEvent(candidate,1600);
+  const report=tap.associateEvents(candidate);assert.equal(report.phrases[0].ready,true);assert.equal(report.phrases[0].marks[0].startMs,500);
+  candidate=tap.undoEvent(tap.undoEvent(tap.undoEvent(candidate)));
+  assert.deepEqual(candidate.events,original.events);assert.deepEqual(candidate.units,original.units);
+});
+
+test('word hold punch-in keeps earlier holds and scoped retime preserves other phrases', () => {
+  const units=[0,1,2].map(i=>({id:'w'+i,wordId:'w'+i,phraseId:i<2?'p':'q',text:'word',minMs:0,maxMs:6000,referenceStartMs:i*1000,referenceEndMs:(i+1)*1000}));
+  let take=tap.beginWordHolds(units,[{id:'e',sourceMs:100}]);
+  for(let i=0;i<3;i++){take=tap.pressWord(take,i*1000+100);take=tap.releaseWord(take,i*1000+800);}
+  const original=take.holds;
+  take=tap.punchIn({...take,index:1,retime:{phraseId:'p'}},1100);
+  assert.deepEqual(take.holds.map(h=>h.wordId),['w0','w2']);
+  assert.deepEqual(tap.undoWordHold(take).holds,original);
+});
+
 test('lead-in guidance follows source-clock time and clamps before and after the lead-in', () => {
   assert.deepEqual(tap.leadInProgress(1000, 3000, 1000), { remainingMs: 2000, progress: 0 });
   assert.deepEqual(tap.leadInProgress(2500, 3000, 1000), { remainingMs: 500, progress: 0.5 });
