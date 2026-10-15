@@ -27,8 +27,24 @@ let server,browser;
     assert.equal(await evaluate(()=>__qa.hasUnsavedWork()),true,name+' retained');
   }
   // Cancel link before the host SPA receives it, not just after its DOM changes.
-  await page.evaluate(()=>{window.hostClicks=0;document.querySelector('#next').addEventListener('click',e=>{window.hostClicks++;e.preventDefault();history.pushState({},'',e.currentTarget.href)});});
+  await page.evaluate(()=>{window.hostClicks=0;document.querySelector('#next').addEventListener('click',e=>{window.hostClicks++;e.preventDefault();document.body.dispatchEvent(new CustomEvent('yt-navigate',{bubbles:true,detail:{endpoint:{watchEndpoint:{videoId:new URL(e.currentTarget.href).searchParams.get('v')}}}}))});});
   await page.locator('#next').click();assert.equal(await page.evaluate(()=>hostClicks),0);
+  // YouTube's actual onYtNavigate forwards the endpoint to handleNavigate before
+  // the browser sees History API navigation. Cancel must stop that site event,
+  // not merely cancel the later URL update while the handler keeps running.
+  await page.evaluate(()=>{window.hostTransitions=0;document.body.addEventListener('yt-navigate',e=>{const id=e.detail.endpoint.watchEndpoint.videoId;history.pushState({},'','/watch?v='+id);window.hostTransitions++;document.body.dataset.loadedVideo=id;});});
+  await evaluate(()=>{__qa.discardTimingLocal();__qa.timing.draft=__fresh();__qa.timing.draft.previewRevision=1});
+  const autoDialogs=dialogs.length;
+  await page.evaluate(()=>document.body.dispatchEvent(new CustomEvent('yt-navigate',{bubbles:true,cancelable:true,detail:{endpoint:{watchEndpoint:{videoId:'TESTVIDEO02'}}}})));
+  assert.equal(await page.evaluate(()=>hostTransitions),0,'Cancel stops automatic next before site transition');
+  assert.equal(dialogs.length,autoDialogs+1);
+  await page.evaluate(()=>document.body.dispatchEvent(new CustomEvent('yt-navigate',{bubbles:true,cancelable:true,detail:{endpoint:{watchEndpoint:{videoId:'TESTVIDEO02'}}}})));
+  assert.equal(await page.evaluate(()=>hostTransitions),0,'queued autoplay retry remains blocked');
+  assert.equal(dialogs.length,autoDialogs+1,'automatic retries do not reopen the dialog');
+  assert.equal(await evaluate(()=>{const v=document.querySelector('video');v.paused=false;v.dispatchEvent(new Event('play'));return v.paused}),true,'queued autoplay cannot resume after Cancel');
+  await evaluate(()=>document.querySelector('#activate').addEventListener('click',()=>{const v=document.querySelector('video');v.paused=false;v.dispatchEvent(new Event('play'));},{once:true}));
+  await page.locator('#activate').click();
+  assert.equal(await evaluate(()=>document.querySelector('video').paused),false,'explicit playback can resume to review unsaved timing');
   // End-of-track capture prevents the host's automatic Next handler.
   await page.evaluate(()=>{window.autoNext=0;document.querySelector('video').addEventListener('ended',()=>{window.autoNext++;history.pushState({},'','/watch?v=TESTVIDEO02')});document.querySelector('video').dispatchEvent(new Event('ended'));});
   assert.equal(await page.evaluate(()=>autoNext),0);assert.match(await evaluate(()=>__qa.syncPanel.querySelector('.lvx-sync-notice').textContent),/Auto-next/);
@@ -57,7 +73,7 @@ let server,browser;
   assert.equal(await evaluate(()=>__qa.hasUnsavedWork()),false,'explicit discard clears typed lyrics too');
   // Explicit Leave is honored once, without a second prompt from the SPA navigate event.
   await evaluate(()=>{__qa.timing.draft=__fresh();__qa.timing.draft.previewRevision=1});accept=true;
-  const leaveDialogs=dialogs.length;await page.locator('#next').click();assert.equal(page.url(),next);assert.equal(dialogs.length,leaveDialogs+1);
-  const proof={observedAt:new Date().toISOString(),basis:'Actual content.js in Chrome isolated world; mocked source media/worker/storage; real navigation and native dialogs.',checks:['clean preview','same-video params','armed take','raw stopped take','used preview','typed times','lyrics','effects','syllable spelling','link blocked before host','ended auto-next blocked','native beforeunload cancel','failed save retained','successful save clean','Back cancelled','close Sync cancelled','unavoidable switch retains draft','other-video close ignored','explicit discard clears typed lyrics','explicit leave single prompt'],dialogs};
+  const leaveDialogs=dialogs.length;await page.evaluate(url=>{document.querySelector('#next').href=url+'&list=fixture&index=2'},next);await page.locator('#next').click();assert.equal(page.url(),next);assert.equal(dialogs.length,leaveDialogs+1);
+  const proof={observedAt:new Date().toISOString(),basis:'Actual content.js in Chrome isolated world; mocked source media/worker/storage; real navigation and native dialogs.',checks:['clean preview','same-video params','armed take','raw stopped take','used preview','typed times','lyrics','effects','syllable spelling','link blocked before host','ended auto-next blocked','native beforeunload cancel','failed save retained','successful save clean','Back cancelled','close Sync cancelled','unavoidable switch retains draft','other-video close ignored','explicit discard clears typed lyrics','explicit leave single prompt','automatic site transition blocked before handler','queued autoplay retries stay blocked','automatic play after Cancel paused','explicit playback resumes review','approved video survives playlist URL normalization'],dialogs};
   fs.writeFileSync(path.join(root,'docs/unsaved-navigation-proof.json'),JSON.stringify(proof,null,2)+'\n');console.log(JSON.stringify(proof));
 })().catch(error=>{console.error(error.stack);process.exitCode=1}).finally(async()=>{await browser?.close();await server?.close()});

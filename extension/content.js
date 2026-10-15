@@ -538,6 +538,7 @@
       timing.draft && (timing.draft.previewRevision > 0 || timing.draft.changedWords > 0));
   }
   let navigationApproval = null;
+  let navigationHold = null, navigationGestureUntil = 0;
   const navigationWork = () => JSON.stringify([timing.draft?.token, timing.draft?.previewRevision,
     timing.dirty && syncText.value, transcript.dirty && syncButton('transcript-text').value,
     tapping.splitDirty && [syncButton('tap-spoken').value, syncButton('tap-split').value], tapping.take, performanceTake.armed, performanceTake.marks]);
@@ -547,43 +548,80 @@
     return !source || LvScore.mediaKey({url}) !== source;
   }
   function approvedNavigation(url) {
+    const target=new URL(url),approved=navigationApproval&&new URL(navigationApproval.url);
+    const same=approved&&(target.href===approved.href||target.origin===approved.origin&&LvScore.mediaKey({url:target.href})&&LvScore.mediaKey({url:target.href})===LvScore.mediaKey({url:approved.href}));
     return navigationApproval && performance.now() < navigationApproval.until &&
-      new URL(url).href === navigationApproval.url && navigationApproval.work === navigationWork();
+      same && navigationApproval.work === navigationWork();
   }
-  function confirmUnsavedNavigation(url) {
-    if (!hasUnsavedWork() || !leavesEditedVideo(url) || approvedNavigation(url)) return true;
+  function holdUnsavedNavigation(message) {
+    navigationApproval=null;navigationGestureUntil=0;
+    navigationHold={source:navigationSource(),pause:true};
+    getMedia()?.pause();
+    setSyncNotice(message,'warn');
+  }
+  function navigationHeld() {
+    if(navigationHold&&(!hasUnsavedWork()||navigationHold.source!==navigationSource()))navigationHold=null;
+    return !!navigationHold;
+  }
+  function confirmUnsavedNavigation(url,explicit=false) {
+    if (!hasUnsavedWork()) {navigationHold=null;return true;}
+    if (!leavesEditedVideo(url) || approvedNavigation(url)) return true;
+    // Cancel is persistent for automatic retries. A deliberate link/transport
+    // gesture can ask again; a queued site task cannot manufacture permission.
+    if(navigationHeld()&&!explicit&&performance.now()>navigationGestureUntil)return false;
     const leave = window.confirm('Leave this video without saving timings? Your current take and edits have not been saved. Choose Cancel to stay, then use Save timings.');
-    if (leave) navigationApproval = {url: new URL(url).href, work: navigationWork(), until: performance.now() + 10000};
-    else {
-      getMedia()?.pause();
-      setSyncNotice('Stayed on this video. Your take and edits are retained. Use Save timings before leaving.','warn');
-    }
+    if (leave) {navigationHold=null;navigationApproval = {url: new URL(url).href, work: navigationWork(), until: performance.now() + 10000};}
+    else holdUnsavedNavigation('Stayed on this video. Automatic next is blocked; your take and edits are retained. Resume to review, or Save timings before leaving.');
     return leave;
   }
   window.addEventListener('beforeunload', event => {
     if (!hasUnsavedWork() || approvedNavigation(navigationApproval?.url || location.href)) return;
+    // Native dialogs do not report Cancel to script. Park the player before
+    // asking; if the document stays, queued autoplay still has no permission.
+    holdUnsavedNavigation('Navigation paused while your take is unsaved. Resume to review, or Save timings before leaving.');
     event.preventDefault(); event.returnValue = '';
   });
   // Catch links before YouTube mutates its player/DOM, including Next in a playlist.
   window.addEventListener('click', event => {
+    if(event.isTrusted&&event.composedPath().some(node=>['A','BUTTON','VIDEO'].includes(node?.tagName)||node?.getAttribute?.('role')==='button'))navigationGestureUntil=performance.now()+1000;
     if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     const link = event.composedPath().find(node => node?.tagName === 'A' && node.href);
     if (!link || link.download || link.target && link.target !== '_self') return;
     const url = new URL(link.href, location.href);
     if (url.origin !== location.origin) return; // Native beforeunload owns document exits.
-    if (!confirmUnsavedNavigation(url.href)) { event.preventDefault(); event.stopImmediatePropagation(); }
+    if (!confirmUnsavedNavigation(url.href,true)) { event.preventDefault(); event.stopImmediatePropagation(); }
   }, true);
+  window.addEventListener('keydown',event=>{
+    if(event.isTrusted&&!event.target?.matches?.('input,textarea,select')&&!event.target?.isContentEditable&&
+      (['Space','KeyK','MediaPlayPause'].includes(event.code)||event.shiftKey&&event.code==='KeyN'))navigationGestureUntil=performance.now()+1000;
+  },true);
+  // YouTube's onYtNavigate starts its player/page transition before pushState.
+  // Stop that event at window capture; canceling the later browser navigation
+  // alone does not unwind the already-running site handler.
+  window.addEventListener('yt-navigate',event=>{
+    const endpoint=event.detail?.endpoint;
+    const target=endpoint?.watchEndpoint?.videoId?'/watch?v='+encodeURIComponent(endpoint.watchEndpoint.videoId):endpoint?.commandMetadata?.webCommandMetadata?.url||endpoint?.urlEndpoint?.url;
+    if(!target)return;
+    let url;try{url=new URL(target,location.href).href;}catch{return;}
+    if(!confirmUnsavedNavigation(url)){event.preventDefault();event.stopImmediatePropagation();}
+  },true);
+  window.addEventListener('play',event=>{
+    if(event.target!==getMedia()||!navigationHeld()||!navigationHold.pause)return;
+    if(performance.now()<=navigationGestureUntil){navigationHold.pause=false;return;}
+    event.stopImmediatePropagation();getMedia()?.pause();
+  },true);
   // History API updates also emit navigate, covering programmatic SPA transitions.
   window.navigation?.addEventListener('navigate', event => {
-    if (navigationApproval && event.destination.url !== navigationApproval.url) navigationApproval = null;
-    if (!event.destination.sameDocument || event.hashChange || event.downloadRequest || !hasUnsavedWork() || !leavesEditedVideo(event.destination.url)) return;
-    if (event.cancelable && !confirmUnsavedNavigation(event.destination.url)) event.preventDefault();
+    if (navigationApproval && !approvedNavigation(event.destination.url)) navigationApproval = null;
+    if(!hasUnsavedWork()){navigationHold=null;return;}
+    if (!event.destination.sameDocument || event.hashChange || event.downloadRequest || !leavesEditedVideo(event.destination.url)) return;
+    if (event.cancelable && !confirmUnsavedNavigation(event.destination.url,event.userInitiated)) event.preventDefault();
   });
   // An unsaved take should never silently roll into the next playlist video.
   window.addEventListener('ended', event => {
     if (event.target !== getMedia() || !hasUnsavedWork()) return;
     event.stopImmediatePropagation();
-    getMedia()?.pause();
+    holdUnsavedNavigation('Playback ended. Automatic next is blocked while your take is unsaved. Use Save timings, or deliberately choose the next video and confirm leaving.');
     if (tapping.take?.status === 'armed') stopTapTake();
     if (performanceTake.armed) stopEffects();
     syncPanel.hidden = false;
@@ -1973,6 +2011,7 @@
     finally { timing.busy = false; refreshTimingPanel(); }
   }
   function discardTimingLocal() {
+    navigationHold=null;navigationApproval=null;
     discardTapTake();
     discardEffects();
     timing.draft = null; timing.dirty = false; timing.auditioned = false; state.auditionLoop = timing.priorLoop; timing.priorLoop = null; state.scoreSignature = '';
