@@ -1215,7 +1215,9 @@
   function setCaptureText(selector,value){const element=syncPanel.querySelector(selector);if(element.textContent!==value)element.textContent=value;}
   function refreshPerformClock(now) {
     if(!state.score)return;
-    if(tapping.take?.status==='armed'&&!timing.busy){
+    // After punch-in, releases/explicit navigation own the capture cursor.
+    // Stale playback estimates must not skip an unclaimed word between presses.
+    if(tapping.take?.status==='armed'&&tapping.listening&&!timing.busy){
       const pinned=tapping.backIndex!==null&&tapping.backIndex!==undefined&&tapping.backAnchorMs!==null&&now+state.score.offsetMs<=tapping.backAnchorMs;
       const followed=pinned?tapping.take:LvTapTiming.followPlayback(tapping.take,Math.max(0,Math.round(now+(rawTake(tapping.take)?state.score.offsetMs:0))),{rewind:tapping.listening});
       if(followed!==tapping.take){tapping.take=followed;followTapUnit();state.scoreSignature='';refreshTimingPanel();}
@@ -1234,7 +1236,7 @@
       if(unit&&tapping.streamWordId!==unit.wordId){tapping.streamWordId=unit.wordId;timing.phraseIndex=timing.draft.score.phrases.findIndex(p=>p.id===unit.phraseId);tapping.wordId=unit.wordId;state.scoreSignature='';refreshTimingPanel();}
       syncPanel.querySelector('.lvx-estimated-phrase').hidden=false;
       setCaptureText('.lvx-estimated-phrase',unit?`Next: “${unit.text}” · ${take.syllableEvents.filter(e=>e.sourceMs>=unit.minMs&&e.sourceMs<unit.maxMs).length} syllable taps in this phrase`:'Every word is held');
-      setCaptureText('.lvx-cue-legend','Playback follows existing timing · hold Space to take over');
+      setCaptureText('.lvx-cue-legend',tapping.listening?'Playback follows existing timing · hold Space to take over':'You control the next word · hold Space to record it');
       return;
     }
     if(eventTake(tapping.take)&&tapping.take.status==='armed'){
@@ -1268,8 +1270,8 @@
     let phrase=timingPhrase();
     if(tapping.take&&['armed','complete'].includes(tapping.take.status)&&!(tapping.take.mode==='syllable'&&tapping.take.status==='complete')){
       const live=syncPanel.querySelector('.lvx-estimated-phrase');live.hidden=false;
-      setCaptureText('.lvx-estimated-phrase',getMedia()?.paused?'Take armed · playback paused':tapping.heldInput?'Recording your held timing':'Following existing timing · press Space to take over');
-      setCaptureText('.lvx-cue-legend','Playback keeps moving while you listen · held words stay under your control');
+      setCaptureText('.lvx-estimated-phrase',getMedia()?.paused?'Take armed · playback paused':tapping.heldInput?'Recording your held timing':tapping.listening?'Following existing timing · press Space to take over':'Waiting for your next input');
+      setCaptureText('.lvx-cue-legend',tapping.listening?'Playback keeps moving while you listen · press Space to take over':'Your input advances the cue · rewind to listen again');
       return;
     }
     if((!tapping.take||tapping.take.status==='stopped')&&!timing.busy){followPlaybackPhrase(now);followPlaybackWord(now);}
