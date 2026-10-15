@@ -26,6 +26,18 @@ test('syllable punch-in expands an early phrase only on the candidate and undo r
   assert.deepEqual(candidate.events,original.events);assert.deepEqual(candidate.units,original.units);
 });
 
+test('recorded entrances supersede earlier stale ends while a true rewind returns to earlier words', () => {
+  const units=[0,1,2].map(i=>({id:'w'+i,wordId:'w'+i,phraseId:'p',text:'word',minMs:0,maxMs:10000,estimatedStartMs:1000+i*2000,estimatedEndMs:3000+i*2000,referenceStartMs:1000+i*2000,referenceEndMs:3000+i*2000}));
+  for(const raw of [false,true]){
+    let take=raw?tap.beginWordHolds(units,[{id:'e',sourceMs:1800}]):tap.begin(units,{mode:'word',cadence:'pairs'});
+    take={...take,index:1};take=raw?tap.pressWord(take,1800):tap.mark(take,1800);take=raw?tap.releaseWord(take,2300):tap.release(take,2300);
+    const original=structuredClone(take);
+    assert.equal(tap.followPlayback(take,1900,{rewind:true}).index,1);
+    assert.equal(tap.followPlayback(take,1200,{rewind:true}).index,0);
+    assert.deepEqual(take,original,'listening never mutates timing');
+  }
+});
+
 test('word hold punch-in keeps earlier holds and scoped retime preserves other phrases', () => {
   const units=[0,1,2].map(i=>({id:'w'+i,wordId:'w'+i,phraseId:i<2?'p':'q',text:'word',minMs:0,maxMs:6000,referenceStartMs:i*1000,referenceEndMs:(i+1)*1000}));
   let take=tap.beginWordHolds(units,[{id:'e',sourceMs:100}]);

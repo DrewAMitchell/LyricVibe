@@ -1330,7 +1330,11 @@
     if (!take || take.status !== 'armed' || !integerTime(nowMs) || take.pendingStartMs !== null ||
         !(take.cadence === 'word-holds' || take.mode === 'word' || take.mode === 'phrase')) return take;
     const recordedEnds=new Map(take.cadence==='word-holds'?(take.holds||[]).map(h=>[h.wordId,h.releaseMs]):(take.marks||[]).map(m=>[m.id,m.endMs]));
-    const candidates = take.units.map((unit,index)=>({unit,index})).filter(({unit})=>!take.retime||unit.phraseId===take.retime.phraseId);
+    const recordedStarts=new Map(take.cadence==='word-holds'?(take.holds||[]).map(h=>[h.wordId,h.pressMs]):(take.marks||[]).map(m=>[m.id,m.startMs]));
+    const eligible = take.units.map((unit,index)=>({unit,index})).filter(({unit})=>!take.retime||unit.phraseId===take.retime.phraseId);
+    // A recorded entrance supersedes an earlier word's stale estimated end.
+    const entered=eligible.filter(({unit})=>nowMs>=(recordedStarts.get(take.cadence==='word-holds'?unit.wordId:unit.id)??Infinity)).at(-1)?.index??0;
+    const candidates=eligible.filter(({index})=>index>=entered);
     const found = candidates.find(({unit})=>nowMs < (recordedEnds.get(take.cadence==='word-holds'?unit.wordId:unit.id) ?? unit.referenceEndMs ?? unit.estimatedEndMs ?? unit.maxMs)) || candidates.at(-1);
     if (!found) return take;
     const index = rewind ? found.index : Math.max(take.index,found.index);
