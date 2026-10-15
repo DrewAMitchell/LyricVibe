@@ -453,6 +453,7 @@
       <div class="lvx-tap-timeline" aria-label="Current phrase timing"><div class="lvx-tap-blocks"></div><i class="lvx-tap-playhead" hidden></i></div>
       <div class="lvx-tap-status" role="status" aria-live="polite">Choose a word to begin.</div>
       <div class="lvx-tap-actions"><button data-sync="tap-use">Use take in preview</button><button data-sync="tap-undo">↶ Undo mark</button><button data-sync="tap-discard">Discard take</button><button data-sync="take-export" disabled>Export take</button></div>
+      <button data-sync="events-restore" title="Reopen the last locally recorded syllable pass for this video. Review its grouping before adding it to the preview.">Review last syllable pass ↗</button>
       <button data-sync="transcript-open" class="lvx-transcript-open">✎ Lyrics text</button><dialog class="lvx-transcript-editor" aria-label="Lyrics text"><h3>Lyrics</h3><p class="lvx-sync-hint">Paste or edit the lyrics, one phrase per line. Prefix a word with = to show it all at once (e.g. =NoOoOoOo); remove = to follow syllables. <code>[backing]</code> puts a line on the backing lane. Fixed words keep their timing; new lines get estimated timing to retime; deleted words and lines are hidden. Undo preview reverts.</p><textarea data-sync="transcript-text" rows="18" spellcheck="true" aria-label="Lyrics, one phrase per line"></textarea><ul class="lvx-transcript-changes" aria-live="polite"></ul><div class="lvx-tap-actions"><button data-sync="transcript-apply">Apply to preview</button><button data-sync="transcript-close">Close</button></div></dialog><section class="lvx-event-review" hidden aria-label="Assign recorded events"><p class="lvx-event-summary" role="status"></p><div class="lvx-event-phrases"></div><div class="lvx-tap-actions"><button data-sync="events-review">Use reviewed assignments</button><button data-sync="events-export">Export events</button></div><p class="lvx-sync-hint">Counts group your recorded entrances into words. Amber means uncertain or changed. Raw timestamps never move. A word starts at its first entrance; its end stays provisional until word-boundary cleanup. Long gaps are flagged because a held syllable can look like the next word. Unresolved phrases stay in the take.</p></section>
       <section class="lvx-mark-correction" hidden aria-label="Correct recorded timing"><label>Recorded <select data-sync="correct-mark" aria-label="Recorded mark to correct"></select></label><div class="lvx-correction-times"><label>Start ms <input data-sync="correct-start" type="number" min="0" step="10"></label><label>End ms <input data-sync="correct-end" type="number" min="0" step="10"></label></div><div class="lvx-tap-actions"><button data-sync="correct-hear">▶ Hear this mark</button><button data-sync="correct-save">Use exact times</button></div><label>Adjust <select data-sync="correct-edge"><option value="move">Whole mark</option><option value="start">Start only</option><option value="end">End only</option></select></label><div class="lvx-tap-actions"><button data-sync="correct-earlier">← Earlier 10 ms</button><button data-sync="correct-later">Later 10 ms →</button><button data-sync="correct-undo">↶ Undo correction</button></div><p class="lvx-sync-hint">Alt + ← / → adjusts the selected edge by 10 ms; add Shift for 50 ms. Corrections use original song time. Hear this mark plays a short loop at practice speed.</p></section>
       <details class="lvx-perform-options"><summary>Performance options <span>units · grid · clicks</span></summary>
@@ -501,7 +502,13 @@
   // Raw takes record absolute source-clock times and are reviewed after Stop.
   const rawTake = take => eventTake(take)||wordTake(take);
   const tapCount = take => eventTake(take)?take.events.length:wordTake(take)?take.holds.length:take?.marks.length||0;
-  const captureSaveWarning=()=>rawTake(tapping.take)&&tapping.eventErrors?.length?`${tapping.eventErrors.length} captured phrase${tapping.eventErrors.length===1?'':'s'} still need review. Save keeps the applied preview and backs up unresolved capture.`:'';
+  const captureSaveWarning=()=>{
+    if(!rawTake(tapping.take))return '';
+    const report=wordTake(tapping.take)?LvTapTiming.associateWordHolds(tapping.take):LvTapTiming.associateEvents(tapping.take,{counts:tapping.eventCounts||{}});
+    const unresolved=new Set([...report.phrases.filter(p=>!p.ready&&(p.eventCount||p.heldCount)).map(p=>p.phraseId),...(tapping.eventErrors||[]).map(p=>p.phraseId)]);
+    const unassigned=(report.unassigned||report.unclaimed||[]).length;
+    return unresolved.size||unassigned?`${unresolved.size} captured phrase${unresolved.size===1?' still needs':'s still need'} review${unassigned?`; ${unassigned} events unassigned`:''}. Save keeps the applied preview and backs up unresolved capture.`:'';
+  };
   const continuousPass = () => continuousSyllables() || phraseStream() || eventPass() || wordPass();
   const frameTake = take => take?.cadence==='word-frames';
   function discardTapTake() { const restored=tapping.restored;tapping.restored=false;tapping.take = null; tapping.listening=false;tapping.backAnchorMs=null;tapping.backIndex=null; tapping.eventCounts={};tapping.eventApplied=[];tapping.eventErrors=[];tapping.eventReport=null;tapping.eventArchiveKey=null; tapping.frameWordId=null; tapping.streamWordId=null; tapping.followSeek=false;tapping.seekPhraseId=null;tapping.armSeekMs=null; tapping.auditionScore=null; tapping.auditionMarks=null; tapping.binding = null; tapping.clockMs = null; tapping.splitDirty = false; tapping.heldInput = null; tapping.cancelledSpace = false; tapping.reviewId = null; tapping.correctionUndo = [];if(restored)syncButton('tap-syllable-flow').value='events'; }
@@ -915,6 +922,8 @@
     syncButton('tap-undo').disabled = timing.busy || !take || (!tapCount(take) && take.pendingStartMs === null && !take.actionHistory?.length);
     syncButton('tap-use').disabled = timing.busy || !tapCount(take) || take.status === 'armed' || take.pendingStartMs !== null;
     syncButton('tap-discard').disabled = timing.busy || !take;
+    syncButton('events-restore').hidden=mode!=='syllable'||Boolean(take);
+    syncButton('events-restore').disabled=timing.busy||!sourceMatches||timing.dirty||tapping.splitDirty||effectPending();
     if(mode==='syllable'&&!continuous)syncButton('tap-use').disabled=timing.busy||take?.status!=='complete';
     const review=syncPanel.querySelector('.lvx-syllable-review');review.hidden=mode!=='syllable'||!take||continuous;
     syncButton('syllable-retake').disabled=timing.busy||!sourceMatches;
@@ -1364,13 +1373,15 @@
     let done=0;
     const binding=tapBinding(),phrases=timing.draft.score.phrases.slice(fromIndex).filter(p=>p.laneId===phrase.laneId&&p.endMs>p.startMs);
     const units=await Promise.all(phrases.flatMap(p=>p.words.filter(w=>!w.excluded).map(async word=>{
-      const authored=word.syllables?.length&&word.syllables.some(s=>s.locked||s.provenance==='manual');
+      // One timed whole-word child is also produced by the word pass. It is
+      // not evidence that the performer chose a one-syllable pronunciation.
+      const authored=word.syllables?.length>1&&word.syllables.some(s=>s.locked||s.provenance==='manual');
       let expectedCount=authored?word.syllables.length:raw?null:1,countOptions=[],countSource=authored?'authored':'unknown',parts=word.syllables?.map(s=>s.text)||[word.spokenText||word.text];
-      if(!authored){try{const r=await chrome.runtime.sendMessage({type:'LV_PRONUNCIATION_SUGGEST',text:word.text,...(word.spokenText?{spokenText:word.spokenText}:{})});
-        countOptions=r?.suggestion?.syllableCounts||[];if(countOptions.length){countSource='dictionary';expectedCount=countOptions[0];}
+      try{const r=await chrome.runtime.sendMessage({type:'LV_PRONUNCIATION_SUGGEST',text:word.text,...(word.spokenText?{spokenText:word.spokenText}:{})});
+        countOptions=r?.suggestion?.syllableCounts||[];if(!authored&&countOptions.length){countSource='dictionary';expectedCount=countOptions[0];}
         const candidate=r?.suggestion?.parts?.length?r.suggestion.parts:r?.suggestion?.alternatives?.find(a=>a.count===expectedCount)?.parts;
-        if(candidate?.length){parts=candidate;expectedCount=parts.length;}
-      }catch{/* A dictionary outage must not prevent a manual take. */}}
+        if(!authored&&candidate?.length){parts=candidate;expectedCount=parts.length;}
+      }catch{/* A dictionary outage must not prevent a manual take. */}
       if(onProgress)onProgress(++done);
       return {id:word.id,wordId:word.id,phraseId:p.id,text:word.text,parts,expectedCount,countOptions,countSource,referenceStartMs:word.startMs+(raw?state.score.offsetMs:0),referenceEndMs:word.endMs+(raw?state.score.offsetMs:0),referenceManual:word.provenance==='manual',minMs:p.startMs+(raw?state.score.offsetMs:0),maxMs:p.endMs+(raw?state.score.offsetMs:0),estimatedStartMs:p.startMs};
     })));
@@ -1688,6 +1699,35 @@
     for(const [,packet] of packets){const events=packet.schema==='lyricvibe-word-holds-v1'?packet.syllableEvents:packet.events;if(events?.length)return events;}
     return null;
   }
+  async function restoreLastSyllablePass(){
+    if(timing.busy||tapping.take||timing.dirty||tapping.splitDirty||effectPending()||!timing.draft)return;
+    const binding=tapBinding();timing.busy=true;refreshTimingPanel();
+    try{
+      const mediaKey=LvScore.mediaKey(state.score.source),all=await chrome.storage.local.get(null);
+      if(LvScore.mediaKey({url:location.href})!==mediaKey)throw Error('Return to this preview’s video before reopening its recording.');
+      const latest=Object.entries(all).filter(([k,v])=>k.startsWith('lvPerformanceEvents:'+mediaKey+':')&&v?.schema==='lyricvibe-performance-events-v1'&&v.mediaKey===mediaKey&&v.events?.length).sort((a,b)=>b[1].createdAt.localeCompare(a[1].createdAt))[0];
+      if(!latest)throw Error('No recorded syllable pass is saved for this video yet.');
+      const [key,packet]=latest;
+      if(packet.lyricsHash!==timing.draft.baseHash)throw Error('The recorded pass belongs to different lyrics. Its raw events are retained.');
+      const current=new Map(timing.draft.score.phrases.flatMap(p=>p.words.map(w=>[w.id,{word:w,phrase:p}])));
+      if(!packet.referenceUnits?.length||packet.referenceUnits.some(u=>{const match=current.get(u.wordId);return !match||match.word.excluded||match.word.text!==u.text||match.phrase.id!==u.phraseId;}))throw Error('Words changed since this recording. Keep its raw events for manual review.');
+      const hints=new Map();
+      for(const laneId of new Set(packet.referenceUnits.map(u=>current.get(u.wordId).phrase.laneId))){
+        const first=timing.draft.score.phrases.findIndex(p=>p.laneId===laneId);
+        for(const u of await prepareStreamUnits(timing.draft.score.phrases[first],true,first))hints.set(u.wordId,u);
+      }
+      // Retain the capture's source-clock frames; refresh only lexical hints.
+      const units=packet.referenceUnits.map(u=>{const h=hints.get(u.wordId);return {...u,expectedCount:h.expectedCount,countOptions:h.countOptions,countSource:h.countSource,parts:h.parts};});
+      const take=LvTapTiming.restoreEventRecording({...packet,referenceUnits:units});
+      const report=LvTapTiming.associateEvents(take,{counts:packet.counts||{}});
+      if(binding!==tapBinding()||tapping.take||LvScore.mediaKey({url:location.href})!==mediaKey)throw Error('The editor changed while reopening the pass. Nothing was replaced.');
+      tapping.take=take;tapping.binding=binding;tapping.rate=getMedia()?.playbackRate||1;tapping.eventCounts=structuredClone(packet.counts||{});tapping.eventApplied=[];tapping.eventErrors=[];tapping.eventArchiveKey=key;tapping.listening=true;
+      syncButton('tap-mode').value='syllable';syncButton('tap-syllable-flow').value=take.inputMode==='hold'?'holds':'events';
+      const ready=report.phrases.filter(p=>p.eventCount&&p.ready).length,pending=report.phrases.filter(p=>p.eventCount&&!p.ready).length;
+      setSyncNotice(`${take.events.length} recorded syllables reopened · ${ready} phrases ready · ${pending} need grouping. Review below, then Use reviewed assignments. The preview has not changed.`,pending?'warn':undefined);
+    }catch(error){setSyncNotice(error.message,'error');}finally{timing.busy=false;state.scoreSignature='';refreshTimingPanel();}
+  }
+  syncButton('events-restore').addEventListener('click',restoreLastSyllablePass);
   function renderWordReview(take,section){
     const report=LvTapTiming.associateWordHolds(take);tapping.eventReport=report;
     const held=report.phrases.filter(p=>p.heldCount),ready=held.filter(p=>p.ready&&!tapping.eventApplied?.includes(p.phraseId));
@@ -1717,6 +1757,7 @@
     }
     if(report.unclaimed.length){const note=document.createElement('p');note.className='lvx-sync-hint';note.textContent=`${report.unclaimed.length} syllable taps are outside any held word and remain unused.`;list.append(note);}
     syncButton('events-review').textContent='Use held phrases';
+    syncButton('events-review').hidden=!ready.length;
     syncButton('events-review').disabled=timing.busy||!ready.length;
     syncButton('events-export').disabled=timing.busy;
   }
@@ -1757,6 +1798,7 @@
       row.append(heading,reason,fields,times);list.append(row);
     }
     if(report.unassigned.length){const note=document.createElement('p');note.className='lvx-sync-hint';note.textContent='Unassigned timestamps remain intact: '+report.unassigned.map(e=>(e.sourceMs/1000).toFixed(3)+'s').join(' · ');list.append(note);}
+    syncButton('events-review').hidden=!ready.length;
     syncButton('events-review').disabled=timing.busy||!ready.length;
     syncButton('events-export').disabled=timing.busy;
   }
@@ -1800,7 +1842,8 @@
       }
       tapping.eventErrors=failures;
       await archiveEvents();
-      setSyncNotice(`${prepared.length} phrases added to preview.${failures.length?' '+failures.length+(failures.length===1?' phrase remains in the take: ':' phrases remain in the take: ')+failures.map(f=>f.message).join('; '):''} Save timings keeps the preview. Raw events and unresolved phrases are backed up locally.`,failures.length?'warn':undefined);
+      const warning=captureSaveWarning();
+      setSyncNotice(`${prepared.length} phrases added to preview.${failures.length?' '+failures.map(f=>f.message).join('; '):''} ${warning||'Save timings keeps the preview. Raw events are backed up locally.'}`,warning||failures.length?'warn':undefined);
     }catch(error){setSyncNotice(error.message,'error');}finally{timing.busy=false;refreshTimingPanel();}
   }
   syncButton('events-review').addEventListener('click',useEventAssignments);

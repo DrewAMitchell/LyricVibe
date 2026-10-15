@@ -910,6 +910,19 @@
     return { ...take, events: [...take.events, event], lastMs: scoreMs,
       actionHistory: [...take.actionHistory, snapshot].slice(-128) };
   }
+  function restoreEventRecording(packet) {
+    if(packet?.schema!=='lyricvibe-performance-events-v1'||!Array.isArray(packet.events)||!packet.events.length||packet.events.length>5000)fail('INVALID_RECORDING','Provide a saved syllable-event recording.');
+    const take=beginEvents(packet.referenceUnits,{inputMode:packet.inputMode||'tap'}),ids=new Set();
+    for(let i=0;i<packet.events.length;i++){
+      const e=packet.events[i],previous=packet.events[i-1];
+      if(!e||typeof e.id!=='string'||!e.id.trim()||ids.has(e.id)||typeof e.kind!=='string'||!e.kind.trim()||!integerTime(e.sourceMs)||
+        previous&&e.sourceMs<previous.sourceMs||e.releaseMs!==undefined&&(!integerTime(e.releaseMs)||e.releaseMs<=e.sourceMs))fail('INVALID_RECORDING','Recorded events need unique ids and ordered, valid source times.');
+      ids.add(e.id);
+    }
+    if(packet.stoppedScoreMs!==undefined&&!integerTime(packet.stoppedScoreMs))fail('INVALID_RECORDING','Recorded stop time must be whole source milliseconds.');
+    const events=clone(packet.events),last=events.at(-1);
+    return {...take,status:'stopped',events,lastMs:last.releaseMs??last.sourceMs,...(packet.stoppedScoreMs===undefined?{}:{stoppedScoreMs:packet.stoppedScoreMs})};
+  }
   function stopEvents(take) {
     if (!take || take.cadence !== 'performance-events') fail('CADENCE_UNSUPPORTED', 'Expected a performance-events take.');
     return take.status === 'stopped' ? take : { ...take, status: 'stopped', pendingStartMs:null };
@@ -992,7 +1005,7 @@
           states.clear(); for (const [sum,paths] of next) states.set(sum,paths);
         }
         const solutions = states.get(assigned.length) || [];
-        if (solutions.length) { lexicalCounts = solutions[0]; ambiguousCounts = solutions.length > 1 && !hasSupplied; }
+        if (solutions.length) { lexicalCounts = solutions[0]; ambiguousCounts = solutions.length > 1; }
         else lexicalCounts = chosen;
       } else lexicalCounts = chosen;
       const finalCounts = lexicalCounts;
@@ -1056,7 +1069,7 @@
       if (matched && units.some((u,i) => u.expectedCount != null && finalCounts[i] !== u.expectedCount) && !issues.includes('count-squished')) issues.push('count-modified');
       return { phraseId, eventCount: assigned.length, expectedCount: expected.every(v=>v!=null)?expected.reduce((a,b)=>a+b,0):null,
         counts: units.map((u,i)=>({ wordId:u.wordId, text:u.text, count:matched?finalCounts[i]:null,
-          ...(needsReview ? { suggestedCount:suggested[i] } : {}), source:hasSupplied && supplied[i] !== undefined?'human':boundaryCounts?'manual-word-boundaries':u.countSource==='authored'?'authored':(options[i].includes(finalCounts[i])?'dictionary-alternative':'dictionary'),
+          ...(needsReview ? { suggestedCount:suggested[i] } : {}), source:hasSupplied && supplied[i] !== undefined?'human':boundaryCounts?'manual-word-boundaries':finalCounts[i]!==expected[i]&&options[i].includes(finalCounts[i])?'dictionary-alternative':u.countSource||'dictionary',
           changed: finalCounts[i] != null && finalCounts[i] !== u.expectedCount, uncertain: (u.expectedCount == null && !boundaryCounts && supplied[i] === undefined) || needsReview })),
         marks, gaps, issues, ready: !needsReview };
     });
@@ -1395,7 +1408,7 @@
   }
 
   return { begin, mark, release, undo, stop, adjust, reposition, followPlayback, punchIn, moveCursor, reassignLast, restoreWordFrameTake, rewindToPhrase, restorePhraseStreamTake,
-    beginEvents, markEvent, pressEventHold, releaseEventHold, stopEvents, undoEvent, rewindEvents, associateEvents,
+    beginEvents, markEvent, pressEventHold, releaseEventHold, stopEvents, undoEvent, rewindEvents, associateEvents, restoreEventRecording,
     beginWordHolds, pressWord, releaseWord, skipWords, undoWordHold, stopWordHolds, rewindWordHolds, retimePhraseHolds, associateWordHolds, wordHoldsFromPairs, estimateTempo,
     leadInProgress, captureProgress, validateTempoMap, tempoMapFromEstimate, setTempoPoint, removeTempoPoint, tempoAt, tempoTimeAtBeat };
 });

@@ -255,6 +255,21 @@ test('partial human counts merge with lexical defaults to resolve an exact total
   assert.deepEqual(report.phrases[0].counts.map(c=>[c.count,c.source]),[[2,'human'],[1,'dictionary']]);
 });
 
+test('a partial count edit cannot approve two remaining dictionary groupings', () => {
+  let take=tap.beginEvents(['a','b','c'].map(id=>({id,wordId:id,phraseId:'p',text:id,minMs:0,maxMs:500,expectedCount:1,countOptions:[1,2]})));
+  for(const ms of [100,200,300,400])take=tap.markEvent(take,ms);
+  const report=tap.associateEvents(take,{counts:{a:1}}).phrases[0];
+  assert.equal(report.ready,false);assert.ok(report.issues.includes('ambiguous-counts'));
+});
+
+test('reopening a saved syllable pass retains ids, source times and rests as an independent stopped take', () => {
+  const packet={schema:'lyricvibe-performance-events-v1',inputMode:'hold',referenceUnits:[{id:'w',wordId:'w',phraseId:'p',text:'diary',minMs:100,maxMs:1200,expectedCount:3}],events:[{id:'kept-3',kind:'syllable-entrance',sourceMs:200,releaseMs:400},{id:'kept-8',kind:'syllable-entrance',sourceMs:500,releaseMs:600},{id:'kept-9',kind:'syllable-entrance',sourceMs:700,releaseMs:900}],stoppedScoreMs:1500};
+  const restored=tap.restoreEventRecording(packet);
+  assert.equal(restored.status,'stopped');assert.deepEqual(restored.events,packet.events);assert.notEqual(restored.events,packet.events);assert.equal(restored.lastMs,900);assert.equal(restored.pendingStartMs,null);
+  assert.deepEqual(tap.associateEvents(restored).phrases[0].marks.map(m=>[m.startMs,m.endMs]),[[200,400],[500,600],[700,900]]);
+  for(const events of [[],[...packet.events,{...packet.events[0]}],[{...packet.events[0],releaseMs:199}],[packet.events[2],packet.events[0]]])assert.throws(()=>tap.restoreEventRecording({...packet,events}),{code:'INVALID_RECORDING'});
+});
+
 test('recorded syllable entrances inside manual word bounds replace whole-word placeholder counts without moving times', () => {
   const units=[
     {id:'a',wordId:'a',phraseId:'p',text:"Something's",minMs:100,maxMs:1500,expectedCount:1,countSource:'authored',referenceStartMs:100,referenceEndMs:700,referenceManual:true},

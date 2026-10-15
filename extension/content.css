@@ -2318,7 +2318,7 @@
 #lvx-root .lvx-transcript-changes{margin:6px 0;padding-left:18px;font-size:11px;max-height:140px;overflow:auto}
 #lvx-root .lvx-transcript-changes li[data-review="true"]{color:#f2c879}
 /* Steps that now happen automatically on pause/stop. */
-#lvx-root [data-sync="tap-use"],#lvx-root [data-sync="tap-discard"],#lvx-root [data-sync="events-review"],#lvx-root [data-sync="effect-use"],#lvx-root [data-sync="effect-discard"],#lvx-root [data-sync="audition"]{display:none!important}
+#lvx-root [data-sync="tap-use"],#lvx-root [data-sync="tap-discard"],#lvx-root [data-sync="effect-use"],#lvx-root [data-sync="effect-discard"],#lvx-root [data-sync="audition"]{display:none!important}
 #lvx-root .lvx-danger{border-color:#b5584f;color:#f3b3ab}
 /* Blocking problems are a red box; attention is amber. */
 #lvx-root .lvx-sync-notice[data-tone="error"]{background:#3a1715;border:1px solid #c4574d;color:#ffd4cf;border-radius:6px;padding:8px 10px;font-weight:600}
