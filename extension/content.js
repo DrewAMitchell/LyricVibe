@@ -849,7 +849,7 @@
     syncButton('tap-arm').textContent = (eventPass()||phraseStream())?(take?.status==='stopped'?'▶ Continue syllable pass':'▶ Start syllable pass'):continuous?'▶ Start continuous pass':mode==='syllable'?'▶ Start phrase take':tapping.take?.status === 'stopped' ? '▶ Continue take' : '▶ Start take';
     if(wordPass())syncButton('tap-arm').textContent=wordTake(take)&&take.status==='stopped'?'▶ Record from playhead':'▶ Start word pass';
     if(take?.status==='stopped'&&mode==='word')syncButton('tap-arm').textContent='▶ Record from playhead';
-    if((streamTake(take)||rawTake(take))&&take.status==='stopped'&&tapping.seekPhraseId)syncButton('tap-arm').textContent='▶ Retake from this phrase';
+    if((streamTake(take)||rawTake(take))&&take.status==='stopped'&&tapping.seekPhraseId)syncButton('tap-arm').textContent='▶ Continue from playhead';
     syncButton('tap-mark').disabled = timing.busy || take?.status !== 'armed';
     syncButton('tap-mark').textContent = (take?.cadence || syncButton('tap-cadence').value) === 'flow' ? (take?.index === take?.units.length - 1 && take?.pendingStartMs !== null ? 'Finish lyric · Space' : 'Next lyric · Space') : take?.pendingStartMs !== null && take ? 'Mark end · Space' : 'Mark start · Space';
     if (take?.status === 'complete') syncButton('tap-mark').textContent = 'Pass complete';
@@ -890,7 +890,7 @@
       cue.querySelector('.lvx-perform-instruction').textContent='Space: next syllable · ← / →: move cue · Ctrl + ← / →: reassign last tap';
       cue.querySelector('small').textContent=take?.status==='armed'?'PHRASE-GUIDED SYLLABLES · RECORDING':take?'PHRASE-GUIDED SYLLABLES · REVIEW':'PHRASE-GUIDED SYLLABLES · READY';
       if(take?.status==='stopped'&&tapping.seekPhraseId){
-        cue.querySelector('.lvx-perform-instruction').textContent='Retake from this phrase keeps earlier phrases and replaces this and later taps. Undo mark restores the previous take.';
+        cue.querySelector('.lvx-perform-instruction').textContent='Continue keeps existing taps until your first new press. Undo mark restores replaced input.';
         cue.querySelector('small').textContent='PHRASE AT PLAYHEAD · READY TO RETAKE';
       }
     }
@@ -1164,7 +1164,7 @@
     if((streamTake(tapping.take)||rawTake(tapping.take))&&tapping.take.status==='stopped'&&tapping.followSeek){
       const target=followPlaybackPhrase(now),id=target?.id||null;
       if(tapping.seekPhraseId!==id){tapping.seekPhraseId=id;state.scoreSignature='';refreshTimingPanel();}
-      syncPanel.querySelector('.lvx-estimated-phrase').textContent=target?'Following your playback position · recorded taps unchanged until Retake':'No phrase at this position';
+      syncPanel.querySelector('.lvx-estimated-phrase').textContent=target?'Following playback · recorded taps unchanged until your next press':'No phrase at this position';
       return;
     }
     if(wordTake(tapping.take)&&tapping.take.status==='armed'){
@@ -2394,7 +2394,7 @@
     if(event.target===getMedia()&&!tapping.take&&tapping.followSeek&&!timing.busy&&!syncPanel.hidden){refreshPerformClock(event.target.currentTime*1000-state.score.offsetMs);return;}
     if(event.target!==getMedia()||!(streamTake(tapping.take)||rawTake(tapping.take))||!tapping.followSeek||timing.busy)return;
     refreshPerformClock(event.target.currentTime*1000-state.score.offsetMs);
-    setSyncNotice('Following your seek position. Recorded taps are intact. Retake from this phrase replaces this and later taps; earlier phrases stay. Undo mark restores the previous take.');
+    setSyncNotice('Following your seek position. Recorded taps are intact. Continue, then press to replace from here; Undo mark restores the previous take.');
   },true);
   window.addEventListener('resize', () => {
     if (state.currentMoment) fitMoment(state.currentMoment);

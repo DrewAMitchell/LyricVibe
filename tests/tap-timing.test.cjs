@@ -34,6 +34,8 @@ test('word hold punch-in keeps earlier holds and scoped retime preserves other p
   take=tap.punchIn({...take,index:1,retime:{phraseId:'p'}},1100);
   assert.deepEqual(take.holds.map(h=>h.wordId),['w0','w2']);
   assert.deepEqual(tap.undoWordHold(take).holds,original);
+  const replay=tap.followPlayback({...take,status:'armed',index:0},850,{rewind:true});
+  assert.equal(replay.index,1,'recorded release owns replay, ahead of the old 1000ms reference end');
 });
 
 test('lead-in guidance follows source-clock time and clamps before and after the lead-in', () => {
