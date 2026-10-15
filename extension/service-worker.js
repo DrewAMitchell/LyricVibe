@@ -263,6 +263,7 @@ async function getFuzzyCachedLyrics(track, artist, hints) {
 }
 
 function setCachedLyrics(track, artist, payload) {
+  payload = { ...payload, _lyricsCheckedAt: Date.now() };
   const key = cacheKey(track, artist, payload.hints);
   if (lyricsCache.size >= CACHE_MAX) {
     const oldest = lyricsCache.keys().next().value;
@@ -780,7 +781,10 @@ async function recognize(body) {
 
   // Check cache before hitting API
   const cached = await getCachedLyrics(detected.title, detected.artist, hints);
-  if (cached) {
+  // Untimed outage fallbacks are useful offline, but must not permanently hide
+  // recovered timed lyrics. Persist the cooldown through worker suspension.
+  if (cached && (cached.lyrics?.synced || isApiDegraded('lrclib') ||
+      Date.now() - (cached._lyricsCheckedAt || 0) < 60000)) {
     if (cached.track && detected.playOffsetMs != null) {
       cached.track.playOffsetMs = detected.playOffsetMs;
     }
@@ -802,6 +806,11 @@ async function recognize(body) {
   const lyricResult = await findLyrics(detected, hints);
 
   if (!lyricResult) {
+    if (cached) {
+      const retained={...cached,hints,track:{...cached.track,playOffsetMs:detected.playOffsetMs}};
+      setCachedLyrics(detected.title,detected.artist,retained);
+      return retained;
+    }
     const h = apiHealth.lrclib;
     const apiTrouble = isApiDegraded('lrclib') ||
       (h.lastErrorType && h.lastErrorType !== 'NOT_FOUND' && h.lastFailure > h.lastSuccess);
@@ -921,22 +930,16 @@ async function findLyrics(track, hints) {
   // but no longer inherits stale failures from a previous, unrelated song.
   apiHealth.lrclib.lastErrorType = null;
 
-  // ── PRIORITY 0: Fast cache-only lookup + parallel standard lookup ──
-  // /api/get-cached returns in ~50-100ms — always safe, even when degraded.
-  // We start the slower /api/get in parallel so it has a head start if cached misses.
+  // Prefer the duration-specific result without firing three provider requests
+  // at once. The remote cache is a rescue after a miss, not parallel traffic.
   if (track.title && track.artist) {
-    const cachedPromise = getLrclibCached(track);
-    const directPromise = !lrclibDown ? getLrclibByMetadata(track) : null;
-
-    // A fast cache entry can disagree with the duration-specific /get result.
-    // When healthy, prefer the primary metadata lookup; both requests already
-    // run in parallel and remain bounded by their existing timeouts.
-    const [cached, direct] = await Promise.all([cachedPromise, directPromise]);
+    const direct = !lrclibDown ? await getLrclibByMetadata(track) : null;
     if (direct && (direct.syncedLyrics || direct.plainLyrics) &&
         !(direct.syncedLyrics && isFakeLRC(direct.syncedLyrics))) {
       return { lyrics: { synced: direct.syncedLyrics || '',
         plain: cleanPlainLyrics(direct.plainLyrics || ''), provider: 'LRCLIB' }, match: direct };
     }
+    const cached = apiHealth.lrclib.lastErrorType==='RATE_LIMITED'?null:await getLrclibCached(track);
     if (cached && (cached.syncedLyrics || cached.plainLyrics)) {
       const isFake = cached.syncedLyrics && isFakeLRC(cached.syncedLyrics);
       if (!isFake) {
@@ -1069,15 +1072,14 @@ async function getLrclibByMetadata(track) {
     // Build secondary query (no album, no duration)
     const p2 = new URLSearchParams({ track_name: track.title, artist_name: track.artist });
 
-    // Fire both in parallel — use allSettled so a failure in one doesn't block the other
-    const [r1, r2] = await Promise.allSettled([
-      apiFetch(`${LRCLIB_BASE}/get?${p1.toString()}`, 'lrclib', TIMEOUT_GET_MS),
-      apiFetch(`${LRCLIB_BASE}/get?${p2.toString()}`, 'lrclib', TIMEOUT_GET_MS)
-    ]);
-
-    // Prefer primary (with album/duration) over secondary
-    if (r1.status === 'fulfilled' && r1.value.ok && r1.value.data && r1.value.data.id) return r1.value.data;
-    if (r2.status === 'fulfilled' && r2.value.ok && r2.value.data && r2.value.data.id) return r2.value.data;
+    const primary=await apiFetch(`${LRCLIB_BASE}/get?${p1.toString()}`, 'lrclib', TIMEOUT_GET_MS);
+    if(primary.ok&&primary.data?.id)return primary.data;
+    if(primary.errorType&&primary.errorType!=='NOT_FOUND')return null;
+    if(p1.toString()!==p2.toString()){
+      const secondary=await apiFetch(`${LRCLIB_BASE}/get?${p2.toString()}`, 'lrclib', TIMEOUT_GET_MS);
+      if(secondary.ok&&secondary.data?.id)return secondary.data;
+      if(secondary.errorType&&secondary.errorType!=='NOT_FOUND')return null;
+    }
 
     // If LRCLIB failed due to a server error or timeout, do not waste time on the fallback query
     if (apiHealth.lrclib.lastErrorType && apiHealth.lrclib.lastErrorType !== 'NOT_FOUND') return null;

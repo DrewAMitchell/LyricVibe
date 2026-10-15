@@ -109,6 +109,45 @@ test('healthy duration-specific metadata lookup wins over conflicting fast cache
   const result = await h.run('recognize({hints:want})');
   assert.equal(result.match.id, 222); assert.match(result.lyrics.synced, /^\[00:23.19\]/);
 });
+
+test('an untimed fallback is rechecked after cooldown and upgrades after worker suspension', async () => {
+  const h=harness();h.context.want=VIDEO;
+  h.context.seed={...h.payload,hints:VIDEO,lyrics:{synced:'',plain:'First phrase\nSecond phrase',provider:'lyrics.ovh'}};
+  h.run("setCachedLyrics('Sample Track','Tëst Artist',seed); lyricsCache.clear()");
+  assert.equal((await h.run('recognize({hints:want})')).lyrics.synced,'');
+  assert.equal(h.calls.length,0);
+  h.run('Date.now=()=>'+(Date.now()+61000));
+  const result=await h.run('recognize({hints:want})');
+  assert.equal(result.match.id,222);assert.ok(result.lyrics.synced);
+});
+
+test('legacy plain cache retries once, survives provider failure and cools down without losing words', async () => {
+  const h=harness();h.context.want=VIDEO;
+  const fallback={...h.payload,hints:VIDEO,lyrics:{synced:'',plain:'Offline words remain available'}};
+  h.context.seed=fallback;
+  h.run("lyricsCache.set(cacheKey('Sample Track','Tëst Artist',want),seed); let attempts=0;findLyrics=async()=>{attempts++;return null}");
+  assert.equal((await h.run('recognize({hints:want})')).lyrics.plain,fallback.lyrics.plain);
+  assert.equal((await h.run('recognize({hints:want})')).lyrics.plain,fallback.lyrics.plain);
+  assert.equal(h.run('attempts'),1);
+  h.run('lyricsCache.clear()');
+  assert.equal((await h.run('recognize({hints:want})')).lyrics.plain,fallback.lyrics.plain);
+  assert.equal(h.run('attempts'),1);
+});
+
+test('a successful exact-duration lookup needs one provider request, not three parallel calls', async () => {
+  const h=harness();h.context.want=VIDEO;
+  assert.equal((await h.run('recognize({hints:want})')).match.id,222);
+  assert.equal(h.calls.length,1);
+  assert.equal(new URL(h.calls[0]).searchParams.get('duration'),'166');
+});
+
+test('rate-limited primary lookup does not immediately hit more LRCLIB endpoints', async () => {
+  const h=harness();h.context.want=VIDEO;
+  h.context.fetch=async url=>{h.calls.push(url);return url.includes('lrclib.net')?{ok:false,status:429}:{ok:true,status:200,json:async()=>({lyrics:'First phrase with enough words\nSecond phrase with enough words'})}};
+  const result=await h.run('recognize({hints:want})');
+  assert.equal(result.lyrics.provider,'lyrics.ovh');
+  assert.equal(h.calls.filter(url=>url.includes('lrclib.net')).length,1);
+});
 test('YouTube video-format suffixes and notification counters do not reach the lyrics query', () => {
   const h = harness();
   h.context.want = { host: 'www.youtube.com', track: 'Sample Cafe - TOKENS ON THE DESK | Animated Video', pageTitle: '(32) Sample Cafe - TOKENS ON THE DESK | Animated Video - YouTube', duration: 135 };
