@@ -960,7 +960,15 @@
       const duplicateTimes = new Set(assigned.filter((e,i) => i > 0 && assigned[i-1].sourceMs === e.sourceMs).map(e=>e.sourceMs));
       const incomplete = take.status === 'stopped' && Number.isSafeInteger(take.stoppedScoreMs) && take.stoppedScoreMs < end;
       const expected = units.map(u => u.expectedCount);
-      const unknownCounts = units.some(u=>u.expectedCount == null && counts[u.wordId] === undefined);
+      // A word pass can leave one whole-word syllable as a timing placeholder.
+      // New performed entrances establish their count when every entrance has
+      // exactly one measured word owner. Never fit gaps or overlapping bounds.
+      const bounded = units.every((u,i) => u.referenceManual && integerTime(u.referenceStartMs) && integerTime(u.referenceEndMs) &&
+        u.referenceEndMs > u.referenceStartMs && (!i || units[i-1].referenceEndMs <= u.referenceStartMs));
+      const owners = bounded ? assigned.map(e => units.findIndex(u => e.sourceMs >= u.referenceStartMs && e.sourceMs < u.referenceEndMs)) : [];
+      const observed = units.map((u,i) => owners.filter(owner => owner === i).length);
+      const boundaryCounts = bounded && owners.every(i=>i>=0) && observed.every(n=>n>0) ? observed : null;
+      const unknownCounts = units.some(u=>u.expectedCount == null && counts[u.wordId] === undefined && !boundaryCounts);
       const options = units.map(u => (u.countOptions || []).map(x => Number.isSafeInteger(x) ? x : x && x.count).filter(x => Number.isSafeInteger(x) && x > 0));
       if (assigned.length === 0 && ambiguous.length === 0) return { phraseId, eventCount: 0,
         expectedCount: expected.every(v=>v!=null)?expected.reduce((a,b)=>a+b,0):null,
@@ -970,9 +978,9 @@
       const supplied = units.map(u => counts[u.wordId]);
       const hasSupplied = supplied.some(v => v !== undefined);
       if (hasSupplied && supplied.some(v => v !== undefined && (!Number.isSafeInteger(v) || v < 1))) fail('INVALID_COUNTS', 'Edited counts must be positive integers.');
-      const chosen = units.map((u,i)=>supplied[i] ?? expected[i] ?? 1);
+      const chosen = units.map((u,i)=>supplied[i] ?? boundaryCounts?.[i] ?? expected[i] ?? 1);
       if (!chosen.every(n=>Number.isSafeInteger(n)&&n>0) || chosen.reduce((a,b)=>a+b,0)!==assigned.length) {
-        const alternatives = units.map((u,i) => supplied[i] !== undefined ? [supplied[i]] : [...new Set([expected[i], ...options[i]].filter(n=>Number.isSafeInteger(n)&&n>0))]);
+        const alternatives = units.map((u,i) => supplied[i] !== undefined ? [supplied[i]] : boundaryCounts ? [boundaryCounts[i]] : [...new Set([expected[i], ...options[i]].filter(n=>Number.isSafeInteger(n)&&n>0))]);
         const states = new Map([[0, [[]]]]);
         for (const choices of alternatives) {
           const next = new Map();
@@ -989,7 +997,7 @@
       } else lexicalCounts = chosen;
       const finalCounts = lexicalCounts;
       const matched = finalCounts.every(v => Number.isSafeInteger(v) && v > 0) && finalCounts.reduce((a,b)=>a+b,0) === assigned.length;
-      const suggested = expected.map(n=>n || 1);
+      const suggested = boundaryCounts ? [...boundaryCounts] : expected.map(n=>n || 1);
       while (suggested.reduce((a,b)=>a+b,0) < assigned.length) {
         const i = units.map((u,j)=>({j,weight:Number.isFinite(u.referenceEndMs-u.referenceStartMs)?Math.max(1,u.referenceEndMs-u.referenceStartMs):1})).sort((a,b)=>b.weight-a.weight)[0].j; suggested[i]++;
       }
@@ -1048,8 +1056,8 @@
       if (matched && units.some((u,i) => u.expectedCount != null && finalCounts[i] !== u.expectedCount) && !issues.includes('count-squished')) issues.push('count-modified');
       return { phraseId, eventCount: assigned.length, expectedCount: expected.every(v=>v!=null)?expected.reduce((a,b)=>a+b,0):null,
         counts: units.map((u,i)=>({ wordId:u.wordId, text:u.text, count:matched?finalCounts[i]:null,
-          ...(needsReview ? { suggestedCount:suggested[i] } : {}), source:hasSupplied && supplied[i] !== undefined?'human':(options[i].includes(finalCounts[i])?'dictionary-alternative':'dictionary'),
-          changed: finalCounts[i] != null && finalCounts[i] !== u.expectedCount, uncertain: u.expectedCount == null || needsReview })),
+          ...(needsReview ? { suggestedCount:suggested[i] } : {}), source:hasSupplied && supplied[i] !== undefined?'human':boundaryCounts?'manual-word-boundaries':u.countSource==='authored'?'authored':(options[i].includes(finalCounts[i])?'dictionary-alternative':'dictionary'),
+          changed: finalCounts[i] != null && finalCounts[i] !== u.expectedCount, uncertain: (u.expectedCount == null && !boundaryCounts && supplied[i] === undefined) || needsReview })),
         marks, gaps, issues, ready: !needsReview };
     });
     const inFrames = new Set(phrases.flatMap(p => take.events.filter(e => e.kind === 'syllable-entrance' && e.sourceMs >= Math.min(...take.units.filter(u=>u.phraseId===p.phraseId).map(u=>u.minMs)) && e.sourceMs < Math.max(...take.units.filter(u=>u.phraseId===p.phraseId).map(u=>u.maxMs))).map(e=>e.id)));

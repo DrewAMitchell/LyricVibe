@@ -254,6 +254,32 @@ test('partial human counts merge with lexical defaults to resolve an exact total
   assert.equal(report.phrases[0].ready,true);
   assert.deepEqual(report.phrases[0].counts.map(c=>[c.count,c.source]),[[2,'human'],[1,'dictionary']]);
 });
+
+test('recorded syllable entrances inside manual word bounds replace whole-word placeholder counts without moving times', () => {
+  const units=[
+    {id:'a',wordId:'a',phraseId:'p',text:"Something's",minMs:100,maxMs:1500,expectedCount:1,countSource:'authored',referenceStartMs:100,referenceEndMs:700,referenceManual:true},
+    {id:'b',wordId:'b',phraseId:'p',text:'getting',minMs:100,maxMs:1500,expectedCount:1,countSource:'authored',referenceStartMs:750,referenceEndMs:1400,referenceManual:true},
+  ];
+  let take=tap.beginEvents(units,{inputMode:'hold'});
+  for(const [start,end] of [[120,300],[400,710],[800,900],[1100,1450]])take=tap.releaseEventHold(tap.pressEventHold(take,start),end);
+  take=tap.stopEvents(take);const raw=structuredClone(take.events);
+  const report=tap.associateEvents(take).phrases[0];
+  assert.equal(report.ready,true);
+  assert.deepEqual(report.counts.map(c=>[c.count,c.source]),[[2,'manual-word-boundaries'],[2,'manual-word-boundaries']]);
+  assert.deepEqual(report.marks.map(m=>[m.wordId,m.startMs,m.endMs]),[['a',120,300],['a',400,710],['b',800,900],['b',1100,1450]]);
+  assert.deepEqual(take.events,raw);
+  // An unknown spelling also receives its count from the performed boundaries.
+  assert.equal(tap.associateEvents({...take,units:units.map(u=>({...u,expectedCount:null}))}).phrases[0].ready,true);
+  const explicit=tap.associateEvents(take,{counts:{a:1,b:3}}).phrases[0];
+  assert.deepEqual(explicit.counts.map(c=>[c.count,c.source]),[[1,'human'],[3,'human']]);
+  // Gaps, overlaps, unmeasured bounds, and words without entrances cannot claim events.
+  for(const changed of [
+    units.map(u=>u.id==='a'?{...u,referenceEndMs:350}:u),
+    units.map(u=>u.id==='a'?{...u,referenceEndMs:850}:u),
+    units.map(u=>({...u,referenceManual:false})),
+    units.map(u=>u.id==='b'?{...u,referenceStartMs:1200}:u),
+  ])assert.equal(tap.associateEvents({...take,units:changed}).phrases[0].ready,false);
+});
 const scoreCore = require('../extension/score-core.js');
 const timingVariant = require('../extension/timing-variant.js');
 
