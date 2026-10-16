@@ -189,23 +189,26 @@
     // affects distant history, never the font size of the word at the feed mouth.
     let low=.001,high=1e8;
     for(let i=0;i<64;i++){const k=(low+high)/2;if(entryFont*k*Math.log1p(total/k)>capacity)high=k;else low=k;}
-    return {tokens,total,decay,entryFont,compression:low};
+    const rows=[],knots=[];
+    tokens.forEach((token,i)=>{let row=rows.findIndex(end=>end<=token.startMs);if(row<0)row=rows.length;rows[row]=token.endMs;token.feedRow=row;token.departMs=token.endMs;const last=knots.at(-1);if(last?.time===token.startMs)last.value=token.center;else knots.push({time:token.startMs,value:token.center,slope:0});});
+    for(let i=1;i<knots.length-1;i++){const a=(knots[i].value-knots[i-1].value)/(knots[i].time-knots[i-1].time),b=(knots[i+1].value-knots[i].value)/(knots[i+1].time-knots[i].time);knots[i].slope=a>0&&b>0?2*a*b/(a+b):0;}
+    return {tokens,total,decay,entryFont,compression:low,knots,pipeWidth:Math.max(.65,...tokens.map(t=>Math.min(1.65,t.textWidth*entryFont)))+.14};
   }
   function vinylAt(track,clock,{reduced=false}={}){
-    const started=track.tokens.filter(t=>clock>=t.startMs),latest=started.at(-1),active=started.filter(t=>clock<t.endMs);
-    let head=0;const feeds=new Map();
-    for(let i=0;i<started.length;i++){const token=started[i],duration=Math.max(1,Math.min(260,(token.endMs-token.startMs)*.35)),p=reduced?1:1-Math.pow(1-clamp((clock-token.startMs)/duration),3),previous=started[i-1]?.center??token.center;head=Math.max(head,previous+(token.center-previous)*p);feeds.set(token.id,p);}
-    const tops=active.length?[...active].reverse():latest?[latest]:[],glyphs=[];
+    const smooth=x=>{const t=clamp(x);return t*t*t*(10+t*(-15+6*t));};
+    const started=track.tokens.filter(t=>clock>=t.startMs),knots=track.knots,glyphs=[];
+    let head=knots[0]?.value||0;
+    for(let i=1;i<knots.length;i++){const a=knots[i-1],b=knots[i];if(clock>=b.time){head=b.value;continue;}if(clock>a.time){const span=b.time-a.time,t=(clock-a.time)/span,t2=t*t,t3=t2*t;head=(2*t3-3*t2+1)*a.value+(t3-2*t2+t)*span*a.slope+(-2*t3+3*t2)*b.value+(t3-t2)*span*b.slope;}break;}
     for(const token of started){
-      const row=tops.indexOf(token),current=clock<token.endMs,feed=feeds.get(token.id),fit=Math.min(1,1.65/(track.entryFont*Math.max(.1,token.textWidth))),age=Math.max(0,head-token.center),flatten=clamp(age/Math.max(6,token.width));
+      const current=clock<token.endMs,duration=Math.max(1,Math.min(260,(token.endMs-token.startMs)*.35)),feed=reduced?1:smooth((clock-token.startMs)/duration),handoff=reduced?(clock>=token.departMs?1:0):smooth((clock-token.departMs)/260),fit=Math.min(1,1.65/(track.entryFont*Math.max(.1,token.textWidth))),age=Math.max(0,head-token.center)*handoff,flatten=smooth(age/Math.max(6,token.width));
+      const centerW=track.entryFont*track.compression*Math.log1p(age/track.compression),centerR=Math.exp(-track.decay*centerW),centerA=-Math.PI/2-centerW,centerFont=track.entryFont*centerR/(1+age/track.compression)*fit;
       for(const ch of token.chars){
-        let x,y,angle,font,radius;
-        if(row>=0){font=track.entryFont*fit;radius=1;angle=-Math.PI/2;x=(ch.center-token.textWidth/2)*font;y=-1-row*.25-(reduced?0:(1-feed)*.48);}
-        else {const distance=head-token.offset-ch.center,d=Math.max(0,distance),winding=track.entryFont*track.compression*Math.log1p(d/track.compression);radius=Math.exp(-track.decay*winding);angle=-Math.PI/2-winding;font=track.entryFont*radius/(1+d/track.compression)*fit;x=radius*Math.cos(angle);y=radius*Math.sin(angle);const centerW=track.entryFont*track.compression*Math.log1p(age/track.compression),centerR=Math.exp(-track.decay*centerW),centerA=-Math.PI/2-centerW;const flatX=centerR*Math.cos(centerA)+(ch.center-token.textWidth/2)*font,flatY=centerR*Math.sin(centerA);x=flatX+(x-flatX)*flatten;y=flatY+(y-flatY)*flatten;angle=-Math.PI/2+(angle+Math.PI/2)*flatten;}
-        glyphs.push({wordId:token.id,text:ch.text,radius,angle,font,x,y,current,feed:row>=0&&feed<1,top:row>=0});
+        const d=Math.max(0,age+token.textWidth/2-ch.center),winding=track.entryFont*track.compression*Math.log1p(d/track.compression),curveR=Math.exp(-track.decay*winding),curveA=-Math.PI/2-winding,curveFont=track.entryFont*curveR/(1+d/track.compression)*fit;
+        const radius=centerR+(curveR-centerR)*flatten,font=centerFont+(curveFont-centerFont)*flatten,flatX=centerR*Math.cos(centerA)+(ch.center-token.textWidth/2)*centerFont,flatY=centerR*Math.sin(centerA),x=flatX+(curveR*Math.cos(curveA)-flatX)*flatten,y=flatY+(curveR*Math.sin(curveA)-flatY)*flatten-(token.feedRow*.25+(1-feed)*.48)*(1-handoff),angle=-Math.PI/2+(curveA+Math.PI/2)*flatten;
+        glyphs.push({wordId:token.id,text:ch.text,radius,angle,font,x,y,current,feed:feed<1,top:handoff===0});
       }
     }
-    return {head,words:started.map(t=>t.id),text:started.map(t=>t.text).join(' '),glyphs,pipeWidth:Math.max(.65,...tops.map(t=>Math.min(1.65,t.textWidth*track.entryFont)))+.14};
+    return {head,words:started.map(t=>t.id),text:started.map(t=>t.text).join(' '),glyphs,pipeWidth:track.pipeWidth};
   }
   function paintVinyl(ctx,track,clock,width,height,{reduced=false,ink='#f5f0e7',accent='#d9543e'}={}){
     const frame=vinylAt(track,clock,{reduced}),R=Math.max(1,Math.min(height*.345,width*.4)),cx=width*.5,cy=height*.59,head=-Math.PI/2;

@@ -101,3 +101,11 @@ test('vinyl newest words stay large, upright at twelve oclock, and feed down bef
 test('vinyl overlapping vocals stay upright on separate feed rows and long current words fit',()=>{
  const score={phrases:[{id:'a',laneId:'lead',words:[word('a','SUPERCALIFRAGILISTIC',1000,3000)]},{id:'b',laneId:'back',words:[word('b','ECHO',1200,2600)]}]};const frame=vinylAt(vinylTrack(score,t=>t.length*.6),1600),a=frame.glyphs.filter(g=>g.wordId==='a'),b=frame.glyphs.filter(g=>g.wordId==='b');assert.ok(frame.glyphs.every(g=>g.current&&g.angle===-Math.PI/2));assert.notEqual(a[0].y,b[0].y);assert.ok(a.every(g=>Math.abs(g.x)<.83));
 });
+
+test('vinyl feed-to-disc positions, sizes and tangents remain continuous at overlap and release boundaries',()=>{
+ const score={phrases:[{id:'p',laneId:'lead',words:[word('a','HOLD',1000,2600),word('b','NEXT',2000,3000),word('c','TURN',3200,4000)]}]},track=vinylTrack(score,t=>t.length*.6);
+ const boundaries=[1260,2000,2260,2600,3000,3020,3200,3460,3620,4000];
+ for(const time of boundaries){const before=vinylAt(track,time-.001),after=vinylAt(track,time+.001);for(const id of before.words){const a=before.glyphs.filter(g=>g.wordId===id),b=after.glyphs.filter(g=>g.wordId===id);a.forEach((g,i)=>{assert.ok(Math.hypot(g.x-b[i].x,g.y-b[i].y)<.0001,'position jump at '+time);assert.ok(Math.abs(g.font-b[i].font)<.0001,'size jump at '+time);assert.ok(Math.abs(g.angle-b[i].angle)<.0001,'rotation jump at '+time);});}assert.equal(before.pipeWidth,after.pipeWidth,'feed sleeve must not snap width');}
+ const prior=vinylAt(track,2100).glyphs.filter(g=>g.wordId==='a'),next=vinylAt(track,2500).glyphs.filter(g=>g.wordId==='a');assert.deepEqual(prior.map(g=>[g.x,g.y,g.font]),next.map(g=>[g.x,g.y,g.font]),'held words retain their row and size while another voice starts');
+ const pose=vinylAt(track,2785);vinylAt(track,5000);assert.deepEqual(vinylAt(track,2785),pose,'handoff reconstructs after seek');
+});
