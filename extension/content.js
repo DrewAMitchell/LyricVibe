@@ -1342,10 +1342,15 @@
     if(eventTake(tapping.take)&&tapping.take.status==='armed'){
       const eventNow=now+state.score.offsetMs;
       const take=tapping.take,frames=take.units.filter((u,i,a)=>!i||a[i-1].phraseId!==u.phraseId);
-      const active=frames.filter(u=>eventNow>=u.minMs&&eventNow<u.maxMs),pinned=tapping.backAnchorMs!=null&&frames.find(u=>u.phraseId===tapping.backPhraseId),unit=pinned||(active.length===1?active[0]:frames.find(u=>u.minMs>eventNow)||frames.at(-1));
+      const active=frames.filter(u=>eventNow>=u.minMs&&eventNow<u.maxMs),selected=frames.find(u=>u.phraseId===timingPhrase()?.id);
+      // An early entrance can extend this phrase into its predecessor. Keep
+      // an active selection (and a held syllable) instead of skipping ahead
+      // and repeatedly pulling future phrases into the same overlap.
+      const pinned=tapping.backAnchorMs!=null&&frames.find(u=>u.phraseId===tapping.backPhraseId);
+      const unit=pinned||(take.pendingStartMs!==null?selected:null)||active.find(u=>u===selected)||active[0]||frames.find(u=>u.minMs>eventNow)||frames.at(-1);
       if(unit&&timingPhrase()?.id!==unit.phraseId){timing.phraseIndex=timing.draft.score.phrases.findIndex(p=>p.id===unit.phraseId);tapping.wordId=unit.wordId;state.scoreSignature='';refreshTimingPanel();}
       syncPanel.querySelector('.lvx-estimated-phrase').hidden=false;
-      setCaptureText('.lvx-estimated-phrase',active.length===1?(syllableHold(take)?'Hold each syllable · ':'Tap each syllable you hear · ')+take.events.filter(e=>e.sourceMs>=unit.minMs&&e.sourceMs<unit.maxMs).length+' events in this phrase':'Phrase lead-in or rest · taps are still preserved');
+      setCaptureText('.lvx-estimated-phrase',active.includes(unit)?(syllableHold(take)?'Hold each syllable · ':'Tap each syllable you hear · ')+take.events.filter(e=>e.sourceMs>=unit.minMs&&e.sourceMs<unit.maxMs).length+' events in this phrase':'Phrase lead-in or rest · taps are still preserved');
       setCaptureText('.lvx-cue-legend','Existing syllables follow playback · Space records your new timing');
       return;
     }
