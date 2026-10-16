@@ -14,3 +14,5 @@ details > summary::-webkit-details-marker { display:none; }
 details > summary::before { content:'+'; display:inline-block; width:18px; margin-right:8px; color:var(--muted); font:600 16px/1 ui-monospace,monospace; text-align:center; }
 details[open] > summary::before { content:'−'; }
 details > summary:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.workspace-notice{display:flex;align-items:start;gap:12px}.workspace-notice>span{white-space:pre-wrap;overflow-wrap:anywhere;min-width:0;flex:1;user-select:text}.workspace-notice>button{flex-shrink:0}
+.workspace-notice.error{max-height:30vh}

@@ -5,7 +5,9 @@
   panel.innerHTML='<div class="phrase-heading"><strong>Tempo sections</strong><span>Drag a block’s edges to set its duration</span></div><div class="tempo-tools"><label>BPM<input id="section-bpm" type="number" min="20" max="400" step="1" value="120"></label><label>Start s<input id="section-start" type="number" min="0" step="0.001"></label><label>End s<input id="section-end" type="number" min="0" step="0.001"></label><button id="section-apply">Save section</button><button id="section-split">Split at playhead</button><button id="section-remove">Remove section</button><button id="section-undo">↶ Undo tempo</button></div><div id="tempo-section-ruler"></div><div id="tempo-section-lane" class="lane"></div><p id="tempo-section-notice" role="status"></p>';
   document.querySelector('main').before(panel);
   const state={map:null,revision:0,durationMs:0,sourceMs:0,index:0,history:[],busy:false};
-  const notice=text=>$('tempo-section-notice').textContent=text;
+  const noticeCopy=document.createElement('button');noticeCopy.textContent='Copy message';$('tempo-section-notice').after(noticeCopy);
+  noticeCopy.onclick=async()=>{try{await navigator.clipboard.writeText($('tempo-section-notice').textContent);noticeCopy.textContent='Copied';}catch{noticeCopy.textContent='Select message to copy';}};
+  const notice=text=>{$('tempo-section-notice').textContent=text;noticeCopy.textContent='Copy message';};
   async function request(type,extra={}){const r=await chrome.runtime.sendMessage({type,tabId,mediaKey,...extra});if(!r?.ok)throw Error(r?.error?.message||'Tempo source unavailable.');return r;}
   function bounds(){return {start:state.map.segments[state.index].startMs,end:state.map.segments[state.index+1]?.startMs??state.durationMs};}
   function render(){

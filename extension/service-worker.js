@@ -267,6 +267,42 @@ async function getFuzzyCachedLyrics(track, artist, hints) {
   return null;
 }
 
+// Text can be reused across recordings; timestamps and manual scores cannot.
+// Reject equally plausible caches with different words instead of choosing by storage order.
+async function getCachedLyricText(track, artist) {
+  const norm=s=>String(s||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\([^)]*\)|\[[^\]]*\]/g,' ').replace(/\b(official|video|audio|lyrics|hd|4k)\b/g,' ').replace(/[^a-z0-9]+/g,' ').trim();
+  const similarity=(a,b)=>{if(a===b)return 1;const x=new Set(a.split(' ')),y=new Set(b.split(' '));return 2*[...x].filter(t=>y.has(t)).length/(x.size+y.size);};
+  const title=norm(track),who=norm(artist);if(!title||!who)return null;
+  const all=await chrome.storage.local.get(null),matches=[];
+  for(const [key,value]of Object.entries(all)){
+    if(!key.startsWith(PERSISTENT_PREFIX)||!value?.ok)continue;
+    const t=norm(value.track?.title),a=norm(value.track?.artist);if(!t||!a)continue;
+    const rank=similarity(title,t),artistRank=similarity(who,a);if(rank<.85||artistRank<.7)continue;
+    const plain=cleanPlainLyrics(value.lyrics?.plain||value.lyrics?.synced||'');if(!plain)continue;
+    matches.push({plain,rank:rank+artistRank,title:value.track.title,artist:value.track.artist,sourceMediaKey:LvScore.mediaKey(value.hints||{})});
+  }
+  matches.sort((a,b)=>b.rank-a.rank);const best=matches[0];
+  if(!best||matches.some(m=>best.rank-m.rank<.05&&m.plain!==best.plain))return null;
+  return {lyrics:{synced:'',plain:best.plain,provider:'Local text cache'},match:{},textCache:{title:best.title,artist:best.artist,sourceMediaKey:best.sourceMediaKey,timingReused:false}};
+}
+
+async function lookupDiagnostics(tabId) {
+  const hints=normalizeHints(await getPageHints(tabId)),track=trackFromHints(hints),mediaKey=LvScore.mediaKey(hints);
+  const cached=track?await getCachedLyrics(track.title,track.artist,hints):null;
+  const text=track?await getCachedLyricText(track.title,track.artist):null;
+  return {observedAt:new Date().toISOString(),mediaKey,pageTitle:hints.pageTitle,detected:track?{title:track.title,artist:track.artist,durationMs:track.durationMs}:null,
+    exactRecordingCache:{timed:!!cached?.lyrics?.synced,plain:!!cached?.lyrics?.plain,provider:cached?.lyrics?.provider||null},
+    matchingTextCache:text?.textCache||null,
+    providers:Object.fromEntries(Object.entries(apiHealth).map(([name,h])=>[name,{lastErrorType:h.lastErrorType,lastFailure:h.lastFailure,lastSuccess:h.lastSuccess,degraded:h.degraded}])),
+    providerStatusScope:'Latest provider observations across tabs; not a per-request trace. Different recordings may supply text only.'};
+}
+
+chrome.runtime.onMessage.addListener((message,sender,sendResponse)=>{
+  if(message?.type!=='LV_LOOKUP_DIAGNOSTICS')return;
+  if(!sender.tab?.id){sendResponse({ok:false,error:{code:'SOURCE_REQUIRED',message:'Open error details on the source video.'}});return;}
+  lookupDiagnostics(sender.tab.id).then(diagnostics=>sendResponse({ok:true,diagnostics}),error=>sendResponse({ok:false,error:{code:'DIAGNOSTICS_FAILED',message:error.message}}));return true;
+});
+
 function setCachedLyrics(track, artist, payload) {
   payload = { ...payload, _lyricsCheckedAt: Date.now() };
   const key = cacheKey(track, artist, payload.hints);
@@ -807,7 +843,11 @@ async function recognize(body) {
     };
   }
 
-  const lyricResult = await findLyrics(detected, hints);
+  let lyricResult = await findLyrics(detected, hints);
+  if(!lyricResult){
+    const scoped=await getFuzzyCachedLyrics(detected.title,detected.artist,hints);
+    lyricResult=scoped?.ok&&hasUsableLyrics(scoped)?{lyrics:{...scoped.lyrics},match:scoped.match||{}}:await getCachedLyricText(detected.title,detected.artist);
+  }
 
   if (!lyricResult) {
     if (cached) {
@@ -856,6 +896,7 @@ async function recognize(body) {
     track,
     lyrics: lyricResult.lyrics,
     match: matched,
+    ...(lyricResult.textCache?{textCache:lyricResult.textCache}:{}),
     hints
   };
 

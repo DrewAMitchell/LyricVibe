@@ -137,6 +137,27 @@
 
   const hud = document.createElement('div');
   hud.className = 'lvx-hud';
+  const errorPanel=document.createElement('section');errorPanel.className='lvx-error-panel';errorPanel.hidden=true;errorPanel.setAttribute('aria-label','LyricVibe errors');
+  errorPanel.innerHTML='<header><strong>LyricVibe · Error details</strong><button data-error="close" aria-label="Close error details">Close</button></header><div class="lvx-error-entries" role="log" aria-live="polite"></div><footer><button data-error="copy">Copy error details</button><button data-error="retry">Retry lyrics</button><span role="status"></span></footer>';
+  const errorEntries=[],errorButton=document.createElement('button');errorButton.className='lvx-theme-btn';errorButton.textContent='Errors';errorButton.hidden=true;
+  errorButton.onclick=()=>{errorPanel.hidden=!errorPanel.hidden;};
+  errorPanel.querySelector('[data-error="close"]').onclick=()=>{errorPanel.hidden=true;errorButton.focus();};
+  async function copyErrorText(text,output){try{await navigator.clipboard.writeText(text);output.textContent='Copied';}catch{output.textContent='Clipboard unavailable. Select the text and copy it manually.';}}
+  errorPanel.querySelector('[data-error="copy"]').onclick=()=>copyErrorText(errorEntries.map(e=>e.node.textContent).join('\n\n'),errorPanel.querySelector('footer span'));
+  errorPanel.querySelector('[data-error="retry"]').onclick=async()=>{const button=errorPanel.querySelector('[data-error="retry"]');button.disabled=true;try{await chrome.runtime.sendMessage({type:'LV_RETRY'});errorPanel.querySelector('footer span').textContent='Retry requested. Previous errors remain here.';}catch(error){reportError(error.message,'Retry lyrics');}finally{button.disabled=false;}};
+  function reportError(text,operation='Lyric display'){
+    const mediaKey=globalThis.LvScore?.mediaKey({url:location.href})||location.hostname;
+    if(errorEntries[0]?.text===String(text)&&errorEntries[0]?.mediaKey===mediaKey){errorPanel.hidden=false;return;}
+    const node=document.createElement('pre'),entry={text:String(text),mediaKey,node};
+    node.textContent=`${operation}\n${new Date().toISOString()} · ${mediaKey}\n${text}`;
+    errorEntries.unshift(entry);errorPanel.querySelector('.lvx-error-entries').prepend(node);
+    if(errorEntries.length>5)errorEntries.pop().node.remove();
+    errorButton.hidden=false;errorPanel.hidden=false;
+    try{Promise.resolve(chrome.runtime.sendMessage({type:'LV_LOOKUP_DIAGNOSTICS'})).then(result=>{
+      if(result?.ok&&result.diagnostics?.mediaKey===mediaKey)node.textContent+='\n\nLookup context (observed now):\n'+JSON.stringify(result.diagnostics,null,2);
+      else if(result?.error)node.textContent+='\n\nLookup context unavailable: '+(result.error.message||result.error);
+    }).catch(error=>{node.textContent+='\n\nExtension connection: '+error.message;});}catch(error){node.textContent+='\n\nExtension connection: '+error.message;}
+  }
   let bloomEnabled=true;
   let linger=LvBeatTrack.lingerSettings();
   function setLinger(value){
@@ -226,7 +247,7 @@
   quickSyncButton.className = 'lvx-quick-sync-btn';
   quickSyncButton.textContent = '✎ Edit timing';
   quickSyncButton.title = 'Open the timing sidebar: record and refine this video\u2019s lyric timing';
-  quickSyncButton.addEventListener('click', () => state.score ? openTimingReview() : setHud('Edit timing needs this video\u2019s timed lyrics. Wait for them to load.', true, false));
+  quickSyncButton.addEventListener('click', () => openTimingReview());
   // Auto-calibrating the offset applies only to lyrics without a timed score; it lives with the Sync offset.
   const autoSyncButton = document.createElement('button');
   autoSyncButton.className = 'lvx-sync-btn lvx-auto-sync';
@@ -269,7 +290,7 @@
   for(const rate of PLAYBACK_RATES){const option=document.createElement('option');option.value=String(rate);option.textContent=rate+'×';speedSelect.append(option);}
   for(const [rate,label,title]of [[.5,'½×','Half speed'],[.75,'¾×','Three-quarter speed'],[1,'1×','Real-time speed']]){const button=document.createElement('button');button.type='button';button.textContent=label;button.dataset.playbackRate=rate;button.title=title;button.setAttribute('aria-label',title);button.onclick=()=>setPlaybackSpeed(rate);speedGroup.append(button);}
   speedGroup.append(speedSelect);speedSelect.onchange=()=>setPlaybackSpeed(Number(speedSelect.value));
-  hud.append(statusGroup, speedGroup, offsetGroup, editGroup, themeButton, tempoButton, endGroup);
+  hud.append(statusGroup, speedGroup, offsetGroup, editGroup, themeButton, tempoButton, errorButton, endGroup);
   const hudSizeObserver=new ResizeObserver(()=>root.style.setProperty('--lvx-toolbar-height',`${Math.ceil(hud.getBoundingClientRect().height)}px`));
 
   /* Display picker: one tile per theme, animated with this video's own lyrics. */
@@ -484,7 +505,9 @@
   captureActions.before(syncPanel.querySelector('.lvx-phrase-syllables'),syncPanel.querySelector('.lvx-tap-words'),syllableFields);
   syncPanel.querySelector('.lvx-perform-cue').after(syncPanel.querySelector('.lvx-live-recovery'));
   // tone: '' for status, 'warn' for attention, 'error' for anything that blocks you (red box).
-  const setSyncNotice = (text, tone = '') => { syncNotice.textContent = text; syncNotice.dataset.tone = tone; };
+  const syncCopy=document.createElement('button');syncCopy.className='lvx-notice-copy';syncCopy.textContent='Copy message';syncCopy.hidden=true;syncNotice.after(syncCopy);
+  syncCopy.onclick=()=>copyErrorText(syncNotice.textContent,syncCopy);
+  const setSyncNotice = (text, tone = '') => { syncNotice.textContent = text; syncNotice.dataset.tone = tone;syncCopy.hidden=!['error','warn'].includes(tone);syncCopy.textContent='Copy message';if(tone==='error')reportError(text,'Timing editor'); };
   const timingTapPending = () => Boolean(tapping.take && (tapping.take.status === 'armed' || !rawTake(tapping.take) && (tapCount(tapping.take) || tapping.take.pendingStartMs !== null || tapping.take.actionHistory?.length)));
   const effectPending = () => performanceTake.armed || performanceTake.marks.length > 0;
   const tapPending = () => timingTapPending() || effectPending();
@@ -2047,9 +2070,10 @@
   const timingEnvelope = type => ({ type, mediaKey: LvScore.mediaKey(state.score.source), expectedRevision: state.score.revision,
     lyricsHash: state.score.lyrics.contentHash, token: timing.draft?.token, previewRevision: timing.draft?.previewRevision });
   async function timingRequest(type, extra = {}) {
-    if (!state.score || LvScore.mediaKey({ url: location.href }) !== LvScore.mediaKey(state.score.source)) throw Error('The video changed. Reopen Sync for the current video.');
+    if (!state.score) throw Error('[SCORE_MISSING] Edit timing cannot open because this video has no timed score. Plain lyrics may be available, but they do not supply timing. Retry lyrics to look for a timed source.');
+    if (LvScore.mediaKey({ url: location.href }) !== LvScore.mediaKey(state.score.source)) throw Error('[SOURCE_CHANGED] The video changed. Reopen Sync for the current video.');
     const result = await chrome.runtime.sendMessage({ ...timingEnvelope(type), ...extra });
-    if (!result?.ok) throw Error(result?.error?.message || 'Timing request failed.');
+    if (!result?.ok) throw Error(`[${result?.error?.code||'TIMING_REQUEST_FAILED'}] ${type}: ${result?.error?.message || 'Timing request failed.'}`);
     return result;
   }
   function timingPhrase(score = timing.draft?.score) { return score?.phrases[timing.phraseIndex]; }
@@ -2232,7 +2256,7 @@
     event.stopPropagation();
     if (event.key === 'Escape') { event.preventDefault(); closeTimingReview(); }
   });
-  root.append(viewport, preview, progress, hud, themePicker, shortcutsPanel, syncPanel);
+  root.append(viewport, preview, progress, hud, themePicker, shortcutsPanel, syncPanel, errorPanel);
   function mountRoot() {
     const surface = document.fullscreenElement;
     if (surface && !['VIDEO', 'AUDIO'].includes(surface.tagName)) surface.appendChild(root);
@@ -4769,13 +4793,14 @@
 
   function show() {
     if (!root.isConnected) {
-      root.append(viewport, preview, progress, hud, themePicker, shortcutsPanel);
+      root.append(viewport, preview, progress, hud, themePicker, shortcutsPanel, errorPanel);
       mountRoot();
     }
   }
 
   function setHud(text, isError = false, sticky = false, isWarning = false) {
     show();
+    if(isError)reportError(text);
     hud.classList.toggle('lvx-error', isError);
     hud.classList.toggle('lvx-warning', isWarning && !isError);
     hud.classList.remove('lvx-dim');

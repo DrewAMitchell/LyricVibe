@@ -4,7 +4,9 @@
   const tabId = Number(params.get('sourceTab')), mediaKey = params.get('mediaKey');
   const state = {score:null, draft:null, phrase:0, wordId:null, trackId:'lead', busy:false, auditioned:false, dirty:false, editRevision:null, closed:false};
   let range = {start:0,end:1000}, polling, replacementWordId=null, deferredPreview=null, pronunciationKey=null, pronunciationSuggestion=null;
-  const notice = text => { $('notice').textContent = text; };
+  const noticeCopy=document.createElement('button');noticeCopy.textContent='Copy message';$('notice').after(noticeCopy);
+  noticeCopy.onclick=async()=>{try{await navigator.clipboard.writeText($('notice').textContent);noticeCopy.textContent='Copied';}catch{noticeCopy.textContent='Select message to copy';}};
+  const notice = text => { $('notice').textContent = text;noticeCopy.textContent='Copy message'; };
   const phrase = () => state.draft?.score.phrases[state.phrase];
   const word = () => phrase()?.words.find(w=>w.id===state.wordId) || phrase()?.words[0];
   const target = () => $('target').value === 'word' ? word() : word()?.syllables?.find(s=>s.id===$('target').value);

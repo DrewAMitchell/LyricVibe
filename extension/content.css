@@ -2508,3 +2508,14 @@
 #lvx-root .lvx-linger-controls p{flex-basis:100%;margin:0;color:#c0cdd5;font-size:11px}
 #lvx-root .lvx-linger-controls p:empty{display:none}
 #lvx-root .lvx-linger-controls [hidden]{display:none!important}
+#lvx-root .lvx-error-panel[hidden],#lvx-root .lvx-notice-copy[hidden],#lvx-root .lvx-hud button[hidden]{display:none!important}
+#lvx-root .lvx-error-panel{position:fixed;z-index:100;top:calc(var(--lvx-toolbar-height,60px) + 34px);left:24px;width:min(600px,calc(100vw - 48px));max-height:calc(100vh - var(--lvx-toolbar-height,60px) - 64px);display:flex;flex-direction:column;box-sizing:border-box;background:#18242d;color:#f4f7fa;border:1px solid #da9e91;border-radius:12px;box-shadow:0 8px 32px #000b;pointer-events:auto;text-align:left;font:14px/1.5 system-ui,sans-serif;user-select:text}
+#lvx-root.lvx-sync-open .lvx-error-panel{top:24px;max-height:calc(100vh - var(--lvx-toolbar-height,60px) - 64px)}
+#lvx-root .lvx-error-panel header,#lvx-root .lvx-error-panel footer{display:flex;align-items:center;gap:10px;padding:12px 16px;flex-wrap:wrap;flex-shrink:0}
+#lvx-root .lvx-error-panel header{border-bottom:1px solid #52616d}#lvx-root .lvx-error-panel header strong{flex:1}
+#lvx-root .lvx-error-entries{overflow:auto;min-height:0;padding:0 16px}
+#lvx-root .lvx-error-entries pre{font:13px/1.55 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;margin:14px 0;padding-bottom:14px;border-bottom:1px solid #52616d;user-select:text;text-transform:none;letter-spacing:normal}
+#lvx-root .lvx-error-panel button,#lvx-root .lvx-notice-copy{font:13px system-ui,sans-serif;color:#fff;background:#334858;border:1px solid #8195a3;border-radius:6px;min-height:36px;padding:6px 10px;cursor:pointer}
+#lvx-root .lvx-error-panel button:focus-visible{outline:3px solid #f7cc70;outline-offset:2px}
+#lvx-root .lvx-error-panel footer span{font-size:12px;color:#d2dee7}
+#lvx-root .lvx-sync-notice{white-space:pre-wrap;overflow-wrap:anywhere;user-select:text}

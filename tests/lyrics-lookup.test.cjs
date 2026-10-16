@@ -22,6 +22,33 @@ function harness() {
   const payload = { ok: true, track: { title: MUSIC.track, artist: MUSIC.artist, durationMs: 134901 }, lyrics: { synced: entry(1, 135, '00.26').syncedLyrics, plain: '' }, match: entry(1, 135, '00.26'), hints: MUSIC };
   return { data, sessionData, calls, context, run, payload };
 }
+
+test('text cache normalizes accents and title decorations across recordings without transferring timestamps', async () => {
+  const h=harness();h.context.seed={...h.payload,track:{title:'TOKENS ON THE DESK (Official Audio)',artist:'Sample Café'},lyrics:{synced:'[00:01.00] Original words\n[00:04.00] Next line',plain:''}};
+  h.run("setCachedLyrics('TOKENS ON THE DESK','Sample Café',seed)");
+  await new Promise(resolve=>setImmediate(resolve));
+  const result=await h.run("getCachedLyricText('Tokens on the desk','Sample Cafe')");
+  assert.equal(result.lyrics.plain,'Original words\nNext line');assert.equal(result.lyrics.synced,'');
+  assert.equal(result.textCache.timingReused,false);assert.equal(result.textCache.sourceMediaKey,core.mediaKey(MUSIC));
+  assert.equal(h.calls.length,0);
+});
+
+test('text cache refuses different artists and equally plausible conflicting transcripts', async () => {
+  const h=harness();h.context.seed=h.payload;h.run("setCachedLyrics('Sample Track','Tëst Artist',seed)");
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(await h.run("getCachedLyricText('Sample Track','Someone Else')"),null);
+  h.context.second={...h.payload,hints:VIDEO,lyrics:{plain:'Different recording lyrics',synced:''}};
+  h.run("setCachedLyrics('Sample Track','Tëst Artist',second)");await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(await h.run("getCachedLyricText('Sample Track','Test Artist')"),null);
+});
+
+test('production lookup recovers cross-video words after provider miss while keeping timing unavailable', async () => {
+  const h=harness();h.context.seed=h.payload;h.context.want=VIDEO;
+  h.run("setCachedLyrics('Sample Track','Tëst Artist',seed);findLyrics=async()=>null");await new Promise(resolve=>setImmediate(resolve));
+  const result=await h.run('recognize({hints:want})');
+  assert.equal(result.ok,true);assert.equal(result.lyrics.synced,'');assert.match(result.lyrics.plain,/First phrase/);
+  assert.equal(result.textCache.timingReused,false);assert.equal(core.mediaKey(result.hints),core.mediaKey(VIDEO));
+});
 test('production recognize never reuses another video timing cache', async () => {
   const h = harness(); h.context.seed = h.payload; h.context.want = VIDEO;
   h.run("setCachedLyrics('Sample Track','Tëst Artist',seed)");
