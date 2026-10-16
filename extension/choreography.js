@@ -71,7 +71,7 @@
     for(let attempt=0;attempt<90;attempt++,font*=.94){
       const gap=font*.12;
       const boxes=words.map((word,index)=>{
-        const size=font*weight(word),angle=upsideDown&&index%5===2?180:index%2?90:0;
+        const size=font*weight(word),angle=upsideDown&&index%5===2?180:0;
         const w=Math.max(size*.2,measure(word.text,size))+size*.08,h=size*1.3,vertical=angle===90;
         return {index,width:w,height:h,boxWidth:vertical?h:w,boxHeight:vertical?w:h,font:size,angle};
       }).sort((a,b)=>b.boxWidth*b.boxHeight-a.boxWidth*a.boxHeight||a.index-b.index);

@@ -3837,7 +3837,7 @@
       if(choreography.mode==='puzzle'){
         const parts=[...node.querySelectorAll('[data-syllable]')];
         if(!parts.length)node.style.translate=`0 ${(-(1-arrival)*slot.font).toFixed(2)}px`;
-        for(const part of parts){const syllable=word.syllables?.find(s=>s.id===part.dataset.syllable);if(!syllable)continue;const start=Math.max(word.startMs,syllable.startMs),lead=Math.min(350,Math.max(1,start-word.startMs)),a=LvChoreography.arrival(clock,start,lead,reduced);part.style.translate=`0 ${(-(1-a)*slot.font*.85).toFixed(2)}px`;part.style.rotate=((1-a)*90).toFixed(2)+'deg';part.style.opacity=clock<start?String(.12*a):'';}
+        for(const part of parts){const syllable=word.syllables?.find(s=>s.id===part.dataset.syllable);if(!syllable)continue;const start=Math.max(word.startMs,syllable.startMs),lead=Math.min(350,Math.max(1,start-word.startMs)),a=LvChoreography.arrival(clock,start,lead,reduced);part.style.translate=`0 ${(-(1-a)*slot.font*.85).toFixed(2)}px`;part.style.rotate='0deg';part.style.opacity=clock<start?String(.12*a):'';}
       }
     });
   }
