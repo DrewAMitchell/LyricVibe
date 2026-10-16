@@ -1374,7 +1374,7 @@
       setCaptureText('.lvx-cue-legend',tapping.listening?'Playback keeps moving while you listen · press Space to take over':'Your input advances the cue · rewind to listen again');
       return;
     }
-    if((!tapping.take||tapping.take.status==='stopped')&&!timing.busy){followPlaybackPhrase(now);followPlaybackWord(now);}
+    if((!tapping.take||tapping.take.status==='stopped')&&!timing.busy&&tapping.backAnchorMs==null){followPlaybackPhrase(now);followPlaybackWord(now);}
     syncPanel.querySelector('.lvx-estimated-phrase').hidden=false;
     syncPanel.querySelector('.lvx-cue-legend').textContent=tapping.take?.mode==='syllable'&&tapping.take.status==='complete'?'Playing your recorded syllable boundaries · not yet kept':'Blue: selected recording cue · playback estimates shown below';
     phrase=timingPhrase();
@@ -2241,12 +2241,20 @@
     syncPanel.hidden = true; refreshTimingPanel();
   }
   function navigateTiming(delta) {
-    if (tapPending() || tapping.splitDirty) { setSyncNotice('Use the take or set the syllable spelling before changing phrases.'); return false; }
+    if (tapping.splitDirty) { setSyncNotice('Set the syllable spelling before changing phrases.'); return false; }
     if (timing.dirty) { setSyncNotice('Use these times or reset the text before changing phrases.'); return false; }
     if (!timing.draft || timing.busy || !Number.isInteger(delta)) return false;
-    timing.phraseIndex = clamp(timing.phraseIndex + delta, 0, timing.draft.score.phrases.length - 1);
+    const index=clamp(timing.phraseIndex + delta, 0, timing.draft.score.phrases.length - 1),target=timing.draft.score.phrases[index];
+    const take=completePhraseScope(tapping.take),first=take?capturePhraseUnits(take,target)[0]:null;
+    if(take&&!first){setSyncNotice('This phrase is outside the current take’s scope. Use or discard that take before recording another scope.');return false;}
+    timing.phraseIndex = index;
     const media=getMedia(),phrase=timingPhrase();
-    if(media&&phrase&&!tapping.take?.status?.startsWith('arm')){
+    if(take){
+      tapping.take={...take,index:first.index};tapping.wordId=first.unit.wordId;
+      tapping.backPhraseId=phrase.id;tapping.rewindPhraseId=null;tapping.followSeek=false;
+      const anchor=capturePhraseStart(take,phrase);seekCapture(anchor-800,anchor,first.index);
+      setSyncNotice('Phrase selected. Existing recording stays intact until your next press.');
+    }else if(media&&phrase){
       tapping.wordId=phrase.words.find(w=>!w.excluded)?.id||null;tapping.armSeekMs=Math.max(0,phraseLeadInMs(phrase)+state.score.offsetMs);media.currentTime=tapping.armSeekMs/1000;
     }
     else if(!tapping.take)tapping.followSeek=false;
@@ -2634,7 +2642,8 @@
     if(eventName==='seeking'&&event.target===getMedia()){
       const internal=timing.busy||Number.isFinite(tapping.armSeekMs)&&Math.abs(event.target.currentTime*1000-tapping.armSeekMs)<100;
       tapping.armSeekMs=null;
-      if(tapping.take?.status==='armed'&&!timing.busy){if(!internal){tapping.backAnchorMs=null;tapping.backIndex=null;tapping.backPhraseId=null;tapping.rewindPhraseId=null;}listenToTake();tapping.takeSeekUntil=performance.now()+1500;state.auditionLoop=null;return;}
+      if(!internal){tapping.backAnchorMs=null;tapping.backIndex=null;tapping.backPhraseId=null;tapping.rewindPhraseId=null;}
+      if(tapping.take?.status==='armed'&&!timing.busy){listenToTake();tapping.takeSeekUntil=performance.now()+1500;state.auditionLoop=null;return;}
       if(internal)return;
       if(streamTake(tapping.take)||rawTake(tapping.take)){tapping.followSeek=true;tapping.seekPhraseId=null;}
       else if(!tapping.take)tapping.followSeek=true;
@@ -2647,6 +2656,7 @@
   }, true);
   document.addEventListener('seeked',event=>{
     if(event.target===getMedia()&&tapping.take?.status==='armed'&&!timing.busy){refreshPerformClock(event.target.currentTime*1000-state.score.offsetMs);state.scoreSignature='';renderScore(getMediaTimeMs());setSyncNotice('Following playback. Your next press takes over from this position; existing timing is retained until then.');return;}
+    if(event.target===getMedia()&&timing.draft&&(!tapping.take||tapping.take.status==='stopped')&&!timing.busy){refreshPerformClock(event.target.currentTime*1000-state.score.offsetMs);state.scoreSignature='';renderScore(getMediaTimeMs());return;}
     if(event.target===getMedia()&&!tapping.take&&tapping.followSeek&&!timing.busy&&!syncPanel.hidden){refreshPerformClock(event.target.currentTime*1000-state.score.offsetMs);return;}
     if(event.target!==getMedia()||!(streamTake(tapping.take)||rawTake(tapping.take))||!tapping.followSeek||timing.busy)return;
     refreshPerformClock(event.target.currentTime*1000-state.score.offsetMs);
