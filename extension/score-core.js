@@ -178,6 +178,19 @@
     });
   }
 
+  function createPlainScore(source, rawText, lyricsMetadata) {
+    if(typeof rawText!=="string"||!rawText.trim()||rawText.length>200000)fail("INVALID_LYRICS","Provide nonempty plain lyrics, at most 200000 characters.");
+    if(!Number.isFinite(source?.durationMs)||source.durationMs<=0)fail("SOURCE_UNREADY","Wait for the main video duration before recording lyrics.");
+    const lines=rawText.split(/\r?\n/).map(line=>line.trim()).filter(Boolean);
+    // This is an editor layout only. No catalog or acoustic timing is implied.
+    const lrc=lines.map((line,index)=>{const ms=Math.floor(source.durationMs*index/lines.length);return `[${Math.floor(ms/60000)}:${((ms%60000)/1000).toFixed(3).padStart(6,'0')}]${line.replace(/\[\d+:\d+(?:\.\d+)?\]/g,'')}`;}).join('\n');
+    const score=createScore(source,lrc,lyricsMetadata);
+    if(!score.phrases.length)fail("INVALID_LYRICS","The plain lyrics contain no words to record.");
+    score.lyrics.timingBasis='plain-text';
+    for(const phrase of score.phrases)phrase.endEstimated=true;
+    return validateScore(score);
+  }
+
   function estimateWordTimes(phrase) {
     const words = phrase.words;
     if (!words.length) return;
@@ -668,5 +681,5 @@
     return { version: receipt.version, mediaKey: receipt.mediaKey, lyricsHash: receipt.lyricsHash, expectedRevision: receipt.expectedRevision, adapter: receipt.adapter, model: receipt.model, proposals, automaticAdmissionEnabled: false };
   }
 
-  return { VERSION, ScoreError, mediaKey, parseLrc, hyphenWordParts, createScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment };
+  return { VERSION, ScoreError, mediaKey, parseLrc, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment };
 });

@@ -51,6 +51,7 @@
      ══════════════════════════════════════ */
   const state = {
     score: null,
+    plainLyrics: null,
     auditionLoop: null,
     scoreSignature: '',
     lastClockSent: 0,
@@ -506,6 +507,7 @@
   syncPanel.querySelector('.lvx-perform-cue').after(syncPanel.querySelector('.lvx-live-recovery'));
   // tone: '' for status, 'warn' for attention, 'error' for anything that blocks you (red box).
   const syncCopy=document.createElement('button');syncCopy.className='lvx-notice-copy';syncCopy.textContent='Copy message';syncCopy.hidden=true;syncNotice.after(syncCopy);
+  const plainTimingNotice=document.createElement('p');plainTimingNotice.className='lvx-sync-hint';plainTimingNotice.hidden=true;syncCopy.after(plainTimingNotice);
   syncCopy.onclick=()=>copyErrorText(syncNotice.textContent,syncCopy);
   const setSyncNotice = (text, tone = '') => { syncNotice.textContent = text; syncNotice.dataset.tone = tone;syncCopy.hidden=!['error','warn'].includes(tone);syncCopy.textContent='Copy message';if(tone==='error')reportError(text,'Timing editor'); };
   const timingTapPending = () => Boolean(tapping.take && (tapping.take.status === 'armed' || !rawTake(tapping.take) && (tapCount(tapping.take) || tapping.take.pendingStartMs !== null || tapping.take.actionHistory?.length)));
@@ -1406,7 +1408,8 @@
         if(!authored&&candidate?.length){parts=candidate;expectedCount=parts.length;}
       }catch{/* A dictionary outage must not prevent a manual take. */}
       if(onProgress)onProgress(++done);
-      return {id:word.id,wordId:word.id,phraseId:p.id,text:word.text,parts,expectedCount,countOptions,countSource,referenceStartMs:word.startMs+(raw?state.score.offsetMs:0),referenceEndMs:word.endMs+(raw?state.score.offsetMs:0),referenceManual:word.provenance==='manual',minMs:p.startMs+(raw?state.score.offsetMs:0),maxMs:p.endMs+(raw?state.score.offsetMs:0),estimatedStartMs:p.startMs};
+      const unframed=raw&&timing.draft.score.lyrics.timingBasis==='plain-text'&&p.endEstimated;
+      return {id:word.id,wordId:word.id,phraseId:p.id,text:word.text,parts,expectedCount,countOptions,countSource,referenceStartMs:word.startMs+(raw?state.score.offsetMs:0),referenceEndMs:word.endMs+(raw?state.score.offsetMs:0),referenceManual:word.provenance==='manual',minMs:unframed?0:p.startMs+(raw?state.score.offsetMs:0),maxMs:unframed?timing.draft.score.source.durationMs:p.endMs+(raw?state.score.offsetMs:0),estimatedStartMs:p.startMs};
     })));
     if(binding!==tapBinding())throw Error('The preview changed while preparing suggestions. Your existing take is retained.');
     return units;
@@ -1418,6 +1421,8 @@
     if (!word || !media || isAdvertisement() || youtubeMediaState()?.clockUsable === false || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source)) { setSyncNotice('Wait for this video’s main audio before starting a take.'); return; }
     try {
       timing.busy=true;refreshTimingPanel();
+      const unplaced=unplacedWords().length>0;
+      if(unplaced&&phrase.endEstimated&&mode==='syllable'&&!eventPass()&&!wordPass())throw Error('These lyrics have no reliable timing frames yet. Use freely recorded syllable holds, or record word/phrase timings first.');
       const syllableStart=mode==='syllable'&&!wordPass()&&!tapping.take&&tapping.syllableStartKey!==LvScore.mediaKey(state.score.source);
       if(syllableStart){
         phrase=timing.draft.score.phrases.find(p=>p.laneId===phrase.laneId&&p.words.some(w=>!w.excluded));
@@ -1425,7 +1430,7 @@
       }
       if(mode==='syllable'&&!continuousPass()){discardTapTake();await preparePhraseSyllables();phrase=timingPhrase();word=phrase.words.find(w=>!w.excluded);tapping.wordId=word?.id;const unresolved=[...phraseSpellingState()].filter(([,e])=>e.requiresChoice);if(unresolved.length){syncPanel.querySelector('.lvx-phrase-syllables details').open=true;throw Error('Choose the sung syllable count in Syllable spelling for: '+unresolved.map(([id])=>phrase.words.find(w=>w.id===id)?.text).join(', ')+'. Then Start phrase take.');}}
       const retiming=wordTake(tapping.take)&&tapping.take.retime;
-      if(!retiming&&!syllableStart){
+      if(!retiming&&!syllableStart&&!unplaced){
         // Start and Continue both begin at the phrase you are listening to, never a stale selection or the take's old end.
         const now=Math.round(media.currentTime*1000)-state.score.offsetMs,lane=timing.draft.score.phrases.filter(p=>p.laneId===phrase.laneId&&p.words.some(w=>!w.excluded));
         const parked=now>=phrase.startMs-1500&&now<phrase.endMs;
@@ -1434,7 +1439,7 @@
           if(target&&target.id!==phrase.id){timing.phraseIndex=timing.draft.score.phrases.indexOf(target);phrase=target;word=phrase.words.find(w=>!w.excluded)||word;tapping.wordId=word.id;state.scoreSignature='';}
         }
       }
-      if(!retiming&&mode==='word'){
+      if(!retiming&&mode==='word'&&!unplaced){
         const now=Math.round(media.currentTime*1000)-state.score.offsetMs;
         word=phrase.words.find(w=>!w.excluded&&now>=w.startMs&&now<w.endMs)||phrase.words.find(w=>!w.excluded&&w.startMs>=now)||phrase.words.find(w=>!w.excluded)||word;tapping.wordId=word.id;
       }
@@ -1485,7 +1490,7 @@
       if(syllableStart)tapping.syllableStartKey=LvScore.mediaKey(state.score.source);
       // With a tapped tempo, snapping uses its beat phase instead of the first tap.
       if(take.bpm!==null&&tempo.estimate&&take.originMs===null&&Math.abs(take.bpm-tempo.estimate.bpm)<.01)take.originMs=tempo.estimate.anchorMs-state.score.offsetMs;
-      tapping.take = take; tapping.binding = tapBinding(); tapping.clockMs = media.currentTime * 1000; tapping.rate = media.playbackRate;tapping.followSeek=false;tapping.seekPhraseId=null;tapping.streamWordId=null;tapping.listening=true;tapping.backAnchorMs=null;
+      tapping.take = take; tapping.binding = tapBinding(); tapping.clockMs = media.currentTime * 1000; tapping.rate = media.playbackRate;tapping.followSeek=false;tapping.seekPhraseId=null;tapping.streamWordId=null;tapping.listening=!unplaced;tapping.backAnchorMs=null;
       timing.view = 'proposed'; timing.auditioned = false; state.scoreSignature = '';
       setSyncNotice(mode === 'syllable' ? 'Tap Space at each syllable entrance, including the first. Phrase start and end stay fixed. The completed take plays back for review.' : syncButton('tap-cadence').value === 'hold' ? 'Hold Space for each sung word; release it at the end. Each release advances automatically.' : take.cadence === 'flow' ? 'Space starts each next lyric. Enter releases before a rest or at the end. Stop retains completed marks.' : 'Space marks START then END. Use take updates only the unsaved preview.');
       if(frameTake(take))setSyncNotice('Continuous syllable pass: tap each entrance. Two taps inside a word make two syllables. Stop whenever you want; untapped words keep their timing.');
@@ -1499,7 +1504,7 @@
     const take=tapping.take;if(!take||take.status!=='armed')return;
     // A lost key-up must not leave a word held forever; completed marks stay.
     if(take.pendingStartMs!==null&&(syllableHold(take)||wordTake(take)||take.mode==='word'||take.mode==='phrase'))tapping.take=syllableHold(take)?LvTapTiming.undoEvent(take):wordTake(take)?LvTapTiming.undoWordHold(take):LvTapTiming.undo(take);
-    tapping.heldInput=null;tapping.cancelledSpace=false;tapping.listening=true;tapping.followSeek=false;
+    tapping.heldInput=null;tapping.cancelledSpace=false;tapping.listening=unplacedWords().length===0;tapping.followSeek=false;
   }
   function seekCapture(targetMs,anchorMs=null,backIndex=null) {
     const media=getMedia();if(!media||timing.busy)return;
@@ -2070,15 +2075,25 @@
   const timingEnvelope = type => ({ type, mediaKey: LvScore.mediaKey(state.score.source), expectedRevision: state.score.revision,
     lyricsHash: state.score.lyrics.contentHash, token: timing.draft?.token, previewRevision: timing.draft?.previewRevision });
   async function timingRequest(type, extra = {}) {
-    if (!state.score) throw Error('[SCORE_MISSING] Edit timing cannot open because this video has no timed score. Plain lyrics may be available, but they do not supply timing. Retry lyrics to look for a timed source.');
+    if (!state.score&&type==='LV_TIMING_CURRENT') {
+      const plain=state.plainLyrics,key=LvScore.mediaKey({url:location.href});
+      if(!plain?.text||plain.mediaKey!==key)throw Error('[LYRICS_MISSING] No lyrics are loaded for this video. Retry lyrics, then open Edit timing to record your own timings.');
+      const authored=await chrome.runtime.sendMessage({type:'LV_SCORE_AUTHOR',mediaKey:key,...plain});
+      if(!authored?.ok)throw Error(`[${authored?.error?.code||'AUTHORING_FAILED'}] ${authored?.error?.message||'Could not open the plain lyrics.'}`);
+      if(LvScore.mediaKey({url:location.href})!==key)throw Error('[SOURCE_CHANGED] Return to this video to record its lyrics.');
+      state.score=authored.score;state.syncOffsetMs=authored.score.offsetMs;state.scoreSignature='';
+    }
+    if (!state.score) throw Error('[SCORE_MISSING] Open Edit timing with this video’s lyrics before recording.');
     if (LvScore.mediaKey({ url: location.href }) !== LvScore.mediaKey(state.score.source)) throw Error('[SOURCE_CHANGED] The video changed. Reopen Sync for the current video.');
     const result = await chrome.runtime.sendMessage({ ...timingEnvelope(type), ...extra });
     if (!result?.ok) throw Error(`[${result?.error?.code||'TIMING_REQUEST_FAILED'}] ${type}: ${result?.error?.message || 'Timing request failed.'}`);
     return result;
   }
   function timingPhrase(score = timing.draft?.score) { return score?.phrases[timing.phraseIndex]; }
+  function unplacedWords(score=timing.draft?.score||state.score){return score?.lyrics.timingBasis==='plain-text'?score.phrases.flatMap(p=>p.words).filter(w=>!w.excluded&&w.provenance==='estimated'&&!w.locked):[];}
   function refreshTimingPanel() {
     const draft = timing.draft, phrase = timingPhrase();
+    const unplaced=unplacedWords();plainTimingNotice.hidden=!unplaced.length;plainTimingNotice.textContent=`${unplaced.length} words still need timing. Initial positions are placeholders. Hold Space for each word, then refine syllables. Your input controls the next word.`;
     syncPanel.setAttribute('aria-busy', String(timing.busy));
     syncButton('close').disabled = timing.busy;
     root.classList.toggle('lvx-sync-open', !syncPanel.hidden);
@@ -2118,7 +2133,9 @@
       const current=await timingRequest('LV_TIMING_CURRENT');
       const result = current.preview ? current : await timingRequest('LV_TIMING_PREPARE', { fromSaved: true });
       timing.draft = result.preview; timing.phraseIndex = 0; timing.view = 'proposed'; timing.dirty = false; timing.auditioned = false;
+      const unplaced=unplacedWords();if(unplaced.length){const first=unplaced[0];timing.phraseIndex=timing.draft.score.phrases.findIndex(p=>p.words.some(w=>w.id===first.id));tapping.wordId=first.id;syncButton('tap-mode').value='word';syncButton('tap-cadence').value='hold';syncButton('tap-scope').value='lane';syncPanel.querySelector('.lvx-tap-panel').open=true;}
       setSyncNotice(current.preview ? 'Resumed your unsaved changes. Keep recording or refining; Save timings when you like.' : 'Your saved lyrics and timings are ready. Record or refine a take; Save timings when you like.');
+      if(unplaced.length)setSyncNotice('Plain lyrics are ready to record. Choose Start take, then hold Space for each sung word. Timings stay in the preview until Save timings.');
     } catch (error) { timing.openError=error.message;setSyncNotice(error.message,'error'); }
     finally { timing.busy = false; refreshTimingPanel(); }
   }
@@ -2390,7 +2407,7 @@
         preview.textContent = '';
         show();
         root.classList.add('lvx-active');
-        setHud(`${state.trackTitle} · video-specific score · edit timing to review estimates`);
+        setHud(`${state.trackTitle} · ${unplacedWords(message.score).length?'plain lyrics · record your own timing':'video-specific score · edit timing to review estimates'}`);
         startLoop();
         sendResponse({ ok: true });
       } catch (error) { sendResponse({ ok: false, error: { code: error.code, message: error.message } }); }
@@ -3108,6 +3125,7 @@
 
     const track = payload.track || {};
     const lyrics = payload.lyrics || {};
+    state.plainLyrics=lyrics.plain?{text:lyrics.plain,mediaKey:LvScore.mediaKey(payload.hints||{}),title:track.title||'',artist:track.artist||'',provider:lyrics.provider||'Plain lyrics'}:null;
     const synced = parseLrc(lyrics.synced || '');
     const plain = lyrics.plain
       ? lyrics.plain.split(/\n+/).map((line) => line.trim()).filter(Boolean)

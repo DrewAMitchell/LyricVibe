@@ -184,6 +184,19 @@
         : { ok: true, analysis: await root.LvAnalysis.analysisStatus() };
     }
     const { key } = await liveIdentity(tabId, message.mediaKey);
+    if(message.type==='LV_SCORE_AUTHOR'){
+      if(!sourceOverlayBound(sender,tabId,key))throw fail('SOURCE_REQUIRED','Start recording from the lyric overlay on this video.');
+      return serial(key,async()=>{
+        const existing=await read(key);
+        if(existing)return {ok:true,score:existing.score,created:false};
+        if(typeof message.text!=='string'||!message.text.trim()||message.text.length>200000)throw fail('LYRICS_MISSING','No plain lyrics are loaded for this video. Retry lyrics, then open Edit timing.');
+        const {hints}=await liveIdentity(tabId,key),hash=await digest(message.text);
+        const score=LvScore.createPlainScore({platform:'youtube',videoId:key.slice(8),title:String(message.title||''),artist:String(message.artist||''),durationMs:Math.round((hints.duration||0)*1000)},message.text,{provider:String(message.provider||'Plain lyrics'),entryId:null,contentHash:hash});
+        await liveIdentity(tabId,key);
+        const record={score,history:[],review:[]};await chrome.storage.local.set({[keyFor(key)]:record});await publish(tabId,record);
+        return {ok:true,score,created:true};
+      });
+    }
     if(message.type==='LV_TEMPO_GET'||message.type==='LV_TEMPO_SET'){
       if(!editorSourceBound(sender,tabId,key))throw fail('EDITOR_REQUIRED','Tempo sections require the editor bound to this source tab.');
       return chrome.tabs.sendMessage(tabId,{...message,mediaKey:key});
@@ -332,7 +345,7 @@
     });
   }
   const types = new Set(['LV_ANALYSIS_CACHE_CLEAR_REQUEST', 'LV_EDITOR_OPEN', 'LV_LIGHT_EDITOR_OPEN', 'LV_SCORE_GET', 'LV_SCORE_OPERATION', 'LV_SCORE_IMPORT', 'LV_NATIVE_ALIGNMENT_IMPORT', 'LV_SCORE_UNDO', 'LV_SCORE_SEEK', 'LV_SCORE_TRANSPORT', 'LV_SCORE_REVIEW_APPLY', 'LV_ANALYSIS_START', 'LV_ANALYSIS_STOP', 'LV_ANALYSIS_STATUS', 'LV_NATIVE_ANALYSIS_START', 'LV_NATIVE_ANALYSIS_STOP', 'LV_NATIVE_ANALYSIS_STATUS', 'LV_ALIGNMENT_PROPOSALS']);
-  types.add('LV_TEMPO_GET');types.add('LV_TEMPO_SET');
+  types.add('LV_TEMPO_GET');types.add('LV_TEMPO_SET');types.add('LV_SCORE_AUTHOR');
   for (const type of ['LV_TIMING_PREPARE', 'LV_TIMING_CURRENT', 'LV_TIMING_TUNE', 'LV_TIMING_UNDO', 'LV_TIMING_APPLY', 'LV_TIMING_CANCEL']) types.add(type);
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!types.has(message?.type)) return;

@@ -90,6 +90,34 @@ function makeHarness() {
 
 function recordFor(h, id = ID_A) { return h.values[`lvScore:youtube:${id}`]; }
 
+test('plain lyrics explicitly open an editable source-bound score without a timed provider', async()=>{
+  const h=makeHarness(),sender={id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`};
+  h.context.recognize=async()=>{throw Error('Manual authoring must not need the provider');};
+  const authored=await h.dispatch({type:'LV_SCORE_AUTHOR',mediaKey:`youtube:${ID_A}`,text:'Hello again\nMorning light',title:'Plain song',artist:'Singer',provider:'local text'},sender);
+  assert.equal(authored.ok,true);assert.equal(authored.created,true);assert.equal(authored.score.lyrics.timingBasis,'plain-text');
+  assert.equal(authored.score.source.videoId,ID_A);assert.equal(authored.score.offsetMs,0);
+  assert.deepEqual(Array.from(authored.score.phrases,p=>p.words.map(w=>w.text).join(' ')),['Hello again','Morning light']);
+  assert.ok(authored.score.phrases.every(p=>p.endEstimated&&p.words.every(w=>w.provenance==='estimated'&&!w.locked)));
+  const envelope={mediaKey:`youtube:${ID_A}`,expectedRevision:0,lyricsHash:authored.score.lyrics.contentHash};
+  const prepared=await h.dispatch({type:'LV_TIMING_PREPARE',...envelope,fromSaved:true},sender);assert.equal(prepared.ok,true);
+  const before=JSON.stringify(recordFor(h));
+  const first=authored.score.phrases[0].words[0];
+  const tuned=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:prepared.preview.token,previewRevision:0,changes:[{wordId:first.id,startMs:8000,endMs:8500}]},sender);
+  assert.equal(tuned.ok,true,tuned.error?.message);assert.equal(tuned.preview.score.phrases[0].words[0].startMs,8000);
+  assert.equal(tuned.preview.score.phrases[0].words[0].provenance,'manual');assert.equal(JSON.stringify(recordFor(h)),before,'recording updates preview, not saved score');
+  const again=await h.dispatch({type:'LV_SCORE_AUTHOR',mediaKey:`youtube:${ID_A}`,text:'Replacement must not win'},sender);
+  assert.equal(again.created,false);assert.equal(JSON.stringify(recordFor(h)),before);
+  h.restartWorker();assert.equal((await h.dispatch({type:'LV_TIMING_CURRENT',...envelope},sender)).preview.previewRevision,1);
+});
+
+test('plain authoring refuses wrong-video and unbound callers without creating scores',async()=>{
+  const h=makeHarness(),message={type:'LV_SCORE_AUTHOR',mediaKey:`youtube:${ID_B}`,text:'My lyrics'};
+  const wrong=await h.dispatch(message,{id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`});
+  assert.equal(wrong.ok,false);assert.equal(wrong.error.code,'SOURCE_CHANGED');
+  const unbound=await h.dispatch({...message,tabId:2},{id:'test-extension',url:'https://unrelated.example/'});
+  assert.equal(unbound.ok,false);assert.equal(unbound.error.code,'SOURCE_REQUIRED');assert.equal(Object.keys(h.values).length,0);
+});
+
 test('opening overlay Sync after saved text replacement preserves edits and resumes its preview without catalog lookup', async () => {
   const h=makeHarness(), initial=await h.ensure(), phrase=initial.phrases[0];
   const edited=await h.dispatch({type:'LV_SCORE_OPERATION',mediaKey:`youtube:${ID_A}`,expectedRevision:0,
@@ -101,7 +129,7 @@ test('opening overlay Sync after saved text replacement preserves edits and resu
   const source=fs.readFileSync(path.join(root,'extension/content.js'),'utf8');
   const opener=source.slice(source.indexOf('  async function openTimingReview()'),source.indexOf('  function discardTimingLocal()'));
   const timing={busy:false,draft:null}, panel={hidden:true,focus(){}}, notices=[];
-  const context=vm.createContext({timing,syncPanel:panel,state:{auditionLoop:null},refreshTimingPanel(){},setSyncNotice:text=>notices.push(text),
+  const context=vm.createContext({timing,syncPanel:panel,state:{auditionLoop:null},unplacedWords:()=>[],refreshTimingPanel(){},setSyncNotice:text=>notices.push(text),
     async timingRequest(type,extra={}) {
       const result=await h.dispatch({type,mediaKey:`youtube:${ID_A}`,expectedRevision:edited.score.revision,lyricsHash:edited.score.lyrics.contentHash,...extra},
         {id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`});
