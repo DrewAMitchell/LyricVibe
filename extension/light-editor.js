@@ -12,6 +12,7 @@
   const target = () => $('target').value === 'word' ? word() : word()?.syllables?.find(s=>s.id===$('target').value);
   const trackLabel=lane=>lane?.id==='backing'?'Backing':lane?.id==='lead'?'Lead':lane?.label||lane?.id||'Track';
   const phraseIndices=()=>state.draft?.score.phrases.flatMap((p,i)=>state.trackId==='all'||p.laneId===state.trackId?[i]:[])||[];
+  const arrangement = window.LvLightArrange.create({state, request, run, tune, setDraft, notice, selectPhrase, phraseIndices});
   const stateToggles = new Map();
   function syncToggle(id) {
     const input=$(id),button=stateToggles.get(id);if(!input||!button)return;
@@ -47,6 +48,7 @@
     $('save-status').textContent=!ready?'Saved · reopen Sync to continue':state.dirty?'Use exact times first':state.auditioned?'Ready to save this iteration':'Audition preview before saving';
     const blocked=$('save').disabled||Boolean(state.saveError),reason=state.busy?'Updating preview…':!ready?'Reopen Sync to prepare this video’s preview.':state.dirty?'Use exact times for your typed changes first.':!state.auditioned?'Audition preview before saving.':state.saveError||'Ready to save this iteration.';
     $('save-wrap').dataset.blocked=String(blocked);$('save-wrap').tabIndex=blocked?0:-1;$('save-wrap').setAttribute('aria-label',blocked?'Save unavailable: '+reason:'Save timings');$('save-reason').textContent=blocked?reason:'';
+    arrangement.buttons();
   }
   function setDraft(draft) {
     state.draft=draft;state.auditioned=false;
@@ -90,7 +92,7 @@
   function fields() {
     const w=word(),item=target();if(!w||!item)return;
     $('selected-word').textContent=w.text;$('excluded').checked=!!w.excluded;$('whole-word').checked=w.displayMode==='whole';
-    if(!state.dirty){$('start').value=item.startMs;$('end').value=item.endMs;}
+    if(!state.dirty){$('start').value=item.startMs+state.draft.score.offsetMs;$('end').value=item.endMs+state.draft.score.offsetMs;}
   }
   function render() {
     const p=phrase(),w=word();if(!p||!w)return;
@@ -104,11 +106,11 @@
     const indices=phraseIndices(),position=indices.indexOf(state.phrase),from=Math.max(0,Math.min(position-2,indices.length-5));
     for(const i of indices.slice(from,from+5)){
       const row=state.draft.score.phrases[i],b=document.createElement('button'),s=document.createElement('small');
-      s.textContent=`${(row.startMs/1000).toFixed(2)}s · ${i+1} · ${trackLabel(state.draft.score.lanes.find(l=>l.id===row.laneId))}`;b.append(s,document.createTextNode(row.words.map(x=>x.text).join(' ')));b.dataset.phrase=row.id;b.dataset.track=row.laneId;
+      s.textContent=`${((row.startMs+state.draft.score.offsetMs)/1000).toFixed(2)}s · ${i+1} · ${trackLabel(state.draft.score.lanes.find(l=>l.id===row.laneId))}`;b.append(s,document.createTextNode(row.words.map(x=>x.text).join(' ')));b.dataset.phrase=row.id;b.dataset.track=row.laneId;
       b.setAttribute('aria-current',String(i===state.phrase));b.addEventListener('click',()=>selectPhrase(i));phrases.append(b);
     }
     range={start:Math.max(0,Math.min(p.startMs,...p.words.map(x=>x.startMs))-250),end:Math.max(p.endMs,...p.words.map(x=>x.endMs))+250};
-    const ruler=$('ruler');ruler.replaceChildren();for(let i=0;i<=4;i++){const s=document.createElement('span');s.textContent=((range.start+(range.end-range.start)*i/4)/1000).toFixed(2)+'s';s.style.left=(i*24)+'%';ruler.append(s);}
+    const ruler=$('ruler');ruler.replaceChildren();for(let i=0;i<=4;i++){const s=document.createElement('span');s.textContent=((range.start+(range.end-range.start)*i/4+state.draft.score.offsetMs)/1000).toFixed(2)+'s';s.style.left=(i*24)+'%';ruler.append(s);}
     renderLane($('words'),p.words,false);renderLane($('syllables'),w.syllables||[],true);
     const oldTarget=$('target').value;$('target').replaceChildren(new Option('Word','word'));
     for(const s of w.syllables||[])$('target').add(new Option(s.text,s.id));
@@ -118,6 +120,7 @@
     if(keepReplacement&&[...replacementEnd.options].some(o=>o.value===oldEnd))replacementEnd.value=oldEnd;
     $('replacement').value=keepReplacement?oldText:'';replacementWordId=w.id;
     renderPronunciation();
+    arrangement.render();
     fields();buttons();
     phrases.querySelector('[aria-current=true]')?.scrollIntoView({block:'nearest',inline:'nearest'});
   }
@@ -146,7 +149,7 @@
     container.replaceChildren();
     for(const item of items){
       const b=document.createElement('button');b.textContent=item.text;b.dataset.id=item.id;b.dataset.start=item.startMs;b.dataset.end=item.endMs;b.classList.toggle('excluded',!!item.excluded);
-      b.setAttribute('aria-label',`${item.text}, ${item.startMs} to ${item.endMs} milliseconds${item.excluded?', excluded':''}`);
+      b.setAttribute('aria-label',`${item.text}, ${item.startMs+state.draft.score.offsetMs} to ${item.endMs+state.draft.score.offsetMs} milliseconds${item.excluded?', excluded':''}`);
       b.setAttribute('aria-selected',String(isSyllable?$('target').value===item.id:word().id===item.id));position(b,item);
       for(const edge of ['start','end']){const h=document.createElement('span');h.className='handle '+edge;h.dataset.edge=edge;b.append(h);}
       b.addEventListener('click',()=>{if(b.dataset.dragged==='true'){delete b.dataset.dragged;return;}if(isSyllable){$('target').value=item.id;state.dirty=false;fields();for(const s of container.children)s.setAttribute('aria-selected',String(s.dataset.id===item.id));run(()=>seek(item.startMs-100));}else selectWord(item.id);});
@@ -165,9 +168,10 @@
   }
   async function commitTimes(startMs,endMs) {
     if(!Number.isSafeInteger(startMs)||!Number.isSafeInteger(endMs)||endMs<=startMs)throw Error('Enter whole milliseconds, with end after start.');
+    startMs-=state.draft.score.offsetMs;endMs-=state.draft.score.offsetMs;
     const item=target();await tune($('target').value==='word'?{changes:[{wordId:word().id,startMs,endMs}]}:{operation:{type:'setSyllableTiming',syllableId:item.id,startMs,endMs}});
   }
-  const nudge=delta=>run(()=>{const t=target(),edge=$('edge').value;return commitTimes(t.startMs+(edge==='end'?0:delta),t.endMs+(edge==='start'?0:delta));});
+  const nudge=delta=>run(()=>{const t=target(),edge=$('edge').value,offset=state.draft.score.offsetMs;return commitTimes(t.startMs+offset+(edge==='end'?0:delta),t.endMs+offset+(edge==='start'?0:delta));});
   $('earlier').onclick=()=>nudge(-10);$('later').onclick=()=>nudge(10);
   for(const id of ['start','end'])$(id).oninput=()=>{if(!state.dirty)state.editRevision=state.draft.previewRevision;state.dirty=true;buttons();};
   $('target').onchange=()=>{state.dirty=false;fields();};
@@ -188,7 +192,7 @@
   const updateLoop=()=>request('LV_SCORE_TRANSPORT',$('loop').checked?{action:'setLoop',loop:{startMs:Math.max(0,phrase().startMs+state.draft.score.offsetMs-250),endMs:phrase().endMs+state.draft.score.offsetMs+250}}:{action:'clearLoop'});
   $('loop').onchange=()=>run(updateLoop);
   $('audition').onclick=()=>run(async()=>{if(state.dirty)throw Error('Use exact times first.');await seek(phrase().startMs-300);await request('LV_SCORE_TRANSPORT',{action:'play'});state.auditioned=true;notice('Preview is playing in YouTube. Save timings keeps this partial iteration, including exclusions.');});
-  $('undo').onclick=()=>run(async()=>{state.dirty=false;const phraseId=phrase().id,wordId=word().id,all=state.trackId==='all';const result=await request('LV_TIMING_UNDO');state.phrase=result.preview.score.phrases.findIndex(p=>p.id===phraseId);state.wordId=wordId;state.trackId=all?'all':result.preview.score.phrases[state.phrase].laneId;setDraft(result.preview);notice('Last preview edit undone in YouTube. Saved timings are unchanged.');});
+  $('undo').onclick=()=>run(async()=>{state.dirty=false;const phraseId=phrase().id,wordId=word().id,all=state.trackId==='all';const result=await request('LV_TIMING_UNDO');state.phrase=Math.max(0,result.preview.score.phrases.findIndex(p=>p.id===phraseId));state.wordId=wordId;state.trackId=all?'all':result.preview.score.phrases[state.phrase].laneId;setDraft(result.preview);notice('Last preview edit undone in YouTube. Saved timings are unchanged.');});
   $('save').onclick=()=>run(async()=>{state.saveError=null;try{if(!state.auditioned||state.dirty)throw Error('Audition this preview before saving.');const r=await request('LV_TIMING_APPLY');state.score=r.score;state.draft=null;setDraft((await request('LV_TIMING_PREPARE',{fromSaved:true})).preview);notice('Timings saved. Keep refining here; each save has its own undo in YouTube.');buttons();}catch(error){state.saveError=error.message;throw error}});
   document.addEventListener('keydown',event=>{
     if(!['ArrowLeft','ArrowRight'].includes(event.key)||event.metaKey||event.target.matches('input,textarea,select,[contenteditable=true]'))return;
@@ -209,7 +213,7 @@
       const followLane=state.trackId==='all'?phrase()?.laneId:state.trackId,laneInfo=state.draft?.score.lanes.find(l=>l.id===followLane),laneActive=state.draft?.score.phrases.some(p=>p.laneId===followLane&&now>=p.startMs&&now<p.endMs&&p.words.some(w=>!w.excluded));
       if(Number.isFinite(c.playbackRate)&&c.playbackRate>0)$('speed').textContent=c.playbackRate+'×';
       $('clock').textContent=`${(c.currentTimeMs/1000).toFixed(3)}s · ${c.paused?'paused':'playing'}${laneInfo?' · '+trackLabel(laneInfo)+(!c.paused&&!laneActive?' rest':''):''}`;
-      if(state.draft&&!c.paused&&$('follow').checked&&!$('loop').checked&&!state.busy&&!state.dirty&&!document.activeElement?.closest('aside')&&document.activeElement?.id!=='phrase-track'&&!document.querySelector('.lane button:active')){
+      if(state.draft&&!c.paused&&$('follow').checked&&!$('loop').checked&&!state.busy&&!state.dirty&&!arrangement.interacting()&&!document.activeElement?.closest('aside,#arrange-panel')&&document.activeElement?.id!=='phrase-track'&&!document.querySelector('.lane button:active')){
         const rows=state.draft.score.phrases,current=phrase(),lane=current?.laneId;
         if(!(now>=current.startMs&&now<current.endMs)){
           let index=rows.findIndex(p=>p.laneId===(state.trackId==='all'?lane:state.trackId)&&now>=p.startMs&&now<p.endMs&&p.words.some(w=>!w.excluded));
@@ -225,10 +229,10 @@
   window.LvLightEditor=Object.freeze({getState:()=>JSON.parse(JSON.stringify(state))});
   const viewControls=()=>[...document.querySelectorAll('input[id],select[id]')].map(e=>({id:e.id,value:e.value,checked:e.checked}));
   function restoreViewControls(restore){
-    for(const saved of restore.controls||[]){const e=$(saved.id);if(!e||saved.id==='phrase-track')continue;if(e.tagName==='SELECT'&&![...e.options].some(o=>o.value===saved.value))continue;e.value=saved.value;if(e.type==='checkbox')e.checked=!!saved.checked;}
+    for(const saved of restore.controls||[]){const e=$(saved.id);if(!e||['phrase-track','start','end'].includes(saved.id))continue;if(e.tagName==='SELECT'&&![...e.options].some(o=>o.value===saved.value))continue;e.value=saved.value;if(e.type==='checkbox')e.checked=!!saved.checked;}
     for(const saved of restore.details||[]){const e=$(saved.id);if(e?.tagName==='DETAILS')e.open=!!saved.open;}
     buttons();if(restore.focusId)$(restore.focusId)?.focus();
   }
-  window.addEventListener('pagehide',()=>{state.closed=true;clearTimeout(polling);sessionStorage.setItem('lvLightRestore',JSON.stringify({mediaKey,token:state.draft?.token,revision:state.draft?.previewRevision,phrase:state.phrase,wordId:state.wordId,trackId:state.trackId,target:$('target').value,start:$('start').value,end:$('end').value,dirty:state.dirty,editRevision:state.editRevision,auditioned:state.auditioned,controls:viewControls(),details:[...document.querySelectorAll('details[id]')].map(e=>({id:e.id,open:e.open})),focusId:document.activeElement?.id}));});
-  run(async()=>{if(!Number.isSafeInteger(tabId)||tabId<=0||!mediaKey)throw Error('Open this editor from Sync in YouTube.');state.score=(await request('LV_SCORE_GET')).score;const current=await request('LV_TIMING_CURRENT');state.score=current.score;setDraft(current.preview||(await request('LV_TIMING_PREPARE',{fromSaved:true})).preview);const restore=JSON.parse(sessionStorage.getItem('lvLightRestore')||'null');if(restore&&restore.mediaKey===mediaKey&&restore.token===state.draft.token&&restore.revision===state.draft.previewRevision){state.phrase=Math.max(0,Math.min(restore.phrase,state.draft.score.phrases.length-1));state.wordId=restore.wordId;state.trackId=restore.trackId==='all'?'all':state.draft.score.lanes.some(l=>l.id===restore.trackId)&&phrase()?.laneId===restore.trackId?restore.trackId:phrase()?.laneId||state.trackId;render();if([...$('target').options].some(o=>o.value===restore.target))$('target').value=restore.target;fields();$('start').value=restore.start;$('end').value=restore.end;state.dirty=!!restore.dirty;state.editRevision=restore.editRevision;state.auditioned=!!restore.auditioned;restoreViewControls(restore);}notice('Select a word to seek YouTube. Exclude unsung text or refine the blocks, then audition and save.');poll();});
+  window.addEventListener('pagehide',()=>{state.closed=true;clearTimeout(polling);sessionStorage.setItem('lvLightRestore',JSON.stringify({mediaKey,token:state.draft?.token,revision:state.draft?.previewRevision,phrase:state.phrase,wordId:state.wordId,trackId:state.trackId,timeFieldsBasis:'media',target:$('target').value,start:$('start').value,end:$('end').value,dirty:state.dirty,editRevision:state.editRevision,auditioned:state.auditioned,controls:viewControls(),details:[...document.querySelectorAll('details[id]')].map(e=>({id:e.id,open:e.open})),focusId:document.activeElement?.id}));});
+  run(async()=>{if(!Number.isSafeInteger(tabId)||tabId<=0||!mediaKey)throw Error('Open this editor from Sync in YouTube.');state.score=(await request('LV_SCORE_GET')).score;const current=await request('LV_TIMING_CURRENT');state.score=current.score;setDraft(current.preview||(await request('LV_TIMING_PREPARE',{fromSaved:true})).preview);const restore=JSON.parse(sessionStorage.getItem('lvLightRestore')||'null');if(restore&&restore.mediaKey===mediaKey&&restore.token===state.draft.token&&restore.revision===state.draft.previewRevision){state.phrase=Math.max(0,Math.min(restore.phrase,state.draft.score.phrases.length-1));state.wordId=restore.wordId;state.trackId=restore.trackId==='all'?'all':state.draft.score.lanes.some(l=>l.id===restore.trackId)&&phrase()?.laneId===restore.trackId?restore.trackId:phrase()?.laneId||state.trackId;render();if([...$('target').options].some(o=>o.value===restore.target))$('target').value=restore.target;fields();$('start').value=Number(restore.start)+(restore.timeFieldsBasis==='media'?0:state.draft.score.offsetMs);$('end').value=Number(restore.end)+(restore.timeFieldsBasis==='media'?0:state.draft.score.offsetMs);state.dirty=!!restore.dirty;state.editRevision=restore.editRevision;state.auditioned=!!restore.auditioned;restoreViewControls(restore);}notice('Select a word to seek YouTube. Exclude unsung text or refine the blocks, then audition and save.');poll();});
 })();

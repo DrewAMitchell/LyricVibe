@@ -337,3 +337,32 @@ test('phrase capture rescales preview contents atomically and rejects protected 
   assert.throws(()=>variant.operate(draft,[{type:'setPhraseTiming',phraseId:phrase.id,startMs:23000,endMs:25000},{type:'setPhraseTiming',phraseId:'missing',startMs:1,endMs:2}]),{code:'UNKNOWN_ID'});
   assert.equal(JSON.stringify(draft),original);
 });
+
+
+test('phrase group shifts preserve every child interval, lock, exclusion and lane atomically',()=>{
+  let base=make('[00:01.00]hello world\n[00:05.00]second phrase\n[00:09.00]third phrase');
+  const w=base.phrases[0].words[0];base=core.applyOperation(base,{type:'setWordSyllables',wordId:w.id,syllables:[{id:'held-syllable',text:w.text,startMs:w.startMs+10,endMs:w.endMs-10}]},base.revision);
+  base=core.applyOperation(base,{type:'setWordExcluded',wordId:base.phrases[1].words[0].id,excluded:true},base.revision);
+  const draft=variant.merge(base,base),before=JSON.stringify(draft),ids=base.phrases.slice(0,2).map(p=>p.id);
+  assert.throws(()=>variant.operate(draft,{type:'shiftPhrases',phraseIds:ids,deltaMs:275}),{code:'MANUAL_PROTECTED'});
+  const shifted=variant.operate(draft,{type:'shiftPhrases',phraseIds:ids,deltaMs:275},true);
+  for(let i=0;i<2;i++){const expected=structuredClone(base.phrases[i]);for(const item of [expected,...expected.words.flatMap(w=>[w,...(w.syllables||[])])]){item.startMs+=275;item.endMs+=275;}assert.deepEqual(shifted.score.phrases[i],expected);}
+  assert.deepEqual(shifted.score.phrases[2],base.phrases[2]);assert.equal(JSON.stringify(draft),before);
+  for(const op of [{phraseIds:ids,deltaMs:-1001},{phraseIds:[ids[0],'missing'],deltaMs:10},{phraseIds:[ids[0],ids[0]],deltaMs:10},{phraseIds:ids,deltaMs:.5}])assert.throws(()=>variant.operate(draft,{type:'shiftPhrases',...op},true));
+  assert.equal(JSON.stringify(draft),before);
+});
+
+test('copying a saved synchronization rebinds only the destination, offset and explicit provenance',()=>{
+  const base=make('[00:01.00]old target lyrics','b'),draft=variant.merge(base,base);
+  let saved=core.createScore({videoId:'FIXTURE0003',durationMs:90000},'[00:03.00]hello world',{contentHash:'c'.repeat(64)});
+  saved=core.applyOperation(saved,{type:'setWordSyllables',wordId:saved.phrases[0].words[0].id,syllables:[{id:'copy-child',text:'hello',startMs:3000,endMs:3200}]},saved.revision);
+  saved=core.applyOperation(saved,{type:'setOffset',offsetMs:500},saved.revision);
+  saved.beatCues=[{id:'beat-1',beat:2,durationBeats:1,effect:'pulse',strength:.5,provenance:'manual',target:{kind:'screen'}}];
+  const original=JSON.stringify(saved),copied=variant.copyToRecording(draft,saved,-1200);
+  assert.deepEqual(copied.score.source,base.source);assert.deepEqual(copied.score.phrases,saved.phrases);assert.equal(copied.score.offsetMs,-700);assert.equal(copied.score.beatCues,undefined);
+  assert.deepEqual(copied.score.lyrics.timingCopy,{mediaKey:'youtube:FIXTURE0003',title:saved.source.title,revision:saved.revision,lyricsHash:saved.lyrics.contentHash});
+  assert.equal(copied.score.lyrics.contentHash,saved.lyrics.contentHash);assert.equal(JSON.stringify(saved),original);
+  assert.throws(()=>variant.copyToRecording(draft,base,0),{code:'SOURCE_MISMATCH'});assert.throws(()=>variant.copyToRecording(draft,saved,.5),{code:'INVALID_TIME'});
+  assert.throws(()=>variant.operate(copied,{type:'setOffset',offsetMs:2000}),{code:'MANUAL_PROTECTED'});
+  const offset=variant.operate(copied,{type:'setOffset',offsetMs:2000},true);assert.deepEqual(offset.score.phrases,saved.phrases);assert.equal(offset.score.offsetMs,2000);
+});

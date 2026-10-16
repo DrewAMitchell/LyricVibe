@@ -22,6 +22,7 @@ function makeHarness() {
   const runtimeMessages = [];
   const popupWindows = [];
   let listener;
+  let copyBlocked = false;
   const analysisCalls = [];
   let analysisStatus = { state: 'capturing', tabId: 1, mediaKey: `youtube:${ID_A}`, sessionId: 'session-1' };
   const chrome = {
@@ -43,6 +44,7 @@ function makeHarness() {
     tabs: {
       async sendMessage(tabId, message) {
         if (message.type === 'LV_GET_HINTS') return { ...tabs.get(tabId) };
+        if (message.type === 'LV_TIMING_COPY_CHECK') return {ok:true,mediaKey:message.mediaKey,canCopy:!copyBlocked};
         tabMessages.push({ tabId, message: structuredClone(message) });
         return { ok: true };
       },
@@ -84,6 +86,7 @@ function makeHarness() {
     });
   }
   return { context, values, sessionValues, tabs, tabMessages, runtimeMessages, popupWindows, analysisCalls, dispatch, ensure,
+    setCopyBlocked(value) { copyBlocked=value; },
     restartWorker() { vm.runInContext(hostSource, context, { filename: 'score-host.js' }); },
     setAnalysisStatus(value) { analysisStatus = value; } };
 }
@@ -815,4 +818,26 @@ test('same-document YouTube navigation can prepare and open the current video, b
  assert.equal((await h.dispatch({type:'LV_TIMING_CURRENT',...envelope},{...sender,frameId:2})).error.code,'SOURCE_REQUIRED');
  assert.equal((await h.dispatch({type:'LV_TIMING_CURRENT',...envelope,mediaKey:'youtube:'+ID_A},sender)).error.code,'SOURCE_CHANGED');
  assert.equal((await h.dispatch({type:'LV_TIMING_CURRENT',...envelope},{...sender,url:'https://unrelated.example/'})).error.code,'SOURCE_REQUIRED');
+});
+
+
+test('explicit saved-sync copy is preview-only, source-bound, revision-checked and undoable across different lyric hashes',async()=>{
+  const h=makeHarness(),base=await h.ensure(),source=await h.ensure(2,ID_B,{lyrics:{synced:'[00:02.00]different saved words\n[00:07.00]',provider:'saved'}});
+  const sender={id:'test-extension',url:'chrome-extension://test/light-editor.html?sourceTab=1&mediaKey='+encodeURIComponent('youtube:'+ID_A)};
+  const envelope={tabId:1,mediaKey:'youtube:'+ID_A,expectedRevision:base.revision,lyricsHash:base.lyrics.contentHash};
+  const original=JSON.stringify(recordFor(h)),sourceBefore=JSON.stringify(recordFor(h,ID_B));
+  const listed=await h.dispatch({type:'LV_TIMING_SOURCES',...envelope},sender);assert.equal(listed.ok,true);assert.equal(listed.sources.length,1);assert.equal(listed.sources[0].mediaKey,'youtube:'+ID_B);assert.equal(listed.sources[0].score,undefined);
+  const prepared=await h.dispatch({type:'LV_TIMING_PREPARE',...envelope,fromSaved:true},sender);
+  const copy={type:'LV_TIMING_COPY',...envelope,token:prepared.preview.token,previewRevision:0,sourceMediaKey:'youtube:'+ID_B,sourceRevision:source.revision,sourceLyricsHash:source.lyrics.contentHash,deltaMs:2200};
+  assert.equal((await h.dispatch(copy,{id:'test-extension',url:'https://unrelated.example/'})).error.code,'SOURCE_REQUIRED');
+  h.setCopyBlocked(true);assert.equal((await h.dispatch(copy,sender)).error.code,'CAPTURE_PENDING');h.setCopyBlocked(false);
+  assert.equal((await h.dispatch({...copy,sourceRevision:999},sender)).error.code,'COPY_SOURCE_CHANGED');
+  const copied=await h.dispatch(copy,sender);assert.equal(copied.ok,true);assert.equal(copied.preview.score.source.videoId,ID_A);assert.equal(copied.preview.score.offsetMs,2200);assert.equal(copied.preview.score.lyrics.contentHash,source.lyrics.contentHash);
+  assert.equal(JSON.stringify(recordFor(h)),original);assert.equal(JSON.stringify(recordFor(h,ID_B)),sourceBefore);
+  assert.equal((await h.dispatch(copy,sender)).error.code,'PREVIEW_CONFLICT');
+  const undone=await h.dispatch({type:'LV_TIMING_UNDO',...envelope,token:prepared.preview.token,previewRevision:1},sender);assert.equal(undone.ok,true);assert.deepEqual(JSON.parse(JSON.stringify(undone.preview.score)),JSON.parse(JSON.stringify(prepared.preview.score)));
+  const again=await h.dispatch({...copy,previewRevision:2},sender);assert.equal(again.ok,true);
+  const moved=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:prepared.preview.token,previewRevision:3,allowProtected:true,operation:{type:'shiftPhrases',phraseIds:[source.phrases[0].id],deltaMs:400}},sender);assert.equal(moved.ok,true);assert.equal(moved.preview.previewRevision,4);
+  const applied=await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:prepared.preview.token,previewRevision:4},sender);assert.equal(applied.ok,true);assert.equal(applied.score.source.videoId,ID_A);assert.equal(applied.score.phrases[0].startMs,source.phrases[0].startMs+400);assert.equal(JSON.stringify(recordFor(h,ID_B)),sourceBefore);
+  const restored=await h.dispatch({type:'LV_SCORE_UNDO',...envelope,expectedRevision:applied.score.revision},sender);assert.equal(restored.ok,true);assert.equal(restored.score.lyrics.contentHash,base.lyrics.contentHash);
 });

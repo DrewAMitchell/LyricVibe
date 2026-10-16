@@ -99,10 +99,11 @@
     // Apply against a private copy so a failed batch cannot leave a partial preview.
     let score = clone(draft.score);
     for (const submitted of operations) {
-      if (!submitted || !['setWordDisplayMode', 'setBeatCue', 'deleteBeatCue', 'setPhrasePersistence', 'setPhraseTiming', 'setPhraseLane', 'insertPhrase', 'setWordText', 'setWordSyllables', 'setSyllableTiming', 'setSyllableLock', 'setWordEffect', 'setSyllableEffect', 'setWordExcluded', 'replaceWords', 'setPhraseSyllableTimings', 'setPhraseSyllablePerformance'].includes(submitted.type)) fail('INVALID_OPERATION', 'Only phrase timing and lane, syllable segmentation and performance, timing and locks, appearance effects, word exclusion, contiguous text replacement, and phrase syllable capture may be changed in this preview.');
+      if (!submitted || !['setOffset', 'shiftPhrases', 'setWordDisplayMode', 'setBeatCue', 'deleteBeatCue', 'setPhrasePersistence', 'setPhraseTiming', 'setPhraseLane', 'insertPhrase', 'setWordText', 'setWordSyllables', 'setSyllableTiming', 'setSyllableLock', 'setWordEffect', 'setSyllableEffect', 'setWordExcluded', 'replaceWords', 'setPhraseSyllableTimings', 'setPhraseSyllablePerformance'].includes(submitted.type)) fail('INVALID_OPERATION', 'This operation is not supported in the timing preview.');
       const op = clone(submitted);
       let wordId = op.wordId;
       const effectOnly = ['setWordDisplayMode','setBeatCue','deleteBeatCue','setPhrasePersistence'].includes(op.type) || op.type === 'setWordEffect' || op.type === 'setSyllableEffect' || op.type === 'setPhraseLane';
+      if (!allowProtected && (op.type === 'setOffset' || op.type === 'shiftPhrases') && score.phrases.some(p => (op.type === 'setOffset' || op.phraseIds?.includes(p.id)) && p.words.some(w => draft.protectedIds.includes(w.id)))) fail('MANUAL_PROTECTED', 'Enable editing saved timings before moving protected phrases.');
       if (op.type === 'replaceWords' && !allowProtected && Array.isArray(op.wordIds) && op.wordIds.some(id => draft.protectedIds.includes(id))) fail('MANUAL_PROTECTED', 'Enable editing saved timings before replacing words in this protected phrase.');
       if (op.type === 'setPhraseSyllableTimings' && !allowProtected && Array.isArray(op.marks)) {
         const syllableIds = new Set(op.marks.map(mark => mark?.syllableId));
@@ -133,5 +134,20 @@
     }
     return { ...draft, score: core.validateScore(score) };
   }
-  return { merge, tune, operate };
+  function copyToRecording(draft, saved, deltaMs = 0) {
+    core.validateScore(draft.score); core.validateScore(saved);
+    if (!saved.phrases.some(p => p.words.length)) fail('LYRICS_MISSING', 'That saved synchronization has no lyric phrases to copy.');
+    if (core.mediaKey(draft.score.source) === core.mediaKey(saved.source)) fail('SOURCE_MISMATCH', 'Choose a synchronization from another video.');
+    if (!Number.isSafeInteger(deltaMs) || !Number.isSafeInteger(saved.offsetMs + deltaMs)) fail('INVALID_TIME', 'Enter a whole-millisecond offset.');
+    const score = clone(saved);
+    score.source = clone(draft.score.source); score.revision = draft.score.revision;
+    score.offsetMs += deltaMs;
+    // Beat observations belong to the source recording's separately owned tempo
+    // map. Lyric timing and word/syllable appearance can be copied independently.
+    delete score.beatCues;
+    score.lyrics.timingCopy = { mediaKey: core.mediaKey(saved.source), title: saved.source.title, revision: saved.revision, lyricsHash: saved.lyrics.contentHash };
+    const protectedIds = score.phrases.flatMap(p => p.words.filter(protectedWord).map(w => w.id));
+    return { ...draft, score: core.validateScore(score), protectedIds, preservedPhraseIds: [], changedWords: score.phrases.reduce((n,p) => n+p.words.length,0) };
+  }
+  return { merge, tune, operate, copyToRecording };
 });

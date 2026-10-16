@@ -255,6 +255,10 @@
     const s = score.source;
     if (!s || s.platform !== "youtube" || !ID_RE.test(s.videoId || "") || typeof s.title !== "string" || typeof s.artist !== "string" || typeof s.durationMs !== "number" || !Number.isFinite(s.durationMs) || s.durationMs < 0) bad("invalid source identity or metadata");
     if (!score.lyrics || typeof score.lyrics.provider !== "string" || !(score.lyrics.entryId === null || typeof score.lyrics.entryId === "string") || typeof score.lyrics.contentHash !== "string" || !HASH_RE.test(score.lyrics.contentHash)) bad("invalid lyrics metadata");
+    if (score.lyrics.timingCopy !== undefined) {
+      const copy = score.lyrics.timingCopy;
+      if (!copy || typeof copy.mediaKey !== 'string' || !copy.mediaKey.startsWith('youtube:') || !ID_RE.test(copy.mediaKey.slice(8)) || typeof copy.title !== 'string' || !Number.isSafeInteger(copy.revision) || copy.revision < 0 || !HASH_RE.test(copy.lyricsHash || '')) bad('invalid copied timing source');
+    }
     if (!Array.isArray(score.lanes) || !Array.isArray(score.phrases)) bad("lanes and phrases must be arrays");
     const ids = new Set();
     const laneMap = new Map();
@@ -435,6 +439,19 @@
         word.endMs = op.startMs + Math.round(relEnd * newSpan);
         rescaleSyllables(word, oldWordStart, oldWordEnd, word.startMs, word.endMs);
         word.provenance = "manual";
+      }
+    } else if (op.type === "shiftPhrases") {
+      if (!Array.isArray(op.phraseIds) || !op.phraseIds.length || new Set(op.phraseIds).size !== op.phraseIds.length || !Number.isSafeInteger(op.deltaMs)) fail("INVALID_OPERATION", "Choose distinct phrases and a whole-millisecond shift.");
+      const selected = op.phraseIds.map(id => {
+        const phrase = next.phrases.find(p => p.id === id);
+        if (!phrase) fail("UNKNOWN_ID", `unknown phrase id: ${id}`);
+        return phrase;
+      });
+      for (const phrase of selected) {
+        for (const item of [phrase, ...phrase.words.flatMap(w => [w, ...(w.syllables || [])])]) {
+          if (!Number.isSafeInteger(item.startMs + op.deltaMs) || !Number.isSafeInteger(item.endMs + op.deltaMs) || item.startMs + op.deltaMs < 0) fail("INVALID_TIME", "The selection cannot move before the timing origin.");
+          item.startMs += op.deltaMs; item.endMs += op.deltaMs;
+        }
       }
     } else if (op.type === "setOffset") {
       if (!Number.isSafeInteger(op.offsetMs)) fail("INVALID_TIME", "offsetMs must be an integer");
