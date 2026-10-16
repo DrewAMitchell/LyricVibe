@@ -309,7 +309,7 @@
     for(const tile of themePicker.querySelectorAll('.lvx-theme-tile')){
       const selected=tile.dataset.theme===previewTheme;if(activeOnly&&!selected)continue;tile.dataset.previewing=String(selected);
       if(activeOnly&&(tile.offsetTop+tile.offsetHeight<themePicker.scrollTop||tile.offsetTop>themePicker.scrollTop+themePicker.clientHeight))continue;
-      const line=tile.querySelector('.lvx-tile-line'),words=[...line.children].map((n,i)=>({id:'preview-'+i,text:n.textContent,startMs:500+i*450,endMs:950+i*450,syllables:[...n.children].map((part,j)=>({id:part.dataset.syllable,text:part.textContent,startMs:500+i*450+j*450/n.children.length,endMs:500+i*450+(j+1)*450/n.children.length}))}));
+      const line=tile.querySelector('.lvx-tile-line'),words=[...line.children].map((n,i)=>{const parts=[...n.querySelectorAll('[data-syllable]')];return {id:'preview-'+i,text:n.textContent,startMs:500+i*450,endMs:950+i*450,syllables:parts.map((part,j)=>({id:part.dataset.syllable,text:part.textContent,startMs:500+i*450+j*450/parts.length,endMs:500+i*450+(j+1)*450/parts.length}))};});
       const clock=selected?previewTime%(words.length*450+1600):words.length*450+700;
       choreographLine(line,words,clock,tile.querySelector('.lvx-tile-stage').clientWidth-16,110,14);
       if(typeof LvChoreography!=='undefined')expressLine(line,words,clock,LvChoreography.compose({source:{durationMs:words.length*450+1800},phrases:[{id:'preview',laneId:'lead',words}]}));
@@ -3819,7 +3819,7 @@
         const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT),texts=[];while(walker.nextNode())texts.push(walker.currentNode);
         for(const text of texts){if(text.parentElement.closest('.lvx-dance-letter'))continue;const fragment=document.createDocumentFragment();for(const char of Array.from(text.textContent)){const letter=document.createElement('span');letter.className='lvx-dance-letter';letter.textContent=char;fragment.append(letter);}text.replaceWith(fragment);}node.dataset.flexLetters='true';
       }
-      const letters=node.hasAttribute('data-word')?[...node.querySelectorAll('.lvx-dance-letter')]:[];letters.forEach((letter,i)=>{const p=(i+.5)/Math.max(1,letters.length),a=p*Math.PI*2+dance.phase;letter.style.transform=dance.kind==='flex'?`translateY(${(Math.sin(a)*dance.flex).toFixed(4)}em) skewY(${(Math.cos(a)*dance.flex*28).toFixed(3)}deg)`:'';});
+      const letters=node.matches('.lvx-score-word,.lvx-tile-word')?[...node.querySelectorAll('.lvx-dance-letter')]:[];letters.forEach((letter,i)=>{const p=(i+.5)/Math.max(1,letters.length),a=p*Math.PI*2+dance.phase;letter.style.transform=dance.kind==='flex'?`translateY(${(Math.sin(a)*dance.flex).toFixed(4)}em) skewY(${(Math.cos(a)*dance.flex*28).toFixed(3)}deg)`:'';});
       node.style.setProperty('--lvx-expression-bright',value.brightness.toFixed(4));
       if(value.color){node.dataset.expressionColor='true';node.style.setProperty('--lvx-expression-color',value.color);}else{delete node.dataset.expressionColor;node.style.removeProperty('--lvx-expression-color');}
     };
