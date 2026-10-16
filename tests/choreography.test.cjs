@@ -89,3 +89,15 @@ test('vinyl full-song capacity retains every nonexcluded word outside the spindl
  const score={phrases:[{id:'lead',laneId:'lead',words:Array.from({length:400},(_,i)=>word('w'+i,'REMEMBER',i*300,i*300+500))},{id:'back',laneId:'back',words:[word('b','ECHO',1000,1800),{...word('x','HIDDEN',0,500),excluded:true}]}]};
  const track=vinylTrack(score,text=>text.length*.6),frame=vinylAt(track,130000);assert.equal(frame.words.length,401);assert.equal(frame.glyphs.length,400*8+4);assert.ok(frame.glyphs.every(g=>g.radius>=.18&&g.radius<=1&&g.font>0));assert.equal(frame.words[0],'w0');assert.ok(frame.words.includes('b'));assert.ok(!frame.words.includes('x'));
 });
+
+test('vinyl newest words stay large, upright at twelve oclock, and feed down before winding inward',()=>{
+ const score={phrases:[{id:'p',laneId:'lead',words:[word('a','READABLE',1000,1900),word('b','NEXT',2000,2900),word('c','LATER',3000,3900)]}]},measure=t=>t.length*.6,track=vinylTrack(score,measure);
+ const entering=vinylAt(track,1000).glyphs,landed=vinylAt(track,1400).glyphs;
+ assert.ok(entering.every(g=>g.angle===-Math.PI/2&&g.y<-1));assert.ok(landed.every(g=>g.angle===-Math.PI/2&&g.y===-1&&g.font>=.2));assert.ok(Math.abs((landed[0].x+landed.at(-1).x)/2)<.02);
+ const later=vinylAt(track,3400),old=later.glyphs.filter(g=>g.wordId==='a'),current=later.glyphs.filter(g=>g.wordId==='c');assert.ok(old.every(g=>g.font<landed[0].font));assert.ok(current.every(g=>g.top&&g.angle===-Math.PI/2&&g.y===-1));
+ const long=vinylTrack({phrases:[{...score.phrases[0],words:[...score.phrases[0].words,...Array.from({length:500},(_,i)=>word('extra'+i,'HISTORY',4000+i*300,4300+i*300))]}]},measure);assert.equal(vinylAt(long,1400).glyphs[0].font,landed[0].font,'song length must not shrink new words');
+ assert.ok(vinylAt(track,1000,{reduced:true}).glyphs.every(g=>g.y===-1&&!g.feed));
+});
+test('vinyl overlapping vocals stay upright on separate feed rows and long current words fit',()=>{
+ const score={phrases:[{id:'a',laneId:'lead',words:[word('a','SUPERCALIFRAGILISTIC',1000,3000)]},{id:'b',laneId:'back',words:[word('b','ECHO',1200,2600)]}]};const frame=vinylAt(vinylTrack(score,t=>t.length*.6),1600),a=frame.glyphs.filter(g=>g.wordId==='a'),b=frame.glyphs.filter(g=>g.wordId==='b');assert.ok(frame.glyphs.every(g=>g.current&&g.angle===-Math.PI/2));assert.notEqual(a[0].y,b[0].y);assert.ok(a.every(g=>Math.abs(g.x)<.83));
+});

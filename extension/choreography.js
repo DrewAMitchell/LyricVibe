@@ -178,34 +178,48 @@
     return slots;
   }
 
-  // Measure once per score/font. Full-song capacity keeps even the earliest glyphs
-  // outside the spindle; positions are reconstructed from source time, never accumulated.
+  // The newest word keeps a fixed readable size. Only accumulated history compresses.
   function vinylTrack(score,measure){
     const tokens=[];let order=0;
     for(const phrase of score.phrases)for(const word of phrase.words){if(word.excluded)continue;tokens.push({id:word.id,phraseId:phrase.id,laneId:phrase.laneId,text:String(word.text).trim().toUpperCase(),startMs:word.startMs,endMs:word.endMs,order:order++});}
     tokens.sort((a,b)=>a.startMs-b.startMs||a.order-b.order);let total=0;
-    for(const token of tokens){let x=0;token.chars=Array.from(token.text).map(text=>{const width=Math.max(.05,measure(text));const char={text,center:x+width/2,width};x+=width+.015;return char;});token.offset=total;token.width=x+Math.max(.16,measure(' '));total+=token.width;}
-    const decay=-Math.log(.82)/(2*Math.PI),capacity=Math.log(1/.18)/decay;
-    return {tokens,total,decay,emAngle:Math.min(.15,capacity/Math.max(1,total))};
+    for(const token of tokens){let x=0;token.chars=Array.from(token.text).map(text=>{const width=Math.max(.05,measure(text));const char={text,center:x+width/2,width};x+=width+.015;return char;});token.offset=total;token.textWidth=x;token.width=x+Math.max(.35,measure(' '));token.center=total+x/2;total+=token.width;}
+    const decay=-Math.log(.78)/(2*Math.PI),capacity=Math.log(1/.18)/decay,entryFont=.21;
+    // Integral of entryFont/(1+d/compression) gives the angle traveled. Capacity
+    // affects distant history, never the font size of the word at the feed mouth.
+    let low=.001,high=1e8;
+    for(let i=0;i<64;i++){const k=(low+high)/2;if(entryFont*k*Math.log1p(total/k)>capacity)high=k;else low=k;}
+    return {tokens,total,decay,entryFont,compression:low};
   }
   function vinylAt(track,clock,{reduced=false}={}){
-    let head=0;const started=[];
-    for(const token of track.tokens){if(clock<token.startMs)break;const p=reduced?1:1-Math.pow(1-clamp((clock-token.startMs)/Math.max(1,Math.min(320,token.endMs-token.startMs))),3);head=Math.max(head,token.offset+token.width*p);started.push(token);}
-    const glyphs=[];
-    for(const token of started)for(const ch of token.chars){const distance=head-token.offset-ch.center;if(distance<0)continue;const winding=track.emAngle*distance,radius=Math.exp(-track.decay*winding),angle=-.25-winding;glyphs.push({wordId:token.id,text:ch.text,radius,angle,font:track.emAngle*radius,current:clock>=token.startMs&&clock<token.endMs});}
-    return {head,words:started.map(t=>t.id),text:started.map(t=>t.text).join(' '),glyphs};
+    const started=track.tokens.filter(t=>clock>=t.startMs),latest=started.at(-1),active=started.filter(t=>clock<t.endMs);
+    let head=0;const feeds=new Map();
+    for(let i=0;i<started.length;i++){const token=started[i],duration=Math.max(1,Math.min(260,(token.endMs-token.startMs)*.35)),p=reduced?1:1-Math.pow(1-clamp((clock-token.startMs)/duration),3),previous=started[i-1]?.center??token.center;head=Math.max(head,previous+(token.center-previous)*p);feeds.set(token.id,p);}
+    const tops=active.length?[...active].reverse():latest?[latest]:[],glyphs=[];
+    for(const token of started){
+      const row=tops.indexOf(token),current=clock<token.endMs,feed=feeds.get(token.id),fit=Math.min(1,1.65/(track.entryFont*Math.max(.1,token.textWidth))),age=Math.max(0,head-token.center),flatten=clamp(age/Math.max(6,token.width));
+      for(const ch of token.chars){
+        let x,y,angle,font,radius;
+        if(row>=0){font=track.entryFont*fit;radius=1;angle=-Math.PI/2;x=(ch.center-token.textWidth/2)*font;y=-1-row*.25-(reduced?0:(1-feed)*.48);}
+        else {const distance=head-token.offset-ch.center,d=Math.max(0,distance),winding=track.entryFont*track.compression*Math.log1p(d/track.compression);radius=Math.exp(-track.decay*winding);angle=-Math.PI/2-winding;font=track.entryFont*radius/(1+d/track.compression)*fit;x=radius*Math.cos(angle);y=radius*Math.sin(angle);const centerW=track.entryFont*track.compression*Math.log1p(age/track.compression),centerR=Math.exp(-track.decay*centerW),centerA=-Math.PI/2-centerW;const flatX=centerR*Math.cos(centerA)+(ch.center-token.textWidth/2)*font,flatY=centerR*Math.sin(centerA);x=flatX+(x-flatX)*flatten;y=flatY+(y-flatY)*flatten;angle=-Math.PI/2+(angle+Math.PI/2)*flatten;}
+        glyphs.push({wordId:token.id,text:ch.text,radius,angle,font,x,y,current,feed:row>=0&&feed<1,top:row>=0});
+      }
+    }
+    return {head,words:started.map(t=>t.id),text:started.map(t=>t.text).join(' '),glyphs,pipeWidth:Math.max(.65,...tops.map(t=>Math.min(1.65,t.textWidth*track.entryFont)))+.14};
   }
   function paintVinyl(ctx,track,clock,width,height,{reduced=false,ink='#f5f0e7',accent='#d9543e'}={}){
-    const frame=vinylAt(track,clock,{reduced}),R=Math.max(1,Math.min(height*.43,width*.34)),cx=width*.46,cy=height*.5,head=-.25;
+    const frame=vinylAt(track,clock,{reduced}),R=Math.max(1,Math.min(height*.345,width*.4)),cx=width*.5,cy=height*.59,head=-Math.PI/2;
     ctx.clearRect(0,0,width,height);ctx.save();ctx.fillStyle='#141416';ctx.beginPath();ctx.arc(cx,cy,R*1.09,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#414146';ctx.lineWidth=1;ctx.stroke();
     ctx.strokeStyle='rgba(232,223,208,.08)';ctx.beginPath();for(let f=0;f<80;f+=.08){const r=R*1.07*Math.exp(-track.decay*f),a=head-f;if(r<R*.13)break;f?ctx.lineTo(cx+r*Math.cos(a),cy+r*Math.sin(a)):ctx.moveTo(cx+r*Math.cos(a),cy+r*Math.sin(a));}ctx.stroke();
-    ctx.fillStyle=accent;ctx.beginPath();ctx.arc(cx,cy,R*.12,0,Math.PI*2);ctx.fill();ctx.fillStyle='#101113';ctx.beginPath();ctx.arc(cx,cy,Math.max(2,R*.014),0,Math.PI*2);ctx.fill();ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillStyle=accent;ctx.beginPath();ctx.arc(cx,cy,R*.12,0,Math.PI*2);ctx.fill();ctx.fillStyle='#101113';ctx.beginPath();ctx.arc(cx,cy,Math.max(2,R*.014),0,Math.PI*2);ctx.fill();
+    // Open-ended feed sleeve above twelve o'clock. Words travel between the rails.
+    const mouth=cy-R,pipeTop=Math.max(height*.025,mouth-R*.64),pipeHalf=R*frame.pipeWidth/2;
+    const shade=ctx.createLinearGradient(0,pipeTop,0,mouth);shade.addColorStop(0,'rgba(245,240,231,.015)');shade.addColorStop(1,'rgba(245,240,231,.09)');ctx.fillStyle=shade;ctx.fillRect(cx-pipeHalf,pipeTop,pipeHalf*2,mouth-pipeTop);ctx.strokeStyle='#77736d';ctx.lineWidth=Math.max(1,R*.004);ctx.beginPath();for(const side of [-1,1]){ctx.moveTo(cx+side*pipeHalf,pipeTop);ctx.lineTo(cx+side*pipeHalf,mouth-R*.02);ctx.lineTo(cx+side*(pipeHalf+R*.045),mouth+R*.035);}ctx.stroke();ctx.strokeStyle=accent;ctx.lineWidth=Math.max(2,R*.009);ctx.beginPath();ctx.moveTo(cx-pipeHalf-R*.04,mouth+R*.045);ctx.lineTo(cx-pipeHalf+R*.04,mouth+R*.045);ctx.moveTo(cx+pipeHalf-R*.04,mouth+R*.045);ctx.lineTo(cx+pipeHalf+R*.04,mouth+R*.045);ctx.stroke();
     const atlas=ctx.__lvVinylGlyphs||(ctx.__lvVinylGlyphs=new Map());
-    for(const glyph of frame.glyphs){const radius=R*glyph.radius,color=glyph.current?accent:ink,key=color+'|'+glyph.text;let sprite=atlas.get(key);
+    for(const glyph of frame.glyphs){const color=glyph.current?ink:'#d0cbc3',key=color+'|'+glyph.text;let sprite=atlas.get(key);
       if(!sprite){const tile=typeof OffscreenCanvas!=='undefined'?new OffscreenCanvas(1,1):ctx.canvas.ownerDocument.createElement('canvas'),brush=tile.getContext('2d');brush.font='800 100px Arial Narrow, Impact, sans-serif';tile.width=Math.ceil(brush.measureText(glyph.text).width)+12;tile.height=150;brush.font='800 100px Arial Narrow, Impact, sans-serif';brush.textAlign='center';brush.textBaseline='middle';brush.fillStyle=color;brush.fillText(glyph.text,tile.width/2,75);sprite=tile;if(atlas.size<512)atlas.set(key,sprite);}
-      const scale=R*glyph.font/100;ctx.save();ctx.translate(cx+radius*Math.cos(glyph.angle),cy+radius*Math.sin(glyph.angle));ctx.rotate(glyph.angle+Math.PI/2);ctx.globalAlpha=glyph.current?1:.48+.52*glyph.radius;ctx.drawImage(sprite,-sprite.width*scale/2,-75*scale,sprite.width*scale,150*scale);ctx.restore();}
-
-    const hx=cx+R*Math.cos(head),hy=cy+R*Math.sin(head),ax=cx+R*1.34,ay=cy-R*.95;ctx.strokeStyle='#aaa39a';ctx.lineWidth=Math.max(1,R*.012);ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(hx+R*.1,hy-R*.12);ctx.lineTo(hx,hy);ctx.stroke();ctx.fillStyle=ink;for(const [x,y,r] of [[ax,ay,7],[hx,hy,4]]){ctx.beginPath();ctx.arc(x,y,Math.min(r,R*.025),0,Math.PI*2);ctx.fill();}ctx.restore();return frame;
+      const scale=R*glyph.font/100;ctx.save();ctx.translate(cx+R*glyph.x,cy+R*glyph.y);ctx.rotate(glyph.angle+Math.PI/2);ctx.globalAlpha=glyph.top?1:.52+.48*glyph.radius;ctx.drawImage(sprite,-sprite.width*scale/2,-75*scale,sprite.width*scale,150*scale);ctx.restore();}
+    ctx.restore();return frame;
   }
   const api={layout,arrival,compose,expressionAt,danceAt,vinylTrack,vinylAt,paintVinyl};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);
