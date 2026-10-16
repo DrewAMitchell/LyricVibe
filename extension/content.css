@@ -1,6 +1,17 @@
 /* Development build uses installed fonts; playback has no font CDN dependency. */
 
 /* Explicitly opened, bounded timing review beside the live lyric stage. */
+#lvx-root.lvx-tempo-required .lvx-viewport,
+#lvx-root.lvx-tempo-required .lvx-preview { visibility: hidden; }
+#lvx-root.lvx-tempo-required .lvx-sync-panel > :not(header):not(.lvx-tempo-panel):not(.lvx-sync-notice) { display:none!important; }
+#lvx-root.lvx-tempo-required .lvx-tempo-panel { margin-top:18px; }
+#lvx-root.lvx-tempo-required .lvx-tempo-panel [data-sync="tempo-downbeat"],
+#lvx-root.lvx-tempo-required .lvx-tempo-panel [data-sync="tempo-sections"],
+#lvx-root.lvx-tempo-required .lvx-tempo-panel [data-sync="tempo-undo"],
+#lvx-root.lvx-tempo-required .lvx-tempo-panel .lvx-sync-loop { display:none; }
+#lvx-root .lvx-count-in { display:grid; justify-items:center; gap:8px; padding:18px; margin:12px 0; border:1px solid #bccd91; border-radius:10px; background:#202b30; }
+#lvx-root .lvx-count-in[hidden] { display:none; }
+#lvx-root .lvx-count-in output { font-size:64px; font-weight:700; line-height:1; font-variant-numeric:tabular-nums; color:#e0efbc; }
 #lvx-root .lvx-sync-panel[hidden] { display: none !important; }
 #lvx-root .lvx-sync-panel {
   position: absolute; z-index: 10; right: 24px; top: 24px;
