@@ -298,9 +298,9 @@
   /* Display picker: one tile per theme, animated with this video's own lyrics. */
   const themePicker = document.createElement('div');
   themePicker.className = 'lvx-theme-picker'; themePicker.hidden = true;
-  let choreography={mode:'classic',upsideDown:false},previewPlaying=false,previewFrame=0,previewTime=1600,previewLast=0,previewTheme=state.theme;
+  let choreography={mode:'classic',upsideDown:false,automatic:true,fillStage:true,arrangement:'chaotic',origin:'top-left'},previewPlaying=false,previewFrame=0,previewTime=1600,previewLast=0,previewTheme=state.theme;
   const choreographyPlans=new WeakMap(),choreographyMeasure=document.createElement('canvas').getContext('2d');
-  function setChoreography(value){choreography={mode:['classic','fall','puzzle'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
+  function setChoreography(value){choreography={mode:['classic','fall','puzzle'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic!==false,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
   function previewTick(now){
     if(themePicker.hidden||!previewPlaying||document.hidden){previewFrame=0;previewLast=0;return;}
     if(previewLast)previewTime+=Math.min(now-previewLast,100);previewLast=now;renderStylePreview(true);previewFrame=requestAnimationFrame(previewTick);
@@ -309,10 +309,10 @@
     for(const tile of themePicker.querySelectorAll('.lvx-theme-tile')){
       const selected=tile.dataset.theme===previewTheme;if(activeOnly&&!selected)continue;tile.dataset.previewing=String(selected);
       if(activeOnly&&(tile.offsetTop+tile.offsetHeight<themePicker.scrollTop||tile.offsetTop>themePicker.scrollTop+themePicker.clientHeight))continue;
-      if(choreography.mode==='classic')continue;
-      const line=tile.querySelector('.lvx-tile-line'),words=[...line.children].map((n,i)=>({text:n.textContent,startMs:500+i*450,endMs:950+i*450,syllables:[...n.children].map((part,j)=>({id:part.dataset.syllable,text:part.textContent,startMs:500+i*450+j*450/n.children.length}))}));
+      const line=tile.querySelector('.lvx-tile-line'),words=[...line.children].map((n,i)=>({id:'preview-'+i,text:n.textContent,startMs:500+i*450,endMs:950+i*450,syllables:[...n.children].map((part,j)=>({id:part.dataset.syllable,text:part.textContent,startMs:500+i*450+j*450/n.children.length,endMs:500+i*450+(j+1)*450/n.children.length}))}));
       const clock=selected?previewTime%(words.length*450+1600):words.length*450+700;
       choreographLine(line,words,clock,tile.querySelector('.lvx-tile-stage').clientWidth-16,110,14);
+      if(typeof LvChoreography!=='undefined')expressLine(line,words,clock,LvChoreography.compose({source:{durationMs:words.length*450+1800},phrases:[{id:'preview',laneId:'lead',words}]}));
     }
   }
   function setPreviewPlaying(value){previewPlaying=value;cancelAnimationFrame(previewFrame);previewFrame=0;previewLast=0;themePicker.dataset.playing=String(value);const b=themePicker.querySelector('[data-preview-play]');if(b){b.textContent=value?'Pause preview':'Play preview';b.setAttribute('aria-pressed',String(value));}renderStylePreview();if(value&&!themePicker.hidden)previewFrame=requestAnimationFrame(previewTick);}
@@ -337,9 +337,12 @@
     heading.textContent = 'Display style · previews use this video\u2019s lyrics';
     themePicker.append(heading);
     const motionControls=document.createElement('div');motionControls.className='lvx-motion-controls';
-    motionControls.innerHTML='<label>Motion <select aria-label="Lyric choreography"><option value="classic">Classic</option><option value="fall">Falling words</option><option value="puzzle">Word puzzle</option></select></label><label><input type="checkbox"> Allow upside-down words</label><button type="button" data-preview-play>Play preview</button><span>Hover or focus a style to compare. Only one preview plays.</span>';
+    motionControls.innerHTML='<label>Layout <select aria-label="Lyric choreography"><option value="classic">Classic</option><option value="fall">Falling words</option><option value="puzzle">Word puzzle</option></select></label><label><input type="checkbox"> Allow upside-down words</label><label>Expression <select aria-label="Automatic lyric expression"><option value="auto">Automatic</option><option value="off">Authored only</option></select></label><button type="button" data-preview-play>Play preview</button><span>Expression works in every layout. Your authored effects take priority.</span>';
     const motionSelect=motionControls.querySelector('select'),upside=motionControls.querySelector('input');motionSelect.value=choreography.mode;upside.checked=choreography.upsideDown;upside.disabled=choreography.mode!=='puzzle';
     motionSelect.onchange=()=>{setChoreography({...choreography,mode:motionSelect.value});buildThemePicker();};upside.onchange=()=>{setChoreography({...choreography,upsideDown:upside.checked});renderStylePreview();};motionControls.querySelector('button').onclick=()=>setPreviewPlaying(!previewPlaying);themePicker.append(motionControls);
+    const expressionSelect=motionControls.querySelector('[aria-label="Automatic lyric expression"]');expressionSelect.value=choreography.automatic?'auto':'off';expressionSelect.onchange=()=>{setChoreography({...choreography,automatic:expressionSelect.value==='auto'});buildThemePicker();};
+    const fillLabel=document.createElement('label'),fillToggle=document.createElement('input');fillToggle.type='checkbox';fillToggle.checked=choreography.fillStage;fillToggle.disabled=choreography.mode!=='puzzle';fillToggle.onchange=()=>{setChoreography({...choreography,fillStage:fillToggle.checked});buildThemePicker();};fillLabel.append(fillToggle,document.createTextNode('Puzzle fills stage'));motionControls.append(fillLabel);
+    for(const [key,label,options] of [['arrangement','Puzzle arrangement',[['chaotic','Chaotic'],['ordered','Ordered']]],['origin','Puzzle home corner',[['top-left','Top left'],['top-right','Top right'],['bottom-left','Bottom left'],['bottom-right','Bottom right']]]]){const field=document.createElement('label'),select=document.createElement('select');field.append(document.createTextNode(key==='arrangement'?'Arrangement ':'Home corner '));select.setAttribute('aria-label',label);for(const [value,text] of options){const option=document.createElement('option');option.value=value;option.textContent=text;select.append(option);}select.value=choreography[key];select.disabled=choreography.mode!=='puzzle';select.onchange=()=>{setChoreography({...choreography,[key]:select.value});buildThemePicker();};field.append(select);motionControls.append(field);}
     const bloomLabel=document.createElement('label');bloomLabel.className='lvx-bloom-setting';
     const bloomToggle=document.createElement('input');bloomToggle.type='checkbox';bloomToggle.checked=bloomEnabled;
     bloomToggle.onchange=()=>{bloomEnabled=bloomToggle.checked;refreshBeatPulse(getMediaTimeMs());chrome.storage.local.set({lvxBloomEnabled:bloomEnabled}).catch(error=>setHud('Bloom changed in this tab; preference could not save: '+error.message,true,true));};
@@ -352,7 +355,7 @@
     lingerBeats.onchange=()=>{const n=Number(lingerBeats.value);if(!lingerBeats.value.trim()||!Number.isFinite(n)||n<.25||n>64){lingerBeats.value=String(linger.beats);return;}setLinger({...linger,beats:n});refreshLinger();};
     refreshLinger();themePicker.append(lingerControls);
     const settings=document.createElement('details');settings.className='lvx-placement-settings';
-    settings.innerHTML='<summary>Lyric bounds &amp; text size</summary><p>Move or resize the outline, or enter percentages. Both vocal lanes stay inside it.</p><div class="lvx-placement-fields">'+Object.keys(placementDefaults).map(key=>`<label>${({left:'Left %',top:'Top %',width:'Width %',height:'Height %',maxFontPx:'Max text px'})[key]}<input data-placement="${key}" type="number" min="${key==='maxFontPx'?16:0}" max="${key==='maxFontPx'?200:100}" step="1" value="${placement[key]}"></label>`).join('')+'</div><button data-placement-reset>Reset bounds</button>';
+    settings.innerHTML='<summary>Lyric bounds &amp; text size</summary><p>Move or resize the outline, or enter percentages. Both vocal lanes stay inside it. Puzzle fills stage sizes words to this region; turn it off to use Max text px.</p><div class="lvx-placement-fields">'+Object.keys(placementDefaults).map(key=>`<label>${({left:'Left %',top:'Top %',width:'Width %',height:'Height %',maxFontPx:'Max text px'})[key]}<input data-placement="${key}" type="number" min="${key==='maxFontPx'?16:0}" max="${key==='maxFontPx'?200:100}" step="1" value="${placement[key]}"></label>`).join('')+'</div><button data-placement-reset>Reset bounds</button>';
     settings.addEventListener('toggle',()=>{bounds.hidden=!settings.open;});
     settings.addEventListener('change',event=>{const key=event.target.dataset.placement;if(!key)return;const value=Number(event.target.value);if(event.target.value.trim()&&Number.isFinite(value)){applyPlacement({...placement,[key]:value},true);syncPlacementFields();}});
     settings.querySelector('[data-placement-reset]').onclick=()=>{applyPlacement(placementDefaults,true);syncPlacementFields();};
@@ -2428,6 +2431,7 @@
     hide: teardown,
     hints: getPageHints,
     placement:Object.freeze({getState:()=>({...placement}),set:value=>applyPlacement(value,true)}),
+    choreography:Object.freeze({getState:()=>({...choreography}),set:value=>setChoreography({...choreography,...value}),inspect:()=>{const score=timing.draft&&timing.view==='proposed'?timing.draft.score:state.score;return score&&typeof LvChoreography!=='undefined'?LvChoreography.compose(score):{};}}),
     linger:Object.freeze({getState:()=>({...linger}),set:setLinger}),
     tempo:Object.freeze({getState:()=>JSON.parse(JSON.stringify({mediaKey:tempo.mediaKey,map:tempo.map,taps:tempo.taps,estimate:tempo.estimate,revision:tempo.revision})),at:ms=>LvTapTiming.tempoAt(tempo.map,ms),tap:tapTempo,setMap:updateTempoMap}),
     sync: Object.freeze({ getState: () => JSON.parse(JSON.stringify(timing)), open: openTimingReview,
@@ -2445,7 +2449,7 @@
   try {
     chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement','lvxBloomEnabled','lvxChoreography','lvxLinger'], (result) => {
       linger=LvBeatTrack.lingerSettings(result?.lvxLinger);
-      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={mode:['classic','fall','puzzle'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true};}
+      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={mode:['classic','fall','puzzle'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic!==false,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(c.origin)?c.origin:'top-left'};}
       bloomEnabled=result?.lvxBloomEnabled!==false;
       if(result?.lvxPlacement)try{applyPlacement(result.lvxPlacement);}catch(error){setHud(error.message,true,true);}
       if (result && result.lvxTheme && THEMES.includes(result.lvxTheme)) {
@@ -3743,6 +3747,7 @@
 
   function renderCaptureScore() {
     stage.classList.remove('lvx-choreography-stage');
+    stage.style.removeProperty('padding-top');
     stage.classList.add('lvx-score-stage');
     const phrase=timingPhrase(), take=tapping.take, unit=take.units[take.index];
     if (!phrase) return;
@@ -3795,13 +3800,35 @@
   }
   let beatDisplayCache={score:null,map:null,ends:{}};
   const beatStyledNodes=new Set();
-  function choreographLine(line,words,clock,width,height,maxFont){
+  let expressionPlan={score:null,cues:{}};
+  function expressionCues(score){if(expressionPlan.score!==score)expressionPlan={score,cues:LvChoreography.compose(score)};return expressionPlan.cues;}
+  function expressLine(line,words,clock,cues){
+    if(typeof LvChoreography==='undefined')return;
+    const paint=(node,cue,effects,automatic)=>{
+      const value=LvChoreography.expressionAt(cue,clock,{mode:choreography.mode,reduced:bloomMotion.matches,effects,automatic});
+      node.classList.add('lvx-expression');node.dataset.expression=value.reason;node.dataset.authoredExpression=String(Boolean(effects?.length));
+      const angle=(parseFloat(node.style.rotate)||0)*Math.PI/180,x=value.x*Math.cos(angle)+value.y*Math.sin(angle),y=-value.x*Math.sin(angle)+value.y*Math.cos(angle);
+      node.style.transform=`translate(${x.toFixed(3)}px,${y.toFixed(3)}px) rotate(${value.turn.toFixed(3)}deg) scale(${value.scale.toFixed(4)})`;
+      node.style.setProperty('--lvx-expression-bright',value.brightness.toFixed(4));
+      if(value.color){node.dataset.expressionColor='true';node.style.setProperty('--lvx-expression-color',value.color);}else{delete node.dataset.expressionColor;node.style.removeProperty('--lvx-expression-color');}
+    };
+    words.forEach((word,i)=>{
+      const node=line.children[i],cue=cues[word.id];if(!node||!cue)return;
+      const parts=[...node.querySelectorAll('[data-syllable]')],authored=word.effects?.length||word.syllables?.some(s=>s.effects?.length)||node.closest('.lvx-beat-target')||node.querySelector('.lvx-beat-target');
+      const automatic=choreography.automatic&&!authored;
+      paint(node,parts.length?{...cue,sustained:[]}:cue,word.effects||[],automatic);
+      for(const part of parts){const syllable=word.syllables?.find(s=>s.id===part.dataset.syllable);if(!syllable)continue;
+        paint(part,{...cue,startMs:syllable.startMs,endMs:syllable.endMs,impact:false,direction:null,sustained:cue.sustained.filter(s=>s.id===syllable.id)},syllable.effects||[],automatic);
+      }
+    });
+  }
+  function choreographLine(line,words,clock,width,height,maxFont,weights={}){
     if(typeof LvChoreography==='undefined'||choreography.mode==='classic')return;
-    const style=getComputedStyle(line),key=[width,height,maxFont,style.fontFamily,style.fontWeight,choreography.mode,choreography.upsideDown,words.map(w=>w.text).join('|')].join(':');
+    const style=getComputedStyle(line),key=[width,height,maxFont,style.fontFamily,style.fontWeight,choreography.mode,choreography.upsideDown,choreography.arrangement,choreography.origin,words.map(w=>w.text+':'+(weights[w.id]?.weight??1)).join('|')].join(':');
     let plan=choreographyPlans.get(line);
     if(plan?.key!==key){
       const measure=(text,font)=>{choreographyMeasure.font=`${style.fontWeight} ${font}px ${style.fontFamily}`;return choreographyMeasure.measureText(style.textTransform==='uppercase'?text.toUpperCase():text).width+Math.max(0,parseFloat(style.letterSpacing)||0)*text.length;};
-      plan={key,slots:LvChoreography.layout(words,width,height,measure,{...choreography,maxFont})};choreographyPlans.set(line,plan);
+      plan={key,slots:LvChoreography.layout(words,width*.88,height*.88,measure,{...choreography,maxFont,weights}).map(s=>({...s,x:s.x+width*.06,y:s.y+height*.06}))};choreographyPlans.set(line,plan);
       Object.assign(line.style,{width:width+'px',height:height+'px',position:'relative',maxWidth:'100%'});
       for(const slot of plan.slots){const node=line.children[slot.index];if(!node)continue;Object.assign(node.style,{position:'absolute',left:(slot.x-slot.width/2)+'px',top:(slot.y-slot.height/2)+'px',width:slot.width+'px',height:slot.height+'px',fontSize:slot.font+'px',lineHeight:'1.3',rotate:slot.angle+'deg'});}
     }
@@ -3871,8 +3898,12 @@
       }
       state.scoreSignature = signature;
     }
+    renderBeatEffects(score,mediaMs);
+    const cues=typeof LvChoreography==='undefined'?{}:expressionCues(score);
     // Authoring outline only while editing, so you can see where to continue a take while scrubbing.
     const takeIds = syncPanel.hidden ? null : takePhraseIds();
+    const choreographyTop=Math.max(16,Math.min(stage.clientHeight*.3,hud.getBoundingClientRect().bottom-stage.getBoundingClientRect().top+16));
+    if(choreography.mode!=='classic')stage.style.paddingTop=choreographyTop+'px';else stage.style.removeProperty('padding-top');
     for (const phrase of active.phrases) {
       const line = [...stage.children].find(el => el.dataset.phrase === phrase.id);
       if (!line) continue;
@@ -3902,9 +3933,9 @@
           applyReveal(part, syllable, mediaMs - score.offsetMs);
         }
       }
-      if(choreography.mode!=='classic')choreographLine(line,phrase.words,atMs,Math.max(1,stage.clientWidth-32),Math.max(1,(stage.clientHeight-32)/Math.max(1,active.phrases.length)-12),Math.min(placement.maxFontPx,laneFont(phrase,score)));
+      if(choreography.mode!=='classic')choreographLine(line,phrase.words,atMs,Math.max(1,stage.clientWidth-32),Math.max(1,(stage.clientHeight-choreographyTop-16)/Math.max(1,active.phrases.length)-12),choreography.mode==='puzzle'?(choreography.fillStage?Math.max(stage.clientWidth,stage.clientHeight):placement.maxFontPx):Math.min(placement.maxFontPx,laneFont(phrase,score)),choreography.automatic?cues:{});
+      expressLine(line,phrase.words,atMs,cues);
     }
-    renderBeatEffects(score,mediaMs);
   }
   function laneFont(phrase,score){return score.lanes.find(l=>l.id===phrase.laneId)?.role==='backing'?40:80;}
 
