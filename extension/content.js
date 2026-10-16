@@ -2643,10 +2643,11 @@
       const internal=timing.busy||Number.isFinite(tapping.armSeekMs)&&Math.abs(event.target.currentTime*1000-tapping.armSeekMs)<100;
       tapping.armSeekMs=null;
       if(!internal){tapping.backAnchorMs=null;tapping.backIndex=null;tapping.backPhraseId=null;tapping.rewindPhraseId=null;}
-      if(tapping.take?.status==='armed'&&!timing.busy){listenToTake();tapping.takeSeekUntil=performance.now()+1500;state.auditionLoop=null;return;}
+      if(tapping.take?.status==='armed'&&!timing.busy){listenToTake();tapping.takeSeekUntil=performance.now()+1500;state.auditionLoop=null;refreshPerformClock(event.target.currentTime*1000-state.score.offsetMs);state.scoreSignature='';renderScore(getMediaTimeMs());return;}
       if(internal)return;
       if(streamTake(tapping.take)||rawTake(tapping.take)){tapping.followSeek=true;tapping.seekPhraseId=null;}
       else if(!tapping.take)tapping.followSeek=true;
+      if(timing.draft&&!timing.busy){refreshPerformClock(event.target.currentTime*1000-state.score.offsetMs);state.scoreSignature='';renderScore(getMediaTimeMs());}
     }
     if (performanceTake.armed && event.target === getMedia()) stopEffects('Effects stopped because playback changed. Gestures retained.');
     if (tapping.take?.status === 'armed' && event.target === getMedia()) {
