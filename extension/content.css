@@ -12,6 +12,13 @@
 #lvx-root .lvx-count-in { display:grid; justify-items:center; gap:8px; padding:18px; margin:12px 0; border:1px solid #bccd91; border-radius:10px; background:#202b30; }
 #lvx-root .lvx-count-in[hidden] { display:none; }
 #lvx-root .lvx-count-in output { font-size:64px; font-weight:700; line-height:1; font-variant-numeric:tabular-nums; color:#e0efbc; }
+#lvx-root .lvx-count-in-stage { position:absolute; inset:0; z-index:50; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; padding:24px; box-sizing:border-box; background:rgba(12,20,26,.96); color:#f4f7fa; text-align:center; font-family:system-ui,sans-serif; pointer-events:none; }
+#lvx-root .lvx-count-in-stage[hidden] { display:none; }
+#lvx-root .lvx-count-in-stage > span { font-size:20px; letter-spacing:.08em; text-transform:uppercase; color:#d4dfc3; }
+#lvx-root .lvx-count-in-stage output { font-size:clamp(96px,18vw,220px); line-height:1; font-weight:750; font-variant-numeric:tabular-nums; color:#e0efbc; }
+#lvx-root .lvx-count-in-stage strong { max-width:90%; font-size:clamp(20px,3vw,36px); line-height:1.25; overflow-wrap:anywhere; }
+#lvx-root .lvx-count-in-stage small { font-size:14px; color:#b7c5cf; }
+#lvx-root.lvx-counting-in .lvx-stage { visibility:hidden; }
 #lvx-root .lvx-sync-panel[hidden] { display: none !important; }
 #lvx-root .lvx-sync-panel {
   position: absolute; z-index: 10; right: 24px; top: 24px;
@@ -163,7 +170,7 @@
 #lvx-root .lvx-tap-panel .lvx-capture-phases { margin:6px 0; gap:4px; }
 #lvx-root .lvx-tap-panel .lvx-sync-hint { margin:6px 0; }
 #lvx-root .lvx-tap-panel .lvx-perform-cue { position:static; padding:10px; margin-top:8px; }
-#lvx-root .lvx-tap-panel .lvx-perform-cue[data-recording=true] { position:sticky; top:0; z-index:3; max-height:52vh; overflow:auto; }
+#lvx-root .lvx-tap-panel .lvx-perform-cue[data-recording=true] { max-height:52vh; overflow:auto; }
 @media(max-width:900px){#lvx-root.lvx-sync-open:has(.lvx-perform-cue[data-recording=true]) .lvx-stage{visibility:hidden}}
 #lvx-root .lvx-tap-panel .lvx-perform-phrase { margin:6px 0; line-height:1.5; }
 #lvx-root .lvx-tap-panel .lvx-estimated-phrase { margin:6px 0 2px; }
