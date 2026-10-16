@@ -44,6 +44,7 @@ function makeHarness() {
     tabs: {
       async sendMessage(tabId, message) {
         if (message.type === 'LV_GET_HINTS') return { ...tabs.get(tabId) };
+        if (message.type === 'LV_TIMING_EDIT_CHECK') return {ok:true,mediaKey:message.mediaKey,canEdit:!copyBlocked};
         if (message.type === 'LV_TIMING_COPY_CHECK') return {ok:true,mediaKey:message.mediaKey,canCopy:!copyBlocked};
         tabMessages.push({ tabId, message: structuredClone(message) });
         return { ok: true };
@@ -840,4 +841,17 @@ test('explicit saved-sync copy is preview-only, source-bound, revision-checked a
   const moved=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:prepared.preview.token,previewRevision:3,allowProtected:true,operation:{type:'shiftPhrases',phraseIds:[source.phrases[0].id],deltaMs:400}},sender);assert.equal(moved.ok,true);assert.equal(moved.preview.previewRevision,4);
   const applied=await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:prepared.preview.token,previewRevision:4},sender);assert.equal(applied.ok,true);assert.equal(applied.score.source.videoId,ID_A);assert.equal(applied.score.phrases[0].startMs,source.phrases[0].startMs+400);assert.equal(JSON.stringify(recordFor(h,ID_B)),sourceBefore);
   const restored=await h.dispatch({type:'LV_SCORE_UNDO',...envelope,expectedRevision:applied.score.revision},sender);assert.equal(restored.ok,true);assert.equal(restored.score.lyrics.contentHash,base.lyrics.contentHash);
+});
+
+test('a separate editor cannot tune, undo, save or close a preview during capture or pending transcript input',async()=>{
+ const h=makeHarness(),score=await h.ensure(),sender={id:'test-extension',url:'chrome-extension://test/light-editor.html?sourceTab=1&mediaKey='+encodeURIComponent('youtube:'+ID_A)};
+ const base={tabId:1,mediaKey:'youtube:'+ID_A,expectedRevision:score.revision,lyricsHash:score.lyrics.contentHash};
+ const prepared=await h.dispatch({type:'LV_TIMING_PREPARE',...base,fromSaved:true},sender);assert.equal(prepared.ok,true);
+ const envelope={...base,token:prepared.preview.token,previewRevision:0},before=JSON.stringify(h.values);
+ h.setCopyBlocked(true);
+ for(const type of ['LV_TIMING_TUNE','LV_TIMING_UNDO','LV_TIMING_APPLY','LV_TIMING_CANCEL'])assert.equal((await h.dispatch({type,...envelope,operation:{type:'setOffset',offsetMs:100}},sender)).error.code,'CAPTURE_PENDING');
+ assert.equal(JSON.stringify(h.values),before);
+ assert.equal((await h.dispatch({type:'LV_TIMING_CURRENT',...base},sender)).ok,true);
+ h.setCopyBlocked(false);
+ assert.equal((await h.dispatch({type:'LV_TIMING_TUNE',...envelope,operation:{type:'setOffset',offsetMs:100}},sender)).ok,true);
 });

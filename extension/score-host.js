@@ -227,6 +227,10 @@
       if (message.type.startsWith('LV_TIMING_')) {
         if (!timingControlBound(sender, tabId, key)) throw fail('SOURCE_REQUIRED', 'This editor is not connected to the current video. Open Edit timing on that video to reconnect.');
         if (message.lyricsHash !== record.score.lyrics.contentHash) throw fail('LYRIC_REVISION_MISMATCH', 'Saved lyric revision changed. Refresh the preview.');
+        if (editorSourceBound(sender, tabId, key) && !['LV_TIMING_CURRENT','LV_TIMING_SOURCES'].includes(message.type)) {
+          const guard=await chrome.tabs.sendMessage(tabId,{type:'LV_TIMING_EDIT_CHECK',mediaKey:key});
+          if(!guard?.ok||guard.mediaKey!==key||guard.canEdit!==true)throw fail('CAPTURE_PENDING','Stop or keep the take and apply pending lyric text in the video before editing or saving here.');
+        }
         const previewKey = key;
         if (message.type === 'LV_TIMING_SOURCES') {
           const sources = [];

@@ -1099,6 +1099,21 @@
     return { status: 'armed', cadence: 'word-holds', mode: 'syllable', units: safeUnits, syllableEvents: events,
       holds: [], marks: [], index: 0, pendingStartMs: null, lastMs: null, actionHistory: [] };
   }
+  function restoreWordHoldRecording(packet) {
+    if(packet?.schema!=='lyricvibe-word-holds-v1'||!Array.isArray(packet.holds)||!packet.holds.length||packet.holds.length>5000)fail('INVALID_RECORDING','Provide a saved word-hold recording.');
+    const take=beginWordHolds(packet.referenceUnits,packet.syllableEvents),units=new Map(take.units.map(u=>[u.wordId,u])),seen=new Set(),events=new Set();
+    for(const h of packet.holds){
+      if(!h||seen.has(h.wordId)||units.get(h.wordId)?.phraseId!==h.phraseId||!integerTime(h.pressMs)||!integerTime(h.releaseMs)||h.releaseMs<h.pressMs)fail('INVALID_RECORDING','Recorded holds need unique, known words and valid source times.');
+      seen.add(h.wordId);
+    }
+    for(const e of packet.syllableEvents){
+      if(events.has(e.id)||!e.id.trim()||e.releaseMs!==undefined&&(!integerTime(e.releaseMs)||e.releaseMs<=e.sourceMs))fail('INVALID_RECORDING','Recorded syllables need unique ids and valid release times.');
+      events.add(e.id);
+    }
+    if(packet.stoppedScoreMs!==undefined&&!integerTime(packet.stoppedScoreMs))fail('INVALID_RECORDING','Recorded stop time must be whole source milliseconds.');
+    const index=take.units.findIndex(u=>!seen.has(u.wordId));
+    return {...take,status:'stopped',holds:clone(packet.holds),index:index<0?take.units.length:index,lastMs:Math.max(...packet.holds.map(h=>h.releaseMs)),...(packet.stoppedScoreMs===undefined?{}:{stoppedScoreMs:packet.stoppedScoreMs})};
+  }
   const holdSnapshot = take => ({ holds: take.holds, index: take.index, pendingStartMs: take.pendingStartMs, lastMs: take.lastMs, status: take.status, retime: take.retime ?? null });
   function assertHoldTake(take) { if (!take || take.cadence !== 'word-holds') fail('CADENCE_UNSUPPORTED', 'Expected a word-holds take.'); }
   function pressWord(take, scoreMs) {
@@ -1409,6 +1424,6 @@
 
   return { begin, mark, release, undo, stop, adjust, reposition, followPlayback, punchIn, moveCursor, reassignLast, restoreWordFrameTake, rewindToPhrase, restorePhraseStreamTake,
     beginEvents, markEvent, pressEventHold, releaseEventHold, stopEvents, undoEvent, rewindEvents, associateEvents, restoreEventRecording,
-    beginWordHolds, pressWord, releaseWord, skipWords, undoWordHold, stopWordHolds, rewindWordHolds, retimePhraseHolds, associateWordHolds, wordHoldsFromPairs, estimateTempo,
+    beginWordHolds, restoreWordHoldRecording, pressWord, releaseWord, skipWords, undoWordHold, stopWordHolds, rewindWordHolds, retimePhraseHolds, associateWordHolds, wordHoldsFromPairs, estimateTempo,
     leadInProgress, captureProgress, validateTempoMap, tempoMapFromEstimate, setTempoPoint, removeTempoPoint, tempoAt, tempoTimeAtBeat };
 });

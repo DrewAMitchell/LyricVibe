@@ -33,7 +33,14 @@
   }
   async function run(work) {
     if(state.busy)return;state.busy=true;buttons();
-    try {await work();}catch(error){notice(error.message);}finally{state.busy=false;if(deferredPreview?.token===state.draft?.token&&deferredPreview.previewRevision>state.draft.previewRevision)setDraft(deferredPreview);deferredPreview=null;buttons();}
+    try {await work();}catch(error){notice(error.message);}finally{state.busy=false;if(canReceivePreview(deferredPreview))receivePreview(deferredPreview);deferredPreview=null;buttons();}
+  }
+  function canReceivePreview(preview){return preview&&state.score&&preview.baseRevision===state.score.revision&&preview.baseHash===state.score.lyrics.contentHash&&LvScore.mediaKey(preview.score.source)===mediaKey&&(!state.draft||preview.token===state.draft.token&&preview.previewRevision>state.draft.previewRevision);}
+  function receivePreview(preview){
+    const reopened=!state.draft;
+    if(reopened&&state.dirty)state.editRevision=-1;
+    setDraft(preview);
+    if(reopened)notice(state.dirty?'Saved lyrics refreshed. Your typed times are kept; select the word again before applying them.':'Saved lyrics refreshed. Continue editing this video.');
   }
   function buttons() {
     const ready=!!state.draft;
@@ -202,7 +209,7 @@
   });
   chrome.runtime.onMessage.addListener(message=>{
     if(message.tabId!==tabId||message.mediaKey!==mediaKey)return;
-    if(message.type==='LV_TIMING_PREVIEW_UPDATED'&&state.draft?.token===message.preview.token){if(message.preview.previewRevision>state.draft.previewRevision){if(state.busy){if(!deferredPreview||message.preview.previewRevision>deferredPreview.previewRevision)deferredPreview=message.preview;}else setDraft(message.preview);}}
+    if(message.type==='LV_TIMING_PREVIEW_UPDATED'&&canReceivePreview(message.preview)){if(state.busy){if(!deferredPreview||message.preview.token!==deferredPreview.token||message.preview.previewRevision>deferredPreview.previewRevision)deferredPreview=message.preview;}else receivePreview(message.preview);}
     if(message.type==='LV_TIMING_PREVIEW_CLOSED'){state.draft=null;notice('Preview closed in YouTube. Reopen Sync there to continue.');buttons();}
     if(message.type==='LV_SCORE_UPDATED'&&state.score&&message.score.revision!==state.score.revision){state.score=message.score;state.draft=null;notice('Saved score changed. Reopen Sync in YouTube for a fresh preview.');buttons();}
   });

@@ -1297,3 +1297,14 @@ test('word-held syllables stay inside the optional word bounds, preserve raw tap
  const r=tap.associateWordHolds(t),p=r.phrases[0];assert.ok(p.ready);assert.deepEqual(p.marks.map(m=>[m.startMs,m.endMs]),[[100,180],[180,500]]);assert.equal(p.marks[0].startSource,'word-start-bound');assert.deepEqual(r.unclaimed.map(e=>e.sourceMs),[600]);assert.deepEqual(t.syllableEvents,events);
  t={...t,syllableEvents:[{id:'a',sourceMs:60},{id:'b',sourceMs:90}]};const collapsed=tap.associateWordHolds(t).phrases[0];assert.equal(collapsed.ready,false);assert.ok(collapsed.issues.includes('collapsed-syllables'));
 });
+
+test('reopening word-hold recordings preserves holds and syllable releases and rejects unbound or malformed evidence',()=>{
+  const units=[{wordId:'a',phraseId:'p',text:'a',minMs:0,maxMs:1000},{wordId:'b',phraseId:'p',text:'b',minMs:0,maxMs:1000}];
+  const packet={schema:'lyricvibe-word-holds-v1',referenceUnits:units,holds:[{wordId:'b',phraseId:'p',pressMs:400,releaseMs:700}],syllableEvents:[{id:'e1',sourceMs:410,releaseMs:650}],stoppedScoreMs:800};
+  const original=structuredClone(packet),restored=tap.restoreWordHoldRecording(packet);
+  assert.equal(restored.status,'stopped');assert.equal(restored.index,0);assert.equal(restored.lastMs,700);
+  assert.deepEqual(restored.holds,packet.holds);assert.deepEqual(restored.syllableEvents,packet.syllableEvents);assert.deepEqual(packet,original);
+  for(const holds of [[],[...packet.holds,packet.holds[0]],[{...packet.holds[0],wordId:'missing'}],[{...packet.holds[0],phraseId:'other'}],[{...packet.holds[0],releaseMs:399}]])assert.throws(()=>tap.restoreWordHoldRecording({...packet,holds}),{code:'INVALID_RECORDING'});
+  for(const syllableEvents of [[...packet.syllableEvents,packet.syllableEvents[0]],[{id:'e1',sourceMs:410,releaseMs:400}]])assert.throws(()=>tap.restoreWordHoldRecording({...packet,syllableEvents}),{code:'INVALID_RECORDING'});
+  restored.holds[0].pressMs=500;assert.equal(packet.holds[0].pressMs,400);
+});
