@@ -77,3 +77,15 @@ test('dance gestures reconstruct from source time, keep backward fall flat, and 
  assert.equal(danceAt(cue,2400,{kind:'launch'}).x,0);assert.equal(danceAt(cue,5200,{kind:'bounce'}).y,0);
  assert.notEqual(danceAt(cue,1800,{kind:'flex'}).flex,0);assert.equal(danceAt(cue,5200,{kind:'flex'}).flex,0);
 });
+
+const {vinylTrack,vinylAt}=require('../extension/choreography.js');
+test('vinyl history keeps earlier words through rests and reconstructs exact prior poses after seeking',()=>{
+ const score=performance(),before=JSON.stringify(score),track=vinylTrack(score,text=>text.length*.6);
+ const early=vinylAt(track,1500),later=vinylAt(track,4700);assert.ok(later.words.length>early.words.length);assert.equal(later.words[0],early.words[0]);assert.ok(later.glyphs[0].radius<early.glyphs[0].radius);
+ vinylAt(track,9000);assert.deepEqual(vinylAt(track,1500),early);assert.equal(vinylAt(track,-1).words.length,0);assert.equal(JSON.stringify(score),before);
+ assert.equal(vinylAt(track,4700,{reduced:true}).words.length,later.words.length);assert.ok(later.glyphs.every(g=>!g.current),'history survives a silent gap without pretending words are still sung');
+});
+test('vinyl full-song capacity retains every nonexcluded word outside the spindle, including overlapping lanes',()=>{
+ const score={phrases:[{id:'lead',laneId:'lead',words:Array.from({length:400},(_,i)=>word('w'+i,'REMEMBER',i*300,i*300+500))},{id:'back',laneId:'back',words:[word('b','ECHO',1000,1800),{...word('x','HIDDEN',0,500),excluded:true}]}]};
+ const track=vinylTrack(score,text=>text.length*.6),frame=vinylAt(track,130000);assert.equal(frame.words.length,401);assert.equal(frame.glyphs.length,400*8+4);assert.ok(frame.glyphs.every(g=>g.radius>=.18&&g.radius<=1&&g.font>0));assert.equal(frame.words[0],'w0');assert.ok(frame.words.includes('b'));assert.ok(!frame.words.includes('x'));
+});

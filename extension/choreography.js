@@ -177,5 +177,35 @@
     for(const row of rows){for(const item of row.items)slots[item.index]={...item,x:(width-row.width)/2+item.x+item.boxWidth/2,y:y+row.height/2};y+=row.height+font*.22;}
     return slots;
   }
-  const api={layout,arrival,compose,expressionAt,danceAt};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
+
+  // Measure once per score/font. Full-song capacity keeps even the earliest glyphs
+  // outside the spindle; positions are reconstructed from source time, never accumulated.
+  function vinylTrack(score,measure){
+    const tokens=[];let order=0;
+    for(const phrase of score.phrases)for(const word of phrase.words){if(word.excluded)continue;tokens.push({id:word.id,phraseId:phrase.id,laneId:phrase.laneId,text:String(word.text).trim().toUpperCase(),startMs:word.startMs,endMs:word.endMs,order:order++});}
+    tokens.sort((a,b)=>a.startMs-b.startMs||a.order-b.order);let total=0;
+    for(const token of tokens){let x=0;token.chars=Array.from(token.text).map(text=>{const width=Math.max(.05,measure(text));const char={text,center:x+width/2,width};x+=width+.015;return char;});token.offset=total;token.width=x+Math.max(.16,measure(' '));total+=token.width;}
+    const decay=-Math.log(.82)/(2*Math.PI),capacity=Math.log(1/.18)/decay;
+    return {tokens,total,decay,emAngle:Math.min(.15,capacity/Math.max(1,total))};
+  }
+  function vinylAt(track,clock,{reduced=false}={}){
+    let head=0;const started=[];
+    for(const token of track.tokens){if(clock<token.startMs)break;const p=reduced?1:1-Math.pow(1-clamp((clock-token.startMs)/Math.max(1,Math.min(320,token.endMs-token.startMs))),3);head=Math.max(head,token.offset+token.width*p);started.push(token);}
+    const glyphs=[];
+    for(const token of started)for(const ch of token.chars){const distance=head-token.offset-ch.center;if(distance<0)continue;const winding=track.emAngle*distance,radius=Math.exp(-track.decay*winding),angle=-.25-winding;glyphs.push({wordId:token.id,text:ch.text,radius,angle,font:track.emAngle*radius,current:clock>=token.startMs&&clock<token.endMs});}
+    return {head,words:started.map(t=>t.id),text:started.map(t=>t.text).join(' '),glyphs};
+  }
+  function paintVinyl(ctx,track,clock,width,height,{reduced=false,ink='#f5f0e7',accent='#d9543e'}={}){
+    const frame=vinylAt(track,clock,{reduced}),R=Math.max(1,Math.min(height*.43,width*.34)),cx=width*.46,cy=height*.5,head=-.25;
+    ctx.clearRect(0,0,width,height);ctx.save();ctx.fillStyle='#141416';ctx.beginPath();ctx.arc(cx,cy,R*1.09,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#414146';ctx.lineWidth=1;ctx.stroke();
+    ctx.strokeStyle='rgba(232,223,208,.08)';ctx.beginPath();for(let f=0;f<80;f+=.08){const r=R*1.07*Math.exp(-track.decay*f),a=head-f;if(r<R*.13)break;f?ctx.lineTo(cx+r*Math.cos(a),cy+r*Math.sin(a)):ctx.moveTo(cx+r*Math.cos(a),cy+r*Math.sin(a));}ctx.stroke();
+    ctx.fillStyle=accent;ctx.beginPath();ctx.arc(cx,cy,R*.12,0,Math.PI*2);ctx.fill();ctx.fillStyle='#101113';ctx.beginPath();ctx.arc(cx,cy,Math.max(2,R*.014),0,Math.PI*2);ctx.fill();ctx.textAlign='center';ctx.textBaseline='middle';
+    const atlas=ctx.__lvVinylGlyphs||(ctx.__lvVinylGlyphs=new Map());
+    for(const glyph of frame.glyphs){const radius=R*glyph.radius,color=glyph.current?accent:ink,key=color+'|'+glyph.text;let sprite=atlas.get(key);
+      if(!sprite){const tile=typeof OffscreenCanvas!=='undefined'?new OffscreenCanvas(1,1):ctx.canvas.ownerDocument.createElement('canvas'),brush=tile.getContext('2d');brush.font='800 100px Arial Narrow, Impact, sans-serif';tile.width=Math.ceil(brush.measureText(glyph.text).width)+12;tile.height=150;brush.font='800 100px Arial Narrow, Impact, sans-serif';brush.textAlign='center';brush.textBaseline='middle';brush.fillStyle=color;brush.fillText(glyph.text,tile.width/2,75);sprite=tile;if(atlas.size<512)atlas.set(key,sprite);}
+      const scale=R*glyph.font/100;ctx.save();ctx.translate(cx+radius*Math.cos(glyph.angle),cy+radius*Math.sin(glyph.angle));ctx.rotate(glyph.angle+Math.PI/2);ctx.globalAlpha=glyph.current?1:.48+.52*glyph.radius;ctx.drawImage(sprite,-sprite.width*scale/2,-75*scale,sprite.width*scale,150*scale);ctx.restore();}
+
+    const hx=cx+R*Math.cos(head),hy=cy+R*Math.sin(head),ax=cx+R*1.34,ay=cy-R*.95;ctx.strokeStyle='#aaa39a';ctx.lineWidth=Math.max(1,R*.012);ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(hx+R*.1,hy-R*.12);ctx.lineTo(hx,hy);ctx.stroke();ctx.fillStyle=ink;for(const [x,y,r] of [[ax,ay,7],[hx,hy,4]]){ctx.beginPath();ctx.arc(x,y,Math.min(r,R*.025),0,Math.PI*2);ctx.fill();}ctx.restore();return frame;
+  }
+  const api={layout,arrival,compose,expressionAt,danceAt,vinylTrack,vinylAt,paintVinyl};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

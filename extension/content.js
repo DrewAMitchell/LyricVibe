@@ -300,7 +300,7 @@
   themePicker.className = 'lvx-theme-picker'; themePicker.hidden = true;
   let choreography={dance:'off',mode:'classic',upsideDown:false,automatic:true,fillStage:true,arrangement:'chaotic',origin:'top-left'},previewPlaying=false,previewFrame=0,previewTime=1600,previewLast=0,previewTheme=state.theme;
   const choreographyPlans=new WeakMap(),choreographyMeasure=document.createElement('canvas').getContext('2d');
-  function setChoreography(value){choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(value.dance)?value.dance:'off',mode:['classic','fall','puzzle'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic!==false,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
+  function setChoreography(value){choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(value.dance)?value.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic!==false,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
   function previewTick(now){
     if(themePicker.hidden||!previewPlaying||document.hidden){previewFrame=0;previewLast=0;return;}
     if(previewLast)previewTime+=Math.min(now-previewLast,100);previewLast=now;renderStylePreview(true);previewFrame=requestAnimationFrame(previewTick);
@@ -310,6 +310,9 @@
       const selected=tile.dataset.theme===previewTheme;if(activeOnly&&!selected)continue;tile.dataset.previewing=String(selected);
       if(activeOnly&&(tile.offsetTop+tile.offsetHeight<themePicker.scrollTop||tile.offsetTop>themePicker.scrollTop+themePicker.clientHeight))continue;
       const line=tile.querySelector('.lvx-tile-line'),words=[...line.children].map((n,i)=>{const parts=[...n.querySelectorAll('[data-syllable]')];return {id:'preview-'+i,text:n.textContent,startMs:500+i*450,endMs:950+i*450,syllables:parts.map((part,j)=>({id:part.dataset.syllable,text:part.textContent,startMs:500+i*450+j*450/parts.length,endMs:500+i*450+(j+1)*450/parts.length}))};});
+      if(choreography.mode==='vinyl'){
+        line.hidden=true;const box=tile.querySelector('.lvx-tile-stage');let canvas=box.querySelector('canvas');if(!canvas){canvas=document.createElement('canvas');canvas.className='lvx-vinyl-tile';box.append(canvas);}const width=Math.max(1,box.clientWidth),height=Math.max(1,box.clientHeight),ctx=canvas.getContext('2d');if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height;}if(!canvas.__track){ctx.font='800 100px Arial Narrow, Impact, sans-serif';canvas.__track=LvChoreography.vinylTrack({phrases:[{id:'preview',words}]},text=>ctx.measureText(text).width/100);}LvChoreography.paintVinyl(ctx,canvas.__track,selected?previewTime%(words.length*450+1600):words.length*450+700,width,height,{reduced:bloomMotion.matches});continue;
+      }
       const clock=selected?previewTime%(words.length*450+1600):words.length*450+700;
       choreographLine(line,words,clock,tile.querySelector('.lvx-tile-stage').clientWidth-16,110,14);
       if(typeof LvChoreography!=='undefined')expressLine(line,words,clock,LvChoreography.compose({source:{durationMs:words.length*450+1800},phrases:[{id:'preview',laneId:'lead',words}]}));
@@ -337,12 +340,12 @@
     heading.textContent = 'Display style · previews use this video\u2019s lyrics';
     themePicker.append(heading);
     const motionControls=document.createElement('div');motionControls.className='lvx-motion-controls';
-    motionControls.innerHTML='<label>Layout <select aria-label="Lyric choreography"><option value="classic">Classic</option><option value="fall">Falling words</option><option value="puzzle">Word puzzle</option></select></label><label><input type="checkbox"> Allow upside-down words</label><label>Expression <select aria-label="Automatic lyric expression"><option value="auto">Automatic</option><option value="off">Authored only</option></select></label><button type="button" data-preview-play>Play preview</button><span>Expression works in every layout. Your authored effects take priority.</span>';
+    motionControls.innerHTML='<label>Layout <select aria-label="Lyric choreography"><option value="classic">Classic</option><option value="fall">Falling words</option><option value="puzzle">Word puzzle</option><option value="vinyl">Vinyl history</option></select></label><label><input type="checkbox"> Allow upside-down words</label><label>Expression <select aria-label="Automatic lyric expression"><option value="auto">Automatic</option><option value="off">Authored only</option></select></label><button type="button" data-preview-play>Play preview</button><span>Expression works in every layout. Your authored effects take priority.</span>';
     const motionSelect=motionControls.querySelector('select'),upside=motionControls.querySelector('input');motionSelect.value=choreography.mode;upside.checked=choreography.upsideDown;upside.disabled=choreography.mode!=='puzzle';
     motionSelect.onchange=()=>{setChoreography({...choreography,mode:motionSelect.value});buildThemePicker();};upside.onchange=()=>{setChoreography({...choreography,upsideDown:upside.checked});renderStylePreview();};motionControls.querySelector('button').onclick=()=>setPreviewPlaying(!previewPlaying);themePicker.append(motionControls);
     const expressionSelect=motionControls.querySelector('[aria-label="Automatic lyric expression"]');expressionSelect.value=choreography.automatic?'auto':'off';expressionSelect.onchange=()=>{setChoreography({...choreography,automatic:expressionSelect.value==='auto'});buildThemePicker();};
 
-    const danceLabel=document.createElement('label'),danceSelect=document.createElement('select');danceLabel.append(document.createTextNode('Word dance '));danceSelect.setAttribute('aria-label','Word dance');for(const [value,text] of [['off','Off'],['mix','Mix'],['tip','Backward fall'],['flex','Flex'],['bounce','Bounce'],['launch','Launch']]){const option=document.createElement('option');option.value=value;option.textContent=text;danceSelect.append(option);}danceSelect.value=choreography.dance;danceSelect.onchange=()=>{setChoreography({...choreography,dance:danceSelect.value});buildThemePicker();};danceLabel.append(danceSelect);motionControls.append(danceLabel);
+    const danceLabel=document.createElement('label'),danceSelect=document.createElement('select');danceLabel.append(document.createTextNode('Word dance '));danceSelect.setAttribute('aria-label','Word dance');for(const [value,text] of [['off','Off'],['mix','Mix'],['tip','Backward fall'],['flex','Flex'],['bounce','Bounce'],['launch','Launch']]){const option=document.createElement('option');option.value=value;option.textContent=text;danceSelect.append(option);}danceSelect.value=choreography.dance;danceSelect.disabled=choreography.mode==='vinyl';danceSelect.title=choreography.mode==='vinyl'?'Vinyl history uses continuous spiral motion.':'';danceSelect.onchange=()=>{setChoreography({...choreography,dance:danceSelect.value});buildThemePicker();};danceLabel.append(danceSelect);motionControls.append(danceLabel);
     const fillLabel=document.createElement('label'),fillToggle=document.createElement('input');fillToggle.type='checkbox';fillToggle.checked=choreography.fillStage;fillToggle.disabled=choreography.mode!=='puzzle';fillToggle.onchange=()=>{setChoreography({...choreography,fillStage:fillToggle.checked});buildThemePicker();};fillLabel.append(fillToggle,document.createTextNode('Puzzle fills stage'));motionControls.append(fillLabel);
     for(const [key,label,options] of [['arrangement','Puzzle arrangement',[['chaotic','Chaotic'],['ordered','Ordered']]],['origin','Puzzle home corner',[['top-left','Top left'],['top-right','Top right'],['bottom-left','Bottom left'],['bottom-right','Bottom right']]]]){const field=document.createElement('label'),select=document.createElement('select');field.append(document.createTextNode(key==='arrangement'?'Arrangement ':'Home corner '));select.setAttribute('aria-label',label);for(const [value,text] of options){const option=document.createElement('option');option.value=value;option.textContent=text;select.append(option);}select.value=choreography[key];select.disabled=choreography.mode!=='puzzle';select.onchange=()=>{setChoreography({...choreography,[key]:select.value});buildThemePicker();};field.append(select);motionControls.append(field);}
     const bloomLabel=document.createElement('label');bloomLabel.className='lvx-bloom-setting';
@@ -2451,7 +2454,7 @@
   try {
     chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement','lvxBloomEnabled','lvxChoreography','lvxLinger'], (result) => {
       linger=LvBeatTrack.lingerSettings(result?.lvxLinger);
-      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic!==false,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(c.origin)?c.origin:'top-left'};}
+      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic!==false,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(c.origin)?c.origin:'top-left'};}
       bloomEnabled=result?.lvxBloomEnabled!==false;
       if(result?.lvxPlacement)try{applyPlacement(result.lvxPlacement);}catch(error){setHud(error.message,true,true);}
       if (result && result.lvxTheme && THEMES.includes(result.lvxTheme)) {
@@ -3748,7 +3751,7 @@
   }
 
   function renderCaptureScore() {
-    stage.classList.remove('lvx-choreography-stage');
+    stage.classList.remove('lvx-choreography-stage','lvx-vinyl-stage');
     stage.style.removeProperty('padding-top');
     stage.classList.add('lvx-score-stage');
     const phrase=timingPhrase(), take=tapping.take, unit=take.units[take.index];
@@ -3852,10 +3855,26 @@
       }
     });
   }
+
+  function renderVinylScore(score,mediaMs){
+    stage.classList.add('lvx-score-stage','lvx-vinyl-stage');stage.classList.remove('lvx-choreography-stage');stage.style.paddingTop='0px';
+    let canvas=stage.querySelector('.lvx-vinyl-canvas');
+    if(!canvas){stage.replaceChildren();canvas=document.createElement('canvas');canvas.className='lvx-vinyl-canvas';canvas.setAttribute('role','img');canvas.setAttribute('aria-label','Vinyl lyric history: earlier words wind toward the center');stage.append(canvas);state.scoreSignature='vinyl';}
+    const ctx=canvas.getContext('2d'),dpr=Math.min(2,devicePixelRatio||1),rect=stage.getBoundingClientRect(),bar=hud.getBoundingClientRect(),top=bar.top<rect.top+rect.height*.5&&bar.bottom>rect.top?Math.max(0,bar.bottom-rect.top+12):0,bottom=bar.top>=rect.top+rect.height*.5&&bar.top<rect.bottom?rect.bottom-bar.top+12:0,width=Math.max(1,stage.clientWidth),height=Math.max(1,stage.clientHeight-top-bottom),clock=mediaMs-score.offsetMs;canvas.style.marginTop=top+'px';canvas.style.height=height+'px';
+    const pixelW=Math.round(width*dpr),pixelH=Math.round(height*dpr);if(canvas.width!==pixelW||canvas.height!==pixelH){canvas.width=pixelW;canvas.height=pixelH;canvas.__frameKey=null;}
+    if(canvas.__score!==score){ctx.font='800 100px Arial Narrow, Impact, sans-serif';canvas.__track=LvChoreography.vinylTrack(score,text=>ctx.measureText(text).width/100);canvas.__score=score;canvas.__frameKey=null;}
+    const key=[clock,width,height,bloomMotion.matches].join(':');if(canvas.__frameKey===key)return;canvas.__frameKey=key;ctx.setTransform(dpr,0,0,dpr,0,0);
+    const frame=LvChoreography.paintVinyl(ctx,canvas.__track,clock,width,height,{reduced:bloomMotion.matches});canvas.dataset.wordCount=String(frame.words.length);canvas.dataset.glyphCount=String(frame.glyphs.length);canvas.dataset.firstWord=frame.words[0]||'';canvas.dataset.sourceMs=String(mediaMs);canvas.dataset.scoreMs=String(clock);
+    if(canvas.__transcript!==frame.text){canvas.__transcript=frame.text;canvas.setAttribute('aria-label','Sung lyric history: '+(frame.text||'waiting for the first word'));}
+    // Clear a prior DOM layout's beat treatment; the record owns its own geometry.
+    for(const node of beatStyledNodes){node.classList.remove('lvx-beat-target');for(const prop of ['scale','bright','hue'])node.style.removeProperty('--lvx-beat-'+prop);}beatStyledNodes.clear();
+  }
   function renderScore(mediaMs) {
+    stage.classList.remove('lvx-vinyl-stage');
     if (tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete') && timing.draft && !syncPanel.hidden) {renderCaptureScore();return;}
     stage.classList.toggle('lvx-choreography-stage',choreography.mode!=='classic');
     const score = syllableTakeScore() || (timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score);
+    if(choreography.mode==='vinyl'){renderVinylScore(score,mediaMs);return;}
     if(beatDisplayCache.score!==score||beatDisplayCache.map!==tempo.map||beatDisplayCache.linger!==linger){const ends=LvBeatTrack.presentationEnds(score,tempo.map,linger);beatDisplayCache={score,map:tempo.map,linger,ends:ends.phrases,units:ends.units};}
     const active = LvScore.activeAt(score, mediaMs,{displayEnds:beatDisplayCache.ends});
     // Lead-in: an empty lane shows its next phrase dimmed up to 2s early, so a rewind is never a blank screen.
