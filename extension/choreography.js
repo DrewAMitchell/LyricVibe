@@ -64,6 +64,32 @@
     if(cue.direction&&!reduced){const travel=Math.sin(Math.PI*clamp(elapsed/duration))*7*intensity;out.x+=cue.direction[0]*travel;out.y+=cue.direction[1]*travel;out.reason+=(out.reason?' + ':'')+'direction';}
     return out;
   }
+
+  const dances=['tip','flex','bounce','launch'];
+  function danceAt(cue,now,{kind='off',reduced=false,authored=false}={}){
+    const out={kind:'off',x:0,y:0,turn:0,tip:0,flex:0,phase:0,scaleX:1,scaleY:1};
+    if(!cue||now<cue.startMs||reduced||authored||kind==='off')return out;
+    if(kind==='mix'){let hash=0;for(const ch of cue.wordId)hash=(hash*31+ch.charCodeAt(0))>>>0;kind=dances[hash%4];}
+    if(!dances.includes(kind))return out;
+    const u=clamp((now-cue.startMs)/Math.max(1,cue.endMs-cue.startMs)),t=u*4.2;
+    const smooth=x=>{x=clamp(x);return x*x*(3-2*x);};out.kind=kind;
+    if(kind==='tip'){
+      if(t<2.45)out.tip=0;
+      else if(t<2.56)out.tip=-6*Math.sin(Math.PI*(t-2.45)/.11);
+      else if(t<3.04)out.tip=82*smooth((t-2.56)/.48);
+      else {const s=t-3.04;out.tip=s<.6?82-14*Math.exp(-6.5*s)*Math.abs(Math.sin(2*Math.PI*2.2*s)):82;}
+    }else if(kind==='flex'){
+      out.flex=Math.sin(t*4.3)*Math.sin(Math.min(1,t/1.9)*Math.PI)*(1-smooth((t-1.15)/1.4))*.20||0;out.phase=t*3.8;
+    }else if(kind==='bounce'){
+      const flights=[.60,.44,.32,.23,.17],heights=[.62,.34,.19,.10,.05];
+      if(t<.68)out.y=-.78*(1-t/.68)**2;
+      else {let elapsed=t-.68;for(let i=0;i<flights.length;i++){if(elapsed<flights[i]){const p=elapsed/flights[i];out.y=-heights[i]*4*p*(1-p);break;}elapsed-=flights[i];}}
+      if(t>.64&&t<.83){out.scaleY=1-.17*Math.sin(Math.PI*(t-.64)/.19);out.scaleX=1+(1-out.scaleY)*.4;}
+    }else if(kind==='launch'){
+      const p=clamp(t/1.4);out.x=p===1?0:-.9*(1-p);out.y=-1.05*4*p*(1-p);out.turn=(-10+32*p)*Math.sin(Math.PI*p);
+    }
+    return out;
+  }
   function arrival(now,start,lead=500,reduced=false){return reduced?1:1-Math.pow(1-clamp((now-start+lead)/lead),3);}
   function puzzle(words,width,height,measure,{upsideDown,maxFont,weights}){
     const weight=word=>Math.max(.65,Math.min(1.8,weights[word.id]?.weight??1));
@@ -151,5 +177,5 @@
     for(const row of rows){for(const item of row.items)slots[item.index]={...item,x:(width-row.width)/2+item.x+item.boxWidth/2,y:y+row.height/2};y+=row.height+font*.22;}
     return slots;
   }
-  const api={layout,arrival,compose,expressionAt};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
+  const api={layout,arrival,compose,expressionAt,danceAt};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

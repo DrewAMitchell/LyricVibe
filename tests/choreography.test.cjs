@@ -65,3 +65,15 @@ test('ordered puzzle keeps phrase order, emphasis and corner origins without cha
   }
   assert.ok(layout(words,1000,120,measure,{...opts,arrangement:'ordered'}).every(s=>s.angle===0));
 });
+
+const {danceAt}=require('../extension/choreography.js');
+test('dance gestures reconstruct from source time, keep backward fall flat, and respect authored/reduced motion',()=>{
+ const cue={wordId:'word-1',startMs:1000,endMs:5200};
+ for(const kind of ['tip','flex','bounce','launch','mix']){
+  const pose=danceAt(cue,1800,{kind});danceAt(cue,5000,{kind});assert.deepEqual(danceAt(cue,1800,{kind}),pose);
+  assert.equal(danceAt(cue,999,{kind}).kind,'off');assert.equal(danceAt(cue,1800,{kind,reduced:true}).kind,'off');assert.equal(danceAt(cue,1800,{kind,authored:true}).kind,'off');
+ }
+ assert.equal(danceAt(cue,5200,{kind:'tip'}).tip,82);assert.equal(danceAt(cue,9000,{kind:'tip'}).tip,82);
+ assert.equal(danceAt(cue,2400,{kind:'launch'}).x,0);assert.equal(danceAt(cue,5200,{kind:'bounce'}).y,0);
+ assert.notEqual(danceAt(cue,1800,{kind:'flex'}).flex,0);assert.equal(danceAt(cue,5200,{kind:'flex'}).flex,0);
+});

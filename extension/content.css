@@ -2540,3 +2540,6 @@
 #lvx-root .lvx-error-panel button:focus-visible{outline:3px solid #f7cc70;outline-offset:2px}
 #lvx-root .lvx-error-panel footer span{font-size:12px;color:#d2dee7}
 #lvx-root .lvx-sync-notice{white-space:pre-wrap;overflow-wrap:anywhere;user-select:text}
+
+/* Whole-word dance stays separate from timing and syllable emphasis. */
+.lvx-dance-letter{display:inline-block;white-space:pre;transform-origin:50% 80%}
