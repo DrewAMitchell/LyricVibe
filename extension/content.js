@@ -344,15 +344,22 @@
   function backingLabelMode(){return backingLabels[backingLabelKey()]||'hidden';}
   function setBackingLabel(value){const key=backingLabelKey();if(!key)return;backingLabels={...backingLabels,[key]:['header','prefix'].includes(value)?value:'hidden'};state.scoreSignature='';chrome.storage.local.set({lvxBackingLabels:backingLabels}).catch(error=>setHud('Backing names changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
   function setBackingDisplay(value){backingDisplay=LvChoreography.backingSettings(value);state.scoreSignature='';chrome.storage.local.set({lvxBackingDisplay:backingDisplay}).catch(error=>setHud('Backing display changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
-  let choreography={dance:'off',mode:'classic',upsideDown:false,automatic:false,fillStage:true,arrangement:'chaotic',origin:'top-left'},previewPlaying=false,previewFrame=0,previewTime=1600,previewLast=0,previewTheme=state.theme;
+  let choreography={dance:'off',mode:'classic',upsideDown:false,automatic:false,autoFire:false,fillStage:true,arrangement:'chaotic',origin:'top-left'},previewPlaying=false,previewFrame=0,previewTime=1600,previewLast=0,previewTheme=state.theme;
   const choreographyPlans=new WeakMap(),choreographyMeasure=document.createElement('canvas').getContext('2d');
-  function setChoreography(value){choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(value.dance)?value.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic===true,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
+  function setChoreography(value){choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(value.dance)?value.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic===true,autoFire:value.autoFire===true,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
   function previewTick(now){
     if(themePicker.hidden||!previewPlaying||document.hidden){previewFrame=0;previewLast=0;return;}
     if(previewLast)previewTime+=Math.min(now-previewLast,100);previewLast=now;renderStylePreview(true);previewFrame=requestAnimationFrame(previewTick);
   }
+  function wordLook(word){return word.appearance?.look||(choreography.autoFire&&/^fire$/iu.test(word.text.replace(/^[^\p{L}]+|[^\p{L}]+$/gu,''))?'fire':null);}
+  function paintWordTexture(node,word,clock,theme=state.theme){
+    const look=wordLook(word);if(look)node.dataset.look=look;else delete node.dataset.look;
+    const fire=(look||theme)==='fire';node.classList.toggle('lvx-fire-texture',fire);
+    if(fire)node.style.setProperty('--lvx-fire-position',(bloomMotion.matches?50:((clock%2400)/2400)*100).toFixed(2)+'%');
+  }
   function renderStylePreview(activeOnly=false){
-    for(const tile of themePicker.querySelectorAll('.lvx-theme-tile')){
+    const sample=themePicker.querySelector('.lvx-motion-sample');if(sample){sample.dataset.theme=previewTheme;sample.querySelector('.lvx-tile-name').textContent=THEME_LABELS[previewTheme]+(previewTheme===state.theme?' · applied':' · preview');}
+    for(const tile of themePicker.querySelectorAll('.lvx-motion-sample')){
       const selected=tile.dataset.theme===previewTheme;if(activeOnly&&!selected)continue;tile.dataset.previewing=String(selected);
       if(!tile.getClientRects().length)continue;
       const line=tile.querySelector('.lvx-tile-line'),words=[...line.children].map((n,i)=>{const parts=[...n.querySelectorAll('[data-syllable]')];return {id:'preview-'+i,text:n.textContent,startMs:500+i*450,endMs:950+i*450,syllables:parts.map((part,j)=>({id:part.dataset.syllable,text:part.textContent,startMs:500+i*450+j*450/parts.length,endMs:500+i*450+(j+1)*450/parts.length}))};});
@@ -360,6 +367,7 @@
         line.hidden=true;const box=tile.querySelector('.lvx-tile-stage');let canvas=box.querySelector('canvas');if(!canvas){canvas=document.createElement('canvas');canvas.className='lvx-vinyl-tile';box.append(canvas);}const width=Math.max(1,box.clientWidth),height=Math.max(1,box.clientHeight),ctx=canvas.getContext('2d');if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height;}if(!canvas.__track){ctx.font='800 100px Arial Narrow, Impact, sans-serif';canvas.__track=LvChoreography.vinylTrack({phrases:[{id:'preview',words}]},text=>ctx.measureText(text).width/100);}LvChoreography.paintVinyl(ctx,canvas.__track,selected?previewTime%(words.length*450+1600):words.length*450+700,width,height,{reduced:bloomMotion.matches});continue;
       }
       const clock=selected?previewTime%(words.length*450+1600):words.length*450+700;
+      words.forEach((word,i)=>paintWordTexture(line.children[i],word,clock,tile.dataset.theme));
       choreographLine(line,words,clock,tile.querySelector('.lvx-tile-stage').clientWidth-16,Math.max(80,tile.querySelector('.lvx-tile-stage').clientHeight-16),14);
       if(typeof LvChoreography!=='undefined')expressLine(line,words,clock,LvChoreography.compose({source:{durationMs:words.length*450+1800},phrases:[{id:'preview',laneId:'lead',words}]}));
     }
@@ -443,7 +451,7 @@
     themePicker.dataset.motion=choreography.mode;setPreviewPlaying(previewPlaying);
   }
   function organizeStyleStudio({heading,performanceControls,motionControls,danceLabel,bloomLabel,lingerControls,settings,grid}){
-    heading.className='lvx-studio-heading';heading.innerHTML='<div><small>LYRICVIBE / DISPLAY</small><h2>Set the stage.</h2></div><button type="button" aria-label="Close display studio">✕</button>';
+    heading.className='lvx-studio-heading';heading.innerHTML='<div><small>LYRICVIBE</small><h2>Display style</h2></div><button type="button" aria-label="Close display studio">✕</button>';
     heading.querySelector('button').onclick=()=>{toggleThemePicker(false);themeButton.focus();};
     const tabs=document.createElement('div');tabs.className='lvx-studio-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Display studio');
     const panels={};
@@ -453,13 +461,9 @@
       tab.onclick=()=>{studio.view=id;show();};
     }
     tabs.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;const buttons=[...tabs.children],at=buttons.indexOf(document.activeElement);if(at<0)return;event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?buttons.length-1:(at+(event.key==='ArrowRight'?1:-1)+buttons.length)%buttons.length;buttons[next].click();buttons[next].focus();};
-    const caption=document.createElement('p');caption.className='lvx-studio-caption';caption.textContent='Your lyrics, in a different light. Choose a look to apply it.';
-    const pager=document.createElement('div');pager.className='lvx-studio-pager';pager.innerHTML='<button type="button" aria-label="Previous looks">←</button><span role="status"></span><button type="button" aria-label="Next looks">→</button>';
-    const tiles=[...grid.children],pageSize=window.innerWidth<=680?4:6,total=Math.ceil(tiles.length/pageSize);
-    studio.page=clamp(studio.page,0,total-1);
-    function pageLooks(){tiles.forEach((tile,i)=>tile.hidden=Math.floor(i/pageSize)!==studio.page);pager.querySelector('span').textContent=`Looks ${studio.page*pageSize+1}–${Math.min(tiles.length,(studio.page+1)*pageSize)} of ${tiles.length}`;pager.firstElementChild.disabled=studio.page===0;pager.lastElementChild.disabled=studio.page===total-1;const visible=tiles.filter(t=>!t.hidden);if(!visible.some(t=>t.dataset.theme===previewTheme))previewTheme=visible[0].dataset.theme;renderStylePreview();}
-    pager.firstElementChild.onclick=()=>{studio.page--;pageLooks();};pager.lastElementChild.onclick=()=>{studio.page++;pageLooks();};
-    panels.look.append(caption,grid,pager);
+    const caption=document.createElement('p');caption.className='lvx-studio-caption';caption.textContent='Hover to preview · click to apply.';
+    const tiles=[...grid.children];
+    panels.look.append(caption,grid);
     const layout=motionControls.querySelector('label'),upside=motionControls.querySelectorAll('label')[1],expression=motionControls.querySelector('[aria-label="Automatic lyric expression"]').closest('label'),play=motionControls.querySelector('[data-preview-play]');
     const puzzleOptions=[...motionControls.querySelectorAll('label')].filter(label=>label.querySelector('[aria-label="Puzzle arrangement"],[aria-label="Puzzle home corner"]'));
     const layoutRow=document.createElement('div');layoutRow.className='lvx-studio-layout';layoutRow.append(layout);if(choreography.mode==='puzzle')layoutRow.append(...puzzleOptions,upside);
@@ -467,22 +471,23 @@
     effects.querySelector('.lvx-effects-settings').append(expression,danceLabel);effects.ontoggle=()=>{if(effects.isConnected)studio.effectsOpen=effects.open;};
     const tip=danceLabel.querySelector('option[value=tip]');if(tip)tip.textContent='Topple · backward fall';
     const sample=tiles.find(t=>t.dataset.theme===state.theme).cloneNode(true);sample.removeAttribute('aria-pressed');sample.removeAttribute('type');sample.setAttribute('aria-label','Current lyric motion preview');sample.classList.add('lvx-motion-sample');sample.onclick=()=>setPreviewPlaying(!previewPlaying);
-    sample.querySelector('.lvx-tile-name').textContent='CURRENT LOOK · '+THEME_LABELS[state.theme];sample.onfocus=sample.onpointerenter=()=>{previewTheme=state.theme;renderStylePreview();};
-    panels.motion.append(layoutRow,sample,effects);
+    sample.querySelector('.lvx-tile-name').textContent='CURRENT LOOK · '+THEME_LABELS[state.theme];
+    panels.motion.append(layoutRow,effects);
+    const fireLabel=document.createElement('label');fireLabel.className='lvx-auto-fire';fireLabel.innerHTML='<input type="checkbox" aria-label="Automatic fire words"> Fire texture on the word “fire”';fireLabel.querySelector('input').checked=choreography.autoFire;fireLabel.querySelector('input').onchange=event=>{setChoreography({...choreography,autoFire:event.target.checked});renderStylePreview();};panels.look.append(fireLabel);
     motionControls.remove();
     settings.open=studio.areaOpen;settings.ontoggle=()=>{if(!settings.isConnected)return;studio.areaOpen=settings.open;if(settings.open){exits.open=false;studio.exitOpen=false;}};
     const exits=document.createElement('details');exits.className='lvx-studio-exits';exits.open=studio.exitOpen;exits.innerHTML='<summary>Phrase exits <span>When the singing stops</span></summary>';exits.append(lingerControls);exits.ontoggle=()=>{if(!exits.isConnected)return;studio.exitOpen=exits.open;if(exits.open){settings.open=false;studio.areaOpen=false;}};
     performanceControls.querySelector('p').textContent='Drag to place lyrics. Long phrases shrink to fit.';
-    const backing=document.createElement('section');backing.className='lvx-backing-controls';
-    backing.innerHTML='<h3>Backing vocals</h3><label>Space <select aria-label="Backing vocal space"><option value="separate">Separate area</option><option value="shared">Share main area</option></select></label><label>Area limit <input aria-label="Backing area limit" type="range" min="15" max="40" step="1"><output></output></label><p>All backing parts share this limit. Smaller, plain text at 65% opacity. Drawn Stage Edit regions take priority.</p>';
+    const backing=document.createElement('details');backing.className='lvx-backing-controls';
+    backing.innerHTML='<summary>Backing vocals <span>Area · part names</span></summary><label>Space <select aria-label="Backing vocal space"><option value="separate">Separate area</option><option value="shared">Share main area</option></select></label><label>Area limit <input aria-label="Backing area limit" type="range" min="15" max="40" step="1"><output></output></label><p>All backing parts share this limit. Smaller, plain text at 65% opacity. Drawn Stage Edit regions take priority.</p>';
     const backingSpace=backing.querySelector('select'),backingArea=backing.querySelector('input'),backingValue=backing.querySelector('output');backingSpace.value=backingDisplay.space;backingArea.value=String(Math.round(backingDisplay.area*100));backingValue.textContent=backingArea.value+'%';
     const labels=document.createElement('label');labels.innerHTML='Part names · this song <select aria-label="Backing part names"><option value="hidden">Hidden</option><option value="header">Header</option><option value="prefix">Prefix</option></select>';const labelSelect=labels.querySelector('select');labelSelect.value=backingLabelMode();labelSelect.disabled=!backingLabelKey();labelSelect.onchange=()=>setBackingLabel(labelSelect.value);backing.insertBefore(labels,backing.querySelector('p'));
     backingSpace.onchange=()=>setBackingDisplay({...backingDisplay,space:backingSpace.value});backingArea.oninput=()=>{backingValue.textContent=backingArea.value+'%';setBackingDisplay({...backingDisplay,area:Number(backingArea.value)/100});};
     panels.stage.append(performanceControls,backing,settings,exits);
     const footer=document.createElement('footer');footer.className='lvx-studio-footer';const current=document.createElement('span');current.className='lvx-studio-current';current.textContent=THEME_LABELS[state.theme]+' · applied';footer.append(current,play,bloomLabel);
-    themePicker.replaceChildren(heading,tabs,...Object.values(panels),footer);
-    function show(){for(const [id,panel]of Object.entries(panels)){panel.hidden=id!==studio.view;const tab=tabs.querySelector(`[data-studio-tab="${id}"]`);tab.setAttribute('aria-selected',String(!panel.hidden));tab.tabIndex=panel.hidden?-1:0;}previewTheme=studio.view==='motion'?state.theme:previewTheme;renderStylePreview();}
-    pageLooks();show();
+    themePicker.replaceChildren(heading,tabs,sample,...Object.values(panels),footer);
+    function show(){for(const [id,panel]of Object.entries(panels)){panel.hidden=id!==studio.view;const tab=tabs.querySelector(`[data-studio-tab="${id}"]`);tab.setAttribute('aria-selected',String(!panel.hidden));tab.tabIndex=panel.hidden?-1:0;}sample.hidden=studio.view==='stage';previewTheme=studio.view==='motion'?state.theme:previewTheme;renderStylePreview();}
+    show();
   }
   function toggleThemePicker(force) {
     const open = force ?? themePicker.hidden;
@@ -495,6 +500,21 @@
   function syncPlacementFields(){for(const input of themePicker.querySelectorAll('[data-placement]'))if(document.activeElement!==input)input.value=String(Math.round(placement[input.dataset.placement]*10)/10);}
   themePicker.addEventListener('keydown', event => { if (event.key === 'Escape') { event.stopPropagation(); toggleThemePicker(false); themeButton.focus(); } });
   document.addEventListener('pointerdown', event => { if (!themePicker.hidden && !themePicker.contains(event.target) && !bounds.contains(event.target) && event.target !== themeButton) toggleThemePicker(false); }, true);
+
+  const recordingTransport=document.createElement('div');recordingTransport.className='lvx-recording-playback';recordingTransport.hidden=true;recordingTransport.setAttribute('aria-label','Recording playback');
+  recordingTransport.innerHTML='<label>Speed <select aria-label="Recording playback speed">'+[.25,.5,.75,1,1.25,1.5,1.75,2].map(rate=>`<option value="${rate}">${rate}×</option>`).join('')+'</select></label><button type="button" data-record-restart>↶ Restart playback</button><button type="button" data-record-forward>Next lead-in →</button>';
+  recordingTransport.querySelector('select').onchange=event=>setPlaybackSpeed(Number(event.target.value));
+  recordingTransport.querySelector('[data-record-restart]').onclick=()=>rewindCapturePhrase(true);
+  recordingTransport.querySelector('[data-record-forward]').onclick=()=>jumpCaptureLeadIn();viewport.append(recordingTransport);
+  function refreshRecordingTransport(){
+    const take=tapping.take,visible=Boolean(timing.draft&&!syncPanel.hidden&&(countIn.previewTake||take&&['armed','complete'].includes(take.status)));
+    recordingTransport.hidden=!visible;if(!visible)return;
+    const blocked=timing.busy||countIn.active||countIn.preparing||!take||take.pendingStartMs!==null||isAdvertisement()||youtubeMediaState()?.clockUsable===false;
+    recordingTransport.querySelector('select').disabled=blocked;
+    recordingTransport.querySelector('[data-record-restart]').disabled=blocked;
+    const now=getMediaTimeMs()-timingOffsetMs(),target=captureTarget(now);
+    recordingTransport.querySelector('[data-record-forward]').disabled=blocked||take?.status!=='armed'||!target||target.startMs<=now;
+  }
 
   /* Next-line preview (bottom center) */
   const preview = document.createElement('div');
@@ -571,12 +591,12 @@
     <details class="lvx-tempo-panel"><summary>Beat clicker <span>T · tap the beat</span></summary><div class="lvx-clicker-controls"><button data-sync="tempo-tap">Tap · T</button><button data-sync="tempo-downbeat">Beat 1 here</button><label>BPM<input data-sync="tempo-bpm" type="number" min="20" max="400" step="1" value="120"></label><button data-sync="tempo-save">Set BPM</button><label class="lvx-sync-loop"><input type="checkbox" data-sync="tempo-click"> Click</label><button data-sync="tempo-sections">Sections ↗</button></div><p class="lvx-sync-hint">First tap sets beat 1. Keep tapping to fit BPM, or type an exact integer.</p><p class="lvx-tempo-status" role="status"></p><button data-sync="tempo-undo">↶ Undo tempo</button></details>
     <details class="lvx-tap-panel"><summary>Record by ear <span>phrase → syllables · words optional</span></summary>
       <div class="lvx-capture-phases" role="group" aria-label="Syncing phase"><button data-phase="phrase">1 · Phrases</button><button data-phase="syllable">2 · Syllables</button><button data-phase="word">Words · optional</button></div>
-      <div class="lvx-record-choices"><label><input type="checkbox" data-sync="record-repeat"> Repeat recording</label><label><input type="checkbox" data-sync="enable-words"> Enable Words · tricky phrases</label><small data-sync="record-repeat-hint"></small></div>
+      <div class="lvx-record-choices"><label><input type="checkbox" data-sync="record-repeat"> Repeat recording</label><small data-sync="record-repeat-hint"></small></div>
       <p class="lvx-sync-hint">Hold Space while each word is sung. On the next pass, tap at syllable changes inside its saved boundaries.</p>
       <div class="lvx-perform-cue"><small>READY</small><strong class="lvx-perform-phrase"></strong><div class="lvx-upcoming-phrases" aria-label="Upcoming lyrics"></div><span class="lvx-perform-instruction">Then start performing</span><p class="lvx-estimated-phrase" aria-live="off"></p><p class="lvx-cue-legend">Blue follows your recording cue</p><div class="lvx-live-recovery" hidden><button data-sync="tap-back">← Back one</button><button data-sync="tap-skip">Skip one →</button><button data-sync="tap-reassign-back">Last tap ← word</button><button data-sync="tap-reassign-next">Last tap → word</button><small>Left / Right moves the cue; Ctrl + Left / Right reassigns the last tap. The song keeps playing.</small></div></div>
       <label class="lvx-practice-speed">YouTube practice speed <select data-sync="tap-speed" aria-label="Practice playback speed"><option value="0.5">½× · Half speed</option><option value="0.25">¼× · Quarter speed</option><option value="0.75">¾× · Slower</option><option value="1">1× · Normal</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
       <label class="lvx-syllable-flow">Syllable pass <select data-sync="tap-syllable-flow"><option value="holds">Hold syllables · beginning and end</option><option value="events">Tap freely · assign afterward</option><option value="words">Word pass · hold each word over your syllable taps</option><option value="phrase-stream">Suggested word cursor · legacy</option><option value="continuous">Fixed word frames · optional</option><option value="phrase">Phrase practice · prepared spelling</option></select></label>
-      <div class="lvx-other-parts"><label><input type="checkbox" data-sync="record-other-parts"> Record other parts</label><small data-sync="other-parts-hint"></small></div><div class="lvx-tap-actions lvx-perform-actions"><button data-sync="tap-arm">▶ Start take</button><button data-sync="tap-stop">■ Stop</button><button data-sync="capture-rewind" title="Rewind 5 seconds, including before the transcript (Shift+←)">↶ 5s</button><button data-sync="capture-forward" title="Jump to the next lead-in without skipping a lyric (Shift+→)">⏩ Next lead-in</button><button data-sync="retime-flag" title="Flag the phrase you just performed for retiming (F)">⚑ Flag phrase · F</button><button data-sync="tap-mark">Next lyric · Space</button><button data-sync="tap-release">Release · Enter</button></div>
+      <div class="lvx-other-parts"><label><input type="checkbox" data-sync="record-other-parts"> Record other parts</label><small data-sync="other-parts-hint"></small></div><div class="lvx-tap-actions lvx-perform-actions"><button data-sync="tap-arm">▶ Start take</button><button data-sync="tap-stop">■ Stop</button><button data-sync="capture-restart" title="Replay this phrase from its lead-in; keep recorded timing">↶ Restart playback</button><button data-sync="capture-forward" title="Jump to the next lead-in without skipping a lyric (Shift+→)">⏩ Next lead-in</button><button data-sync="retime-flag" title="Flag the phrase you just performed for retiming (F)">⚑ Flag phrase · F</button><button data-sync="tap-mark">Next lyric · Space</button><button data-sync="tap-release">Release · Enter</button></div>
       <div class="lvx-tap-words" hidden aria-hidden="true"></div>
       <section class="lvx-phrase-syllables" hidden aria-label="Phrase syllable spelling"><details><summary>Syllable spelling <span>Edit cuts with |</span></summary><p class="lvx-sync-hint">One Space press per syllable entrance. Dictionary suggestions guide spelling, not audio alignment.</p><div class="lvx-phrase-syllable-fields"></div><button data-sync="phrase-suggest">Suggest phrase syllables</button></details><p class="lvx-phrase-syllable-hint" role="status"></p></section>
       <div class="lvx-tap-actions lvx-syllable-review" hidden><button data-sync="syllable-retake">↻ Retake phrase</button><button data-sync="syllable-hear">▶ Hear this take</button><button data-sync="syllable-next">✓ Keep phrase & next</button></div>
@@ -907,7 +927,7 @@
     const rate=media?.playbackRate;if(!Number.isFinite(rate)||rate<=0||!newSource&&rate===observedRate)return;
     if(ratePreferenceLoaded&&(!newSource||preferredRate===null))persistPlaybackRate(rate);
     observedRate=rate;observedRateMedia=media;observedRateSource=source;state.playbackRate=rate;
-    for(const select of [speedSelect,syncButton('tap-speed')]){if(![...select.options].some(o=>Number(o.value)===rate)){const o=document.createElement('option');o.value=String(rate);o.textContent=rate+'×';select.append(o);}select.value=String(rate);}
+    for(const select of [speedSelect,syncButton('tap-speed'),recordingTransport.querySelector('select')]){if(![...select.options].some(o=>Number(o.value)===rate)){const o=document.createElement('option');o.value=String(rate);o.textContent=rate+'×';select.append(o);}select.value=String(rate);}
     for(const button of speedGroup.querySelectorAll('[data-playback-rate]'))button.setAttribute('aria-pressed',String(Number(button.dataset.playbackRate)===rate));
     if(tapping.take?.status==='armed')tapping.rate=rate;
     if(performanceTake.armed)performanceTake.rate=rate;
@@ -1113,9 +1133,6 @@
     refreshCompletion();
     refreshOtherParts();
     const word = tapWord(), take = tapping.take, mode = syncButton('tap-mode').value;
-    syncPanel.querySelector('[data-phase=word]').hidden=!syncButton('enable-words').checked&&mode!=='word';
-    syncPanel.querySelector('[data-phase=word]').textContent='Words · tricky phrases';
-    syncButton('enable-words').disabled=timing.busy||tapPending()||tapping.splitDirty;
     syncButton('record-repeat').disabled=timing.busy;
     syncButton('record-repeat-hint').textContent=syncButton('record-repeat').checked?(partRun?'Repeats this phrase and its backing parts. Stop ends repeat.':'Repeats this phrase. Existing timing stays until you record over it; Stop ends repeat.') : '';
     const sourceMatches=!!timing.draft&&LvScore.mediaKey(timing.draft.score.source)===LvScore.mediaKey({url:location.href});
@@ -1214,7 +1231,7 @@
     syncButton('tap-back').disabled=timing.busy||!take;
     syncButton('tap-back').textContent='← Restart phrase';
     syncButton('tap-skip').hidden=eventTake(take);
-    syncButton('capture-rewind').disabled=timing.busy||!getMedia();
+    syncButton('capture-restart').disabled=timing.busy||!getMedia()||!tapping.take||tapping.take.pendingStartMs!==null;
     syncButton('tap-skip').disabled=timing.busy||!take||take.index>=take.units.length-1;
     if(eventPass()){
       syncPanel.querySelector('.lvx-tap-panel > .lvx-sync-hint').textContent='Tap Space for every syllable you hear. Each press is a point cue, not a measured beginning or end. Group and review after Stop, or choose holds to capture durations.';
@@ -1375,6 +1392,7 @@
     }
   }
   function refreshCapturePlayback(now) {
+    refreshRecordingTransport();
     refreshMainReference(now);
     for(const span of root.querySelectorAll('.lvx-context-word,.lvx-capture-transcript [data-unit],.lvx-guide-syllable,.lvx-tap-blocks button')){
       const playing=!span.querySelector('.lvx-guide-syllable')&&now>=Number(span.dataset.start)&&now<Number(span.dataset.end);
@@ -1434,8 +1452,8 @@
   function captureGuidanceText() {
     const take=tapping.take,mode=syncButton('tap-mode').value;
     if(!take||take.status!=='armed')return 'Start a take · Space records · playback is your preview';
-    if(eventTake(take))return 'Tap Space at each syllable · ← rewind one · Shift+← rewind 5s · F flag · Shift+→ next lead-in';
-    return `Hold Space while the ${take.mode==='phrase'?'phrase':'word'} is sung · ← back · → skip · F flag · Shift+→ jump ahead`;
+    if(eventTake(take))return 'Tap Space at each syllable · ← rewind one · Shift+← rewind 5s · Shift+→ next lead-in';
+    return `Hold Space while the ${take.mode==='phrase'?'phrase':'word'} is sung · ← back · → skip · Shift+→ jump ahead`;
   }
   let captureLastInput=performance.now();
   function noteCaptureInput(){captureLastInput=performance.now();for(const e of root.querySelectorAll('.lvx-idle-hint'))e.style.visibility='hidden';}
@@ -1457,7 +1475,7 @@
       let meta=host.querySelector('.lvx-capture-meta');
       if(!meta){meta=document.createElement('div');meta.className='lvx-capture-meta';meta.innerHTML='<span class="lvx-capture-flag"></span><span class="lvx-capture-receipt"></span>';host.prepend(meta);}
       const warning=meta.querySelector('.lvx-capture-flag'),receipt=meta.querySelector('.lvx-capture-receipt');
-      visible(warning,Boolean(frame.flagged));text(warning,'Flagged last pass');
+      visible(warning,false);text(warning,'Flagged last pass');
       visible(receipt,recorded.phraseRecorded);text(receipt,recorded.phraseRecorded?(eventTake(take)?recorded.eventCount+(syllableHold(take)?' syllables held':' entrances captured'):take.mode==='phrase'?'Phrase captured':recorded.wordIds.length+' words captured'):'');
       meta.hidden=take?.status!=='armed'&&!frame.flagged&&!recorded.phraseRecorded;
       let countdown=host.querySelector('.lvx-capture-countdown');
@@ -1465,7 +1483,7 @@
       const counting=remaining&&remaining.remainingMs>0;visible(countdown,Boolean(counting));
       countdown.hidden=take?.status!=='armed'&&!counting;
       if(counting){text(countdown.querySelector('span'),'Starts in '+(remaining.remainingMs/1000).toFixed(1)+'s');countdown.querySelector('i').style.transform='scaleX('+(1-remaining.progress)+')';}
-      if(host===cue){let hint=host.querySelector('.lvx-idle-hint');if(!hint){hint=document.createElement('p');hint.className='lvx-idle-hint';host.append(hint);}visible(hint,idle);text(hint,eventTake(take)?'Space: tap · ← back · Shift+← 5s':'Space: hold · ← back · → skip · F flag');hint.title=captureGuidanceText();}
+      if(host===cue){let hint=host.querySelector('.lvx-idle-hint');if(!hint){hint=document.createElement('p');hint.className='lvx-idle-hint';host.append(hint);}visible(hint,idle);text(hint,eventTake(take)?'Space: tap · ← back · Shift+← 5s':'Space: hold · ← back · → skip');hint.title=captureGuidanceText();}
     }
     const forward=syncButton('capture-forward');forward.hidden=!take||take.status!=='armed';
     forward.disabled=timing.busy||!take||take.status!=='armed'||take.pendingStartMs!==null||!target||target.startMs<=now;
@@ -1853,19 +1871,20 @@
     const first=capturePhraseUnits(take,phrase)[0];
     return first&&(wordTake(take)||take.mode==='word'||take.mode==='phrase')?takeUnitStart(take,first.index):phrase.startMs+timingOffsetMs();
   }
-  function rewindCapturePhrase() {
-    let take=tapping.take;if(!take||timing.busy)return;
+  function rewindCapturePhrase(restartOnly=false) {
+    let take=tapping.take;if(!take||timing.busy||restartOnly===true&&(take.pendingStartMs!==null||tapping.binding!==tapBinding()||isAdvertisement()||youtubeMediaState()?.clockUsable===false))return;
     take=completePhraseScope(take);tapping.take=take;
     const lane=timing.draft.score.phrases.filter(p=>p.laneId===timingPhrase()?.laneId&&capturePhraseUnits(take,p).length);
     if(!lane.length)return;
-    const repeated=tapping.rewindPhraseId&&tapping.backAnchorMs!==null&&getMediaTimeMs()<tapping.backAnchorMs+1000;
+    const repeated=restartOnly!==true&&tapping.rewindPhraseId&&tapping.backAnchorMs!==null&&getMediaTimeMs()<tapping.backAnchorMs+1000;
     const selected=lane.findIndex(p=>p.id===(repeated?tapping.rewindPhraseId:timingPhrase()?.id));
     const phrase=lane[Math.max(0,selected-(repeated?1:0))],first=capturePhraseUnits(take,phrase)[0];
     const anchor=capturePhraseStart(take,phrase);
     listenToTake();tapping.take={...tapping.take,index:first.index,status:'armed'};
     timing.phraseIndex=timing.draft.score.phrases.indexOf(phrase);tapping.wordId=first.unit.wordId;tapping.backPhraseId=phrase.id;tapping.rewindPhraseId=phrase.id;
     seekCapture(anchor-800,anchor,first.index);refreshTimingPanel();
-    setSyncNotice('Phrase start selected. Record from its first word or syllable; existing timing stays until your next press. Back again goes to the previous phrase.');
+    if(restartOnly===true){const media=getMedia();if(media)void media.play().catch(error=>setSyncNotice('Press Play to restart: '+error.message));}
+    setSyncNotice(restartOnly===true?'Replaying this phrase. Recorded timing stays until you press to re-record.':'Phrase start selected. Record from its first word or syllable; existing timing stays until your next press. Back again goes to the previous phrase.');
   }
   function markTapTime(event = {}) {
     let take = tapping.take; const media = getMedia();
@@ -2256,7 +2275,6 @@
   }
   for (const name of ['tap-mode','tap-cadence','tap-scope','tap-syllable-flow']) syncButton(name).addEventListener('change',()=>{if(name==='tap-mode'){tapping.syllableStartKey=null;if(syncButton(name).value==='syllable')syncButton('loop').checked=false;}refreshTapPanel();});
   syncButton('record-repeat').addEventListener('change',()=>{if(syncButton('record-repeat').checked&&tapping.take)tapping.take.repeatRange=recordingRepeatRange(tapping.take,timingPhrase());refreshTapPanel();});
-  syncButton('enable-words').addEventListener('change',()=>{syncButton('tap-mode').value=syncButton('enable-words').checked?'word':'phrase';if(syncButton('enable-words').checked)syncButton('tap-scope').value='phrase';refreshTimingPanel();});
   for (const button of syncPanel.querySelectorAll('[data-phase]')) button.addEventListener('click',()=>{
     if (timing.busy || tapPending() || tapping.splitDirty) return;
     if(syncButton('tap-mode').value!==button.dataset.phase)tapping.syllableStartKey=null;
@@ -2271,7 +2289,7 @@
   });
   syncButton('tap-snap').addEventListener('change', refreshTapPanel);
   syncButton('capture-forward').addEventListener('click',jumpCaptureLeadIn);
-  syncButton('capture-rewind').addEventListener('click',()=>seekCapture(getMediaTimeMs()-5000));
+  syncButton('capture-restart').addEventListener('click',()=>rewindCapturePhrase(true));
   syncButton('tap-arm').addEventListener('click', armTapTake);
   syncButton('tap-mark').addEventListener('click', event => { if (!holdCapture()) markTapTime(event); });
   syncButton('tap-mark').addEventListener('pointerdown', event => {
@@ -2661,13 +2679,13 @@
     for(const [section,id]of [[capture,'record'],[effects,'effects'],[beat,'beat']]){section.open=true;section.classList.add('lvx-workspace-section');panes[id].append(section);}
     // Primary capture actions stay above the cue at every viewport height.
     capture.querySelector('.lvx-perform-cue').before(capture.querySelector('.lvx-record-choices'),capture.querySelector('.lvx-other-parts'),capture.querySelector('.lvx-perform-actions'));
-    const transport=document.createElement('div');transport.className='lvx-capture-transport';transport.append(syncButton('capture-rewind'),syncButton('capture-forward'),syncButton('retime-flag'));capture.querySelector('.lvx-perform-actions').after(transport);
+    const transport=document.createElement('div');transport.className='lvx-capture-transport';transport.append(syncButton('capture-restart'),syncButton('capture-forward'));capture.querySelector('.lvx-perform-actions').after(transport);
     const gap=document.createElement('details');gap.className='lvx-effect-gap';gap.innerHTML='<summary>Phrase exit <span>Override this phrase</span></summary>';
     const gapHint=syncButton('gap-default').nextElementSibling;
     gap.append(syncButton('gap-beats').closest('label'),syncButton('gap-use'),syncButton('gap-default'),gapHint);effects.append(gap);
     const exact=syncText.closest('details');exact.querySelector('summary').firstChild.nodeValue='Exact word timings ';panes.review.append(exact);
     for(const selector of ['.lvx-event-review','.lvx-mark-correction','.lvx-tap-timeline','.lvx-syllable-review'])panes.review.append(syncPanel.querySelector(selector));
-    const reviewActions=document.createElement('div');reviewActions.className='lvx-review-actions';reviewActions.append(syncButton('events-restore'),syncButton('transcript-open'),syncButton('light-editor'));panes.review.prepend(reviewActions);
+    const reviewActions=document.createElement('div');reviewActions.className='lvx-review-actions';reviewActions.append(syncButton('events-restore'),syncButton('transcript-open'),syncButton('light-editor'));panes.review.prepend(reviewActions);reviewActions.append(syncButton('retime-flag'));syncButton('retime-flag').textContent='Flag for later';
     syncPanel.querySelector('footer').before(syncPanel.querySelector('.lvx-transcript-editor'));
     const takeActions=syncButton('tap-use').parentElement;panes.review.append(takeActions);
     const reviewHint=document.createElement('p');reviewHint.className='lvx-studio-note';reviewHint.textContent='Review the last recording, correct a mark or open the full editor. Your take and preview stay intact when you switch views.';panes.review.prepend(reviewHint);
@@ -2800,7 +2818,7 @@
       backingLabels=Object.fromEntries(Object.entries(result?.lvxBackingLabels||{}).filter(([key,value])=>['hidden','header','prefix'].includes(value)));
       syncButton('record-other-parts').checked=result?.lvxRecordOtherParts===true;
       linger=LvBeatTrack.lingerSettings(result?.lvxLinger);
-      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic===true,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(c.origin)?c.origin:'top-left'};}
+      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic===true,autoFire:c.autoFire===true,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(c.origin)?c.origin:'top-left'};}
       bloomEnabled=result?.lvxBloomEnabled!==false;
       if(result?.lvxPlacement)try{applyPlacement(result.lvxPlacement);}catch(error){setHud(error.message,true,true);}
       if (result && result.lvxTheme && THEMES.includes(result.lvxTheme)) {
@@ -4172,7 +4190,7 @@
       if(value.color){node.dataset.expressionColor='true';node.style.setProperty('--lvx-expression-color',value.color);}else{delete node.dataset.expressionColor;node.style.removeProperty('--lvx-expression-color');}
     };
     words.forEach((word,i)=>{
-      const node=line.children[i],cue=cues[word.id];if(!node||!cue)return;
+      const node=line.children[i],cue=cues[word.id];if(!node)return;paintWordTexture(node,word,clock);if(!cue)return;
       const parts=[...node.querySelectorAll('[data-syllable]')],authored=word.effects?.length||word.syllables?.some(s=>s.effects?.length)||node.closest('.lvx-beat-target')||node.querySelector('.lvx-beat-target');
       const automatic=settings.automatic&&!authored&&word.appearance?.motion===undefined;
       paint(node,parts.length?{...cue,sustained:[]}:cue,word.effects||[],automatic,!authored,true,word.appearance?.motion);
@@ -4221,6 +4239,7 @@
     for(const node of beatStyledNodes){node.classList.remove('lvx-beat-target');for(const prop of ['scale','bright','hue'])node.style.removeProperty('--lvx-beat-'+prop);}beatStyledNodes.clear();
   }
   function renderScore(mediaMs) {
+    refreshRecordingTransport();
     stage.classList.remove('lvx-vinyl-stage');
     if ((countIn.previewTake||tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete')) && timing.draft && !syncPanel.hidden) {renderCaptureScore();return;}
     stage.classList.add('lvx-choreography-stage');
@@ -4261,7 +4280,7 @@
           const span = document.createElement('span');
           span.className = 'lvx-score-word';
           span.dataset.word = word.id;
-          if(word.appearance?.look)span.dataset.look=word.appearance.look;
+          const look=wordLook(word);if(look)span.dataset.look=look;
           if (word.displayMode!=='whole' && word.syllables?.length && (!word.spokenText||word.spokenText===word.text)) {
             for (const syllable of word.syllables) {
               const part = document.createElement('span');
@@ -4767,7 +4786,7 @@
       if(event.type==='keydown'&&!event.repeat)void tapTempo();
       return;
     }
-    if((event.key==='f'||event.key==='F')&&!inputTarget&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&timing.draft){
+    if((event.key==='f'||event.key==='F')&&!inputTarget&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&timing.draft&&timingWorkspace.view==='review'){
       event.preventDefault();event.stopImmediatePropagation();
       if(event.type==='keydown'&&!event.repeat)void flagPhraseForRetime();
       return;
