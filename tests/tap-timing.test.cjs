@@ -1312,7 +1312,7 @@ test('reopening word-hold recordings preserves holds and syllable releases and r
 
 test('other-part itinerary groups arbitrary named lanes and keeps uninterrupted main runs', () => {
   const phrase=(id,laneId,startMs,endMs,excluded=false)=>({id,laneId,startMs,endMs,words:[{id:id+'w',excluded}]});
-  const score={lanes:[{id:'main',label:'Solo'},{id:'harmony',label:'High harmony'},{id:'reply',label:'Crowd'}],phrases:[
+  const score={lanes:[{id:'main',role:'lead',label:'Solo'},{id:'harmony',role:'backing',label:'High harmony'},{id:'reply',role:'backing',label:'Crowd'}],phrases:[
     phrase('a','main',1000,3000),phrase('b','main',5000,7000),phrase('c','main',9000,11000),
     phrase('h1','harmony',2000,2800),phrase('h2','harmony',2800,3300),phrase('r','reply',3000,4000),
     phrase('hidden','reply',2000,3000,true),phrase('intro','reply',0,500)]};
@@ -1321,13 +1321,16 @@ test('other-part itinerary groups arbitrary named lanes and keeps uninterrupted 
   assert.deepEqual(steps.map(s=>s.label),['Solo','High harmony','Crowd','Solo']);
   assert.deepEqual(steps.map(s=>s.anchorId),['a','a','a','b']);
   assert.equal(JSON.stringify(score),before,'planning cannot retime or relabel a score');
+  assert.deepEqual(tap.planOtherParts(score,'h1'),[],'manual backing selection never turns main into an other part');
+  score.lanes.push({id:'duet',role:'lead',label:'Duet'});score.phrases.push(phrase('duet1','duet',1000,3000));
+  assert.deepEqual(tap.planOtherParts(score,'a').map(s=>s.phraseIds),steps.map(s=>s.phraseIds),'another main lane is not a backing detour');
   assert.deepEqual(tap.planOtherParts(score,'b'),[],'starting later never captures earlier parts');
   assert.equal(tap.planOtherParts(score,'a',{scope:'phrase'}).length,3,'explicit phrase scope never grows into later main phrases');
 });
 
 test('a reply at a shared boundary belongs once to the preceding phrase', () => {
   const p=(id,laneId,startMs,endMs)=>({id,laneId,startMs,endMs,words:[{id:id+'w'}]});
-  const score={lanes:[{id:'lead',label:'Lead'},{id:'echo',label:'Echo'}],phrases:[p('a','lead',0,2000),p('b','lead',2000,4000),p('r','echo',2000,3000)]};
+  const score={lanes:[{id:'lead',role:'lead',label:'Lead'},{id:'echo',role:'backing',label:'Echo'}],phrases:[p('a','lead',0,2000),p('b','lead',2000,4000),p('r','echo',2000,3000)]};
   assert.deepEqual(tap.planOtherParts(score,'a').map(s=>s.phraseIds),[['a'],['r'],['b']]);
   assert.deepEqual(tap.planOtherParts(score,'b'),[]);
   assert.deepEqual(tap.planOtherParts(score,'missing'),[]);
@@ -1336,7 +1339,7 @@ test('a reply at a shared boundary belongs once to the preceding phrase', () => 
 
 test('a response in the following rest remains with its main phrase after retiming', () => {
   const p=(id,laneId,startMs,endMs)=>({id,laneId,startMs,endMs,words:[{id:id+'w'}]});
-  const score={lanes:[{id:'lead',label:'Solo'},{id:'reply',label:'Reply'}],phrases:[p('a','lead',1000,2800),p('b','lead',5000,7000),p('r','reply',3200,4000)]};
+  const score={lanes:[{id:'lead',role:'lead',label:'Solo'},{id:'reply',role:'backing',label:'Reply'}],phrases:[p('a','lead',1000,2800),p('b','lead',5000,7000),p('r','reply',3200,4000)]};
   assert.deepEqual(tap.planOtherParts(score,'a').map(s=>s.phraseIds),[['a'],['r'],['b']]);
   assert.deepEqual(tap.planOtherParts(score,'b'),[]);
 });

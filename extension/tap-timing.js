@@ -17,10 +17,12 @@
     const visible = score.phrases.filter(p => p.words.some(w => !w.excluded));
     const selected = visible.find(p => p.id === phraseId);
     if (!selected) return [];
+    const mainLane=score.lanes.find(l=>l.id===selected.laneId);
+    if(mainLane?.role!=='lead')return [];
     const primary = visible.filter(p => p.laneId === selected.laneId).sort((a,b)=>a.startMs-b.startMs);
     const anchors = scope === 'phrase' ? [selected] : primary.slice(primary.indexOf(selected));
     const groups = new Map(anchors.map(p=>[p.id,[]]));
-    for (const part of visible.filter(p=>p.laneId!==selected.laneId)) {
+    for (const part of visible.filter(p=>score.lanes.find(l=>l.id===p.laneId)?.role==='backing')) {
       const owner = primary.find(p=>part.startMs===p.endMs) ||
         [...primary].reverse().find(p=>part.startMs>=p.startMs) ||
         primary.find(p=>part.startMs<p.startMs && part.endMs>p.startMs);
