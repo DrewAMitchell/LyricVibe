@@ -289,10 +289,24 @@
   // Bar: status · timing offset · edit · display · help/close, as visual groups.
   const offsetGroup = document.createElement('span'); offsetGroup.className = 'lvx-hud-group lvx-hud-offset';
   offsetGroup.title = 'Sync: offset of the lyric track against the music. − earlier, + later ([ and ] keys); type ms or scroll';
-  const syncLabel = document.createElement('span'); syncLabel.className = 'lvx-hud-group-label'; syncLabel.textContent = 'Sync';
+  const syncLabel = document.createElement('span'); syncLabel.className = 'lvx-sidebar-sync-heading'; syncLabel.textContent = 'SYNC';
   offsetGroup.append(syncLabel, syncEarlier, offsetControl, syncLater, autoSyncButton);
   const editGroup = document.createElement('span'); editGroup.className = 'lvx-hud-group'; editGroup.append(quickSyncButton, editButton);
   const endGroup = document.createElement('span'); endGroup.className = 'lvx-hud-group'; endGroup.append(helpButton, stopButton);
+  const sidebar = document.createElement('aside'); sidebar.className = 'lvx-sidebar'; sidebar.setAttribute('aria-label','LyricVibe controls');
+  const sidebarNav = document.createElement('nav'); sidebarNav.className = 'lvx-sidebar-nav'; sidebarNav.setAttribute('aria-label','LyricVibe views');
+  const sidebarItems = document.createElement('div'); sidebarItems.className = 'lvx-sidebar-items';
+  const sidebarPin = document.createElement('button'); sidebarPin.type='button';sidebarPin.className='lvx-sidebar-pin';sidebarPin.textContent='LV';sidebarPin.title='Pin or unpin controls';sidebarPin.setAttribute('aria-label','Pin controls open');sidebarPin.setAttribute('aria-pressed','false');
+  const sidebarView = (key,label,title,activate) => { const button=document.createElement('button');button.type='button';button.dataset.sidebarView=key;button.textContent=label;button.title=title;button.onclick=activate;sidebarItems.append(button);return button; };
+  const displayLookView=sidebarView('display-look','Look','Display · choose a look',()=>{studio.view='look';toggleThemePicker(true);syncSidebarState();});
+  const displayMotionView=sidebarView('display-motion','Motion','Display · tune motion',()=>{studio.view='motion';toggleThemePicker(true);syncSidebarState();});
+  const displayStageView=sidebarView('display-stage','Stage','Display · adjust placement and stage',()=>{studio.view='stage';toggleThemePicker(true);syncSidebarState();});
+  const timingRecordView=sidebarView('timing-record','Record','Timing · record a take',()=>void openTimingView('record'));
+  const timingRefineView=sidebarView('timing-refine','Refine','Timing · refine saved or recorded timing',()=>void openTimingView('review'));
+  const timingEffectsView=sidebarView('timing-effects','Effects','Timing · record phrase effects',()=>void openTimingView('effects'));
+  const timingBeatView=sidebarView('timing-beat','Beat','Timing · set tempo and sections',()=>void openTimingView('beat'));
+  const stageEditView=sidebarView('stage-edit','Stage Edit','Open Stage Edit for this video',()=>void openStageEdit().then(syncSidebarState));
+  sidebarNav.append(sidebarPin,sidebarItems);
   const tempoButton=document.createElement('button');tempoButton.className='lvx-theme-btn lvx-tempo-button';tempoButton.textContent='♩ — BPM · T';
   tempoButton.title='Tap here or press T. The first tap sets beat 1. Beat clicker has exact BPM and Click controls; Sections opens duration blocks.';
   tempoButton.addEventListener('click',()=>void (hasBaselineTempo()?tapTempo():openTempoSetup()));
@@ -305,7 +319,16 @@
   for(const [rate,label,title]of [[.5,'½×','Half speed'],[.75,'¾×','Three-quarter speed'],[1,'1×','Real-time speed']]){const button=document.createElement('button');button.type='button';button.textContent=label;button.dataset.playbackRate=rate;button.title=title;button.setAttribute('aria-label',title);button.onclick=()=>setPlaybackSpeed(rate);speedGroup.append(button);}
   speedGroup.append(speedSelect);speedSelect.onchange=()=>setPlaybackSpeed(Number(speedSelect.value));
   hud.append(statusGroup, speedGroup, offsetGroup, editGroup, themeButton, tempoButton, errorButton, endGroup);
-  const hudSizeObserver=new ResizeObserver(()=>root.style.setProperty('--lvx-toolbar-height',`${Math.ceil(hud.getBoundingClientRect().height)}px`));
+  sidebar.append(sidebarNav,hud);
+  sidebarPin.onclick=()=>{const pinned=sidebar.classList.toggle('lvx-sidebar-pinned');sidebarPin.setAttribute('aria-pressed',String(pinned));sidebarPin.setAttribute('aria-label',pinned?'Unpin controls':'Pin controls open');};
+  const syncSidebarState=()=>{
+    const locked=timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active;
+    for(const button of [displayLookView,displayMotionView,displayStageView,stageEditView,timingRecordView,timingRefineView,timingEffectsView,timingBeatView])button.disabled=locked;
+    for(const [button,on] of [[displayLookView,themePicker.hidden===false&&studio.view==='look'],[displayMotionView,themePicker.hidden===false&&studio.view==='motion'],[displayStageView,themePicker.hidden===false&&studio.view==='stage'],[timingRecordView,!syncPanel.hidden&&timingWorkspace.view==='record'],[timingRefineView,!syncPanel.hidden&&timingWorkspace.view==='review'],[timingEffectsView,!syncPanel.hidden&&timingWorkspace.view==='effects'],[timingBeatView,!syncPanel.hidden&&timingWorkspace.view==='beat'],[stageEditView,stageEdit.active]])button.setAttribute('aria-current',on?'page':'false');
+  };
+  sidebar.addEventListener('pointerenter',syncSidebarState);
+  for(const button of sidebarItems.children)button.addEventListener('click',syncSidebarState);
+  const hudSizeObserver=new ResizeObserver(()=>root.style.setProperty('--lvx-toolbar-height','0px'));
 
   /* Display picker: one tile per theme, animated with this video's own lyrics. */
   const themePicker = document.createElement('div');
@@ -2333,6 +2356,12 @@
     } catch (error) { timing.openError=error.message;setSyncNotice(error.message,'error'); }
     finally { timing.busy = false; refreshTimingPanel(); }
   }
+  async function openTimingView(view){
+    if(timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active)return;
+    await openTimingReview();
+    if(!syncPanel.hidden&&timing.draft&&hasBaselineTempo())setTimingWorkspace(view);
+    syncSidebarState();
+  }
   function discardTimingLocal() {
     cancelCountIn();
     navigationHold=null;navigationApproval=null;
@@ -2594,7 +2623,7 @@
     stageSurface.addEventListener('pointermove',move);stageSurface.addEventListener('pointerup',finish);stageSurface.addEventListener('pointercancel',finish);
   });
   stage.addEventListener('click',event=>{if(!stageEdit.active||stageEditBusy()||stageEdit.fieldsDirty)return;const word=event.target.closest('[data-word]'),phrase=event.target.closest('[data-phrase]');if(!word||!phrase)return;stageEdit.phraseId=phrase.dataset.phrase;refreshStageEdit(true);stageEdit.wordId=word.dataset.word;refreshStageEdit();stagePanel.querySelector('details').open=true;});
-  root.append(viewport, preview, progress, hud, themePicker, shortcutsPanel, syncPanel, errorPanel,controlsNotice,stagePanel);
+  root.append(viewport, preview, progress, sidebar, themePicker, shortcutsPanel, syncPanel, errorPanel,controlsNotice,stagePanel);
   function mountRoot() {
     const surface = document.fullscreenElement;
     if (surface && !['VIDEO', 'AUDIO'].includes(surface.tagName)) surface.appendChild(root);
@@ -4011,7 +4040,7 @@
     stage.classList.add('lvx-score-stage','lvx-vinyl-stage');stage.classList.remove('lvx-choreography-stage');stage.style.paddingTop='0px';
     let canvas=stage.querySelector('.lvx-vinyl-canvas');
     if(!canvas){stage.replaceChildren();canvas=document.createElement('canvas');canvas.className='lvx-vinyl-canvas';canvas.setAttribute('role','img');canvas.setAttribute('aria-label','Vinyl lyric history: earlier words wind toward the center');stage.append(canvas);state.scoreSignature='vinyl';}
-    const ctx=canvas.getContext('2d'),dpr=Math.min(2,devicePixelRatio||1),rect=stage.getBoundingClientRect(),bar=hud.getBoundingClientRect(),top=bar.top<rect.top+rect.height*.5&&bar.bottom>rect.top?Math.max(0,bar.bottom-rect.top+12):0,bottom=bar.top>=rect.top+rect.height*.5&&bar.top<rect.bottom?rect.bottom-bar.top+12:0,width=Math.max(1,stage.clientWidth),height=Math.max(1,stage.clientHeight-top-bottom),clock=mediaMs-score.offsetMs;canvas.style.marginTop=top+'px';canvas.style.height=height+'px';
+    const ctx=canvas.getContext('2d'),dpr=Math.min(2,devicePixelRatio||1),width=Math.max(1,stage.clientWidth),height=Math.max(1,stage.clientHeight),clock=mediaMs-score.offsetMs;canvas.style.marginTop='0px';canvas.style.height=height+'px';
     const pixelW=Math.round(width*dpr),pixelH=Math.round(height*dpr);if(canvas.width!==pixelW||canvas.height!==pixelH){canvas.width=pixelW;canvas.height=pixelH;canvas.__frameKey=null;}
     if(canvas.__score!==score){ctx.font='800 100px Arial Narrow, Impact, sans-serif';canvas.__track=LvChoreography.vinylTrack(score,text=>ctx.measureText(text).width/100);canvas.__score=score;canvas.__frameKey=null;}
     const key=[clock,width,height,bloomMotion.matches].join(':');if(canvas.__frameKey===key)return;canvas.__frameKey=key;ctx.setTransform(dpr,0,0,dpr,0,0);
@@ -4088,7 +4117,7 @@
     const cues=typeof LvChoreography==='undefined'?{}:expressionCues(score);
     // Authoring outline only while editing, so you can see where to continue a take while scrubbing.
     const takeIds = syncPanel.hidden ? null : takePhraseIds();
-    const choreographyTop=Math.max(16,Math.min(stage.clientHeight*.3,hud.getBoundingClientRect().bottom-stage.getBoundingClientRect().top+16));
+    const choreographyTop=16;
     stage.style.paddingTop=choreographyTop+'px';
     for (const phrase of active.phrases) {
       const line = [...stage.children].find(el => el.dataset.phrase === phrase.id);
@@ -5197,7 +5226,7 @@
     const resuming=!overlayEnabled;overlayEnabled=true;
     if(resuming&&resumeSyncPanel){syncPanel.hidden=false;resumeSyncPanel=false;}
     if (!root.isConnected) {
-      root.append(viewport, preview, progress, hud, themePicker, shortcutsPanel, errorPanel,controlsNotice);
+      root.append(viewport, preview, progress, sidebar, themePicker, shortcutsPanel, errorPanel,controlsNotice);
       mountRoot();
     }
     trackWatch?.sync();
