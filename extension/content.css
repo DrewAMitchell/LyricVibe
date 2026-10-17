@@ -2547,3 +2547,25 @@
 #lvx-root .lvx-vinyl-stage{display:block;padding:0!important;overflow:hidden}
 #lvx-root .lvx-vinyl-canvas{display:block;width:100%;height:100%;pointer-events:none}
 #lvx-root .lvx-vinyl-tile{display:block;width:100%;height:100%;position:absolute;inset:0}
+
+/* Performance controls stay discoverable without occupying the lyric area. */
+#lvx-root .lvx-performance-controls{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 16px;padding:12px;background:#15232a;border:1px solid #456675;border-radius:8px;color:#d8edf5}
+#lvx-root .lvx-performance-controls button{padding:10px 14px;min-height:42px;border:1px solid #81b9cd;border-radius:5px;background:#253f4c;color:#effbff;font:600 13px system-ui;cursor:pointer}
+#lvx-root .lvx-performance-controls p{flex-basis:100%;margin:0;font:12px/1.5 system-ui;color:#c7dce5}
+#lvx-root .lvx-performance-controls :focus-visible,#lvx-root .lvx-placement-bounds :focus-visible{outline:2px solid #d9ecac;outline-offset:3px}
+#lvx-root .lvx-placement-bounds{border:3px dashed #81d7f5;background:#62b8db0a;z-index:15}
+#lvx-root .lvx-placement-bounds>span{padding:8px 10px;font:13px/18px system-ui;max-width:calc(100% - 95px);white-space:normal}
+#lvx-root .lvx-bounds-done{position:absolute;top:6px;right:6px;padding:8px 14px;min-height:36px;background:#d8edf5;color:#10232c;border:1px solid #81d7f5;border-radius:5px;cursor:pointer;font:600 13px system-ui}
+#lvx-root .lvx-bounds-resize{width:44px;height:44px;border:1px solid #81d7f5;border-radius:6px 0 0 0;font-size:32px}
+#lvx-root.lvx-lyrics-only>.lvx-hud,#lvx-root.lvx-lyrics-only>.lvx-preview,#lvx-root.lvx-lyrics-only>.lvx-progress,#lvx-root.lvx-lyrics-only>.lvx-theme-picker,#lvx-root.lvx-lyrics-only>.lvx-shortcuts-panel,#lvx-root.lvx-lyrics-only>.lvx-sync-panel,#lvx-root.lvx-lyrics-only>.lvx-error-panel{display:none!important}
+#lvx-root.lvx-lyrics-only.lvx-sync-open .lvx-viewport{right:0}
+
+#lvx-root .lvx-performance-sizes{display:grid;grid-template-columns:1fr 1fr;gap:12px;flex:1 1 100%}
+#lvx-root .lvx-performance-sizes label{display:grid;grid-template-columns:1fr auto;gap:4px;font:12px system-ui}
+#lvx-root .lvx-performance-sizes input{grid-column:1 / -1;box-sizing:border-box;min-width:0;width:100%;background:#10191e;color:#effbff;border:1px solid #657f8c;border-radius:4px;padding:8px;font:15px system-ui}
+#lvx-root .lvx-performance-controls small{flex:1 1 100%;font:11px/1.5 system-ui;color:#bacbd2}
+#lvx-root .lvx-choreography-stage .lvx-wrapped-word{white-space:normal;overflow-wrap:anywhere}
+#lvx-root .lvx-wrapped-word .lvx-score-syllable{display:inline}
+#lvx-root .lvx-score-phrase{font-size:clamp(var(--lvx-min-font,28px),calc(clamp(24px,5vw,80px) * var(--lvx-score-scale,1)),var(--lvx-max-font,128px))}
+#lvx-root .lvx-score-backing{font-size:clamp(var(--lvx-min-font,28px),calc(clamp(18px,2.5vw,38px) * var(--lvx-score-scale,1)),var(--lvx-max-font,128px))}
+#lvx-root .lvx-flow-line{font-size:clamp(var(--lvx-min-font,28px),min(var(--lvx-flow-base-size),var(--lvx-flow-fit-size)),var(--lvx-max-font,128px))}

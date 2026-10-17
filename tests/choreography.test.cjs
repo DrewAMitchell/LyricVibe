@@ -119,3 +119,25 @@ test('held letter wobble is slow, bounded, source-clock repeatable and settles a
  assert.ok(expressionAt(cue,2001).wave<.00001);assert.ok(expressionAt(cue,6999).wave<.00001);
  for(const options of [{reduced:true},{automatic:false},{effects:[{type:'tilt'}]}])assert.equal(expressionAt(cue,3200,options).wave,0);
 });
+
+
+test('ordered puzzle measures actual font sizes and keeps short capped phrases on one compact row',()=>{
+ const words=['READ','THE','WORDS'].map((text,i)=>({id:'spacing-'+i,text})),tracked=(text,font)=>text.length*(font*.55+4);
+ const slots=layout(words,1000,500,tracked,{mode:'puzzle',arrangement:'ordered',maxFont:40});
+ assert.equal(new Set(slots.map(s=>s.y+s.height/2)).size,1,'a short phrase does not force separate rows');
+ for(const s of slots)assert.ok(Math.abs(s.width-(tracked(words[s.index].text,s.font)+s.font*.08))<.001,'slot widths must match real rendered font metrics, including absolute letter spacing');
+ for(let i=1;i<slots.length;i++)assert.ok(slots[i].x-slots[i].width/2-(slots[i-1].x+slots[i-1].width/2)<10,'adjacent words have a compact gap');
+});
+
+
+test('minimum text size splits long phrases into stable ordered sections without changing words or timing',()=>{
+ const words=Array.from({length:18},(_,i)=>({id:'floor-'+i,text:'READABLE',startMs:i*500,endMs:i*500+450})),before=structuredClone(words);
+ for(const mode of ['classic','fall','puzzle'])for(const arrangement of ['ordered','chaotic']){
+  const options={mode,arrangement,minFont:32,maxFont:120},pages=require('../extension/choreography.js').readablePages(words,420,170,measure,options);
+  assert.ok(pages.length>1);assert.deepEqual(pages.flatMap(p=>p.slots.map(s=>s.index)),words.map((_,i)=>i));
+  for(const p of pages)for(const s of p.slots){assert.ok(s.font>=32);assert.ok(s.x-s.boxWidth/2>=-.01&&s.x+s.boxWidth/2<=420.01&&s.y-s.boxHeight/2>=-.01&&s.y+s.boxHeight/2<=170.01);}
+  assert.deepEqual(require('../extension/choreography.js').readablePages(words,420,170,measure,options),pages);
+ }
+ assert.deepEqual(words,before);
+ const single=require('../extension/choreography.js').readablePages([{id:'long',text:'SUPERCALIFRAGILISTIC'}],160,300,measure,{mode:'puzzle',minFont:32,maxFont:60});assert.equal(single[0].slots[0].font,32);assert.equal(single[0].slots[0].wrapped,true);
+});

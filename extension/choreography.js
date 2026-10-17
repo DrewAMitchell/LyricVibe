@@ -92,13 +92,13 @@
     return out;
   }
   function arrival(now,start,lead=500,reduced=false){return reduced?1:1-Math.pow(1-clamp((now-start+lead)/lead),3);}
-  function puzzle(words,width,height,measure,{upsideDown,maxFont,weights}){
+  function puzzle(words,width,height,measure,{upsideDown,maxFont,minFont=0,weights}){
     const weight=word=>Math.max(.65,Math.min(1.8,weights[word.id]?.weight??1));
     let font=Math.min(maxFont/Math.max(1,...words.map(weight)),height*.8);
     for(let attempt=0;attempt<90;attempt++,font*=.94){
       const gap=font*.12;
       const boxes=words.map((word,index)=>{
-        const size=font*weight(word),angle=upsideDown&&index%5===2?180:0;
+        const size=Math.min(maxFont,Math.max(minFont,font*weight(word))),angle=upsideDown&&index%5===2?180:0;
         const w=Math.max(size*.2,measure(word.text,size))+size*.08,h=size*1.3,vertical=angle===90;
         return {index,width:w,height:h,boxWidth:vertical?h:w,boxHeight:vertical?w:h,font:size,angle};
       }).sort((a,b)=>b.boxWidth*b.boxHeight-a.boxWidth*a.boxHeight||a.index-b.index);
@@ -127,43 +127,41 @@
         free=split.filter((a,i)=>!split.some((b,j)=>i!==j&&a.x>=b.x&&a.y>=b.y&&a.x+a.w<=b.x+b.w&&a.y+a.h<=b.y+b.h&&(a.x>b.x||a.y>b.y||a.w<b.w||a.h<b.h||j<i)));
       }
       if(!failed)return slots.sort((a,b)=>a.index-b.index);
+      if(font*1.8<=minFont)break;
     }
     return null;
   }
-  function ordered(words,width,height,measure,{maxFont,weights}){
-    // Consecutive words share a row. Choose the largest readable multi-row lockup,
-    // retaining each word's emphasis instead of sorting by its physical size.
+  function ordered(words,width,height,measure,{maxFont,minFont=0,weights}){
+    // Measure at the actual font: fixed-pixel tracking must not be scaled a second time.
+    const weight=word=>Math.max(.65,Math.min(1.8,weights[word.id]?.weight??1));
     let best=null;
-    for(let count=2;count<=Math.min(4,words.length);count++){
+    for(let count=1;count<=Math.min(4,words.length);count++){
       const rows=Array.from({length:count},()=>[]);
       words.forEach((word,index)=>rows[Math.min(count-1,Math.floor(index*count/words.length))].push({word,index}));
-      const boxes=rows.map(row=>row.map(({word,index})=>{
-        const font=Math.max(.65,Math.min(1.8,weights[word.id]?.weight??1));
-        return {index,font,width:Math.max(font*.2,measure(word.text,font))+font*.08,height:font*1.3,angle:0};
-      }));
-      const rowWidths=boxes.map(row=>row.reduce((n,b)=>n+b.width,0)+.16*(row.length-1));
-      const rowHeights=boxes.map(row=>Math.max(...row.map(b=>b.height)));
-      const totalHeight=rowHeights.reduce((a,b)=>a+b,0)+.12*(count-1);
-      const scale=Math.min(width/Math.max(...rowWidths),height/totalHeight,maxFont/Math.max(...boxes.flat().map(b=>b.font)));
-      if(best&&best.scale>=scale)continue;
-      let y=(height-totalHeight*scale)/2;const slots=[];
-      boxes.forEach((row,r)=>{let x=0;for(const b of row){const w=b.width*scale,h=b.height*scale;slots[b.index]={...b,font:b.font*scale,width:w,height:h,boxWidth:w,boxHeight:h,x:x+w/2,y:y+rowHeights[r]*scale-h/2};x+=w+.16*scale;}y+=(rowHeights[r]+.12)*scale;});
-      best={scale,slots};
+      for(let scale=maxFont/Math.max(1,...words.map(weight)),attempt=0;attempt<90;attempt++,scale*=.94){
+        if(best&&scale<=best.scale)break;
+        const boxes=rows.map(row=>row.map(({word,index})=>{const font=Math.min(maxFont,Math.max(minFont,scale*weight(word)));return {index,font,width:Math.max(font*.2,measure(word.text,font))+font*.08,height:font*1.3,angle:0};}));
+        const gap=scale*.16,rowGap=scale*.12,rowWidths=boxes.map(row=>row.reduce((n,b)=>n+b.width,0)+gap*(row.length-1)),rowHeights=boxes.map(row=>Math.max(...row.map(b=>b.height))),totalHeight=rowHeights.reduce((a,b)=>a+b,0)+rowGap*(count-1);
+        if(Math.max(...rowWidths)>width||totalHeight>height){if(scale*1.8<=minFont)break;continue;}
+        let y=(height-totalHeight)/2;const slots=[];
+        boxes.forEach((row,r)=>{let x=0;for(const b of row){slots[b.index]={...b,boxWidth:b.width,boxHeight:b.height,x:x+b.width/2,y:y+rowHeights[r]-b.height/2};x+=b.width+gap;}y+=rowHeights[r]+rowGap;});
+        best={scale,slots};break;
+      }
     }
     return best?.slots;
   }
-  function layout(words,width,height,measure,{mode='fall',upsideDown=false,maxFont=80,weights={},arrangement='chaotic',origin='top-left'}={}){
-    width=Math.max(1,width);height=Math.max(1,height);
+  function layout(words,width,height,measure,{mode='fall',upsideDown=false,maxFont=80,minFont=0,weights={},arrangement='chaotic',origin='top-left'}={}){
+    width=Math.max(1,width);height=Math.max(1,height);minFont=Math.max(0,minFont);maxFont=Math.max(minFont,maxFont);
     if(!words.length)return [];
     if(mode==='puzzle'&&height>=140&&width>=180&&words.length>=3){
-      const packed=arrangement==='ordered'?ordered(words,width,height,measure,{maxFont,weights}):puzzle(words,width,height,measure,{upsideDown,maxFont,weights});
+      const packed=arrangement==='ordered'?ordered(words,width,height,measure,{maxFont,minFont,weights}):puzzle(words,width,height,measure,{upsideDown,maxFont,minFont,weights});
       if(packed)return packed.map(slot=>({...slot,x:origin.endsWith('right')?width-slot.x:slot.x,y:origin.startsWith('bottom')?height-slot.y:slot.y}));
     }
     // A shallow strip gets a single readable line, never a squeezed word cloud.
     const singleLine=mode==='puzzle'&&height<140;mode=mode==='puzzle'?'fall':mode;
     const weight=word=>mode==='puzzle'?Math.max(.65,Math.min(1.8,weights[word.id]?.weight??1)):1;
-    let font=mode==='puzzle'?Math.min(maxFont/Math.max(1,...words.map(weight)),height*.8):Math.min(maxFont,height*.28),rows,used;
-    for(let attempt=0;attempt<80;attempt++,font*=.9){
+    let font=Math.max(minFont,mode==='puzzle'?Math.min(maxFont/Math.max(1,...words.map(weight)),height*.8):Math.min(maxFont,height*.28)),rows,used;
+    for(let attempt=0;attempt<80;attempt++,font=Math.max(minFont,font*.9)){
       rows=[];let row={items:[],width:0,height:0};const gap=font*.22;
       for(let i=0;i<words.length;i++){
         const angle=0;
@@ -172,13 +170,26 @@
         const x=row.width+(row.items.length?gap:0);row.items.push({index:i,width:w,height:h,boxWidth:bw,boxHeight:bh,x,angle,font:size});row.width=x+bw;row.height=Math.max(row.height,bh);
       }
       if(row.items.length)rows.push(row);used=rows.reduce((sum,r)=>sum+r.height,0)+gap*Math.max(0,rows.length-1);
-      if(used<=height&&rows.every(r=>r.width<=width))break;
+      if(used<=height&&rows.every(r=>r.width<=width)||font<=minFont)break;
     }
     let y=(height-used)/2;const slots=[];
     for(const row of rows){for(const item of row.items)slots[item.index]={...item,x:(width-row.width)/2+item.x+item.boxWidth/2,y:y+row.height/2};y+=row.height+font*.22;}
     return slots;
   }
 
+  // Stable contiguous pages preserve lyric order and never change recorded timing.
+  function readablePages(words,width,height,measure,options={}){
+    const minFont=Math.max(0,options.minFont||0),fits=slots=>slots.every(s=>s.font>=minFont-.01&&s.x-s.boxWidth/2>=-.01&&s.x+s.boxWidth/2<=width+.01&&s.y-s.boxHeight/2>=-.01&&s.y+s.boxHeight/2<=height+.01);
+    const arrange=part=>layout(part,width,height,measure,options),full=arrange(words);
+    if(!minFont||fits(full))return [{start:0,end:words.length,slots:full}];
+    const pages=[];let start=0;
+    while(start<words.length){let end=start+1,best=null;
+      for(let next=start+1;next<=words.length;next++){const slots=arrange(words.slice(start,next));if(!fits(slots))break;best=slots;end=next;}
+      if(!best){const textWidth=Math.max(minFont*.2,measure(words[start].text,minFont))+minFont*.08,rows=Math.ceil(textWidth/Math.max(1,width)),h=minFont*1.3*rows;best=[{index:0,x:width/2,y:height/2,width:Math.min(width,textWidth),height:h,boxWidth:Math.min(width,textWidth),boxHeight:h,font:minFont,angle:0,wrapped:rows>1}];}
+      pages.push({start,end,slots:best.map(s=>({...s,index:s.index+start}))});start=end;
+    }
+    return pages;
+  }
   // The newest word keeps a fixed readable size. Only accumulated history compresses.
   function vinylTrack(score,measure){
     const tokens=[];let order=0;
@@ -225,5 +236,5 @@
       const scale=R*glyph.font/100;ctx.save();ctx.translate(cx+R*glyph.x,cy+R*glyph.y);ctx.rotate(glyph.angle+Math.PI/2);ctx.globalAlpha=glyph.top?1:.52+.48*glyph.radius;ctx.drawImage(sprite,-sprite.width*scale/2,-75*scale,sprite.width*scale,150*scale);ctx.restore();}
     ctx.restore();return frame;
   }
-  const api={layout,arrival,compose,expressionAt,danceAt,vinylTrack,vinylAt,paintVinyl};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
+  const api={layout,readablePages,arrival,compose,expressionAt,danceAt,vinylTrack,vinylAt,paintVinyl};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);
