@@ -11,7 +11,7 @@ function harness() {
   const data = {}, sessionData = {}, calls = [];
   const store = data => ({ get: async key => key == null ? structuredClone(data) : { [key]: structuredClone(data[key]) }, set: async value => Object.assign(data, structuredClone(value)), remove: async () => {} });
   const event = { addListener() {} };
-  const context = vm.createContext({ console, URL, URLSearchParams, AbortSignal, AbortController, setTimeout, clearTimeout, LvScore: core, importScripts() {}, chrome: { storage: { local: store(data), session: store(sessionData) }, action: { onClicked: event }, runtime: { onMessage: event }, tabs: { onRemoved: event } }, fetch: async url => {
+  const context = vm.createContext({ console, URL, URLSearchParams, AbortSignal, AbortController, setTimeout, clearTimeout, LvScore: core, importScripts() {}, chrome: { storage: { local: store(data), session: store(sessionData) }, action: { onClicked: event }, runtime: { onMessage: event }, tabs: { onRemoved: event, sendMessage: async()=>({ok:true,version:1,enabled:true,active:true}) } }, fetch: async url => {
     calls.push(url);
     const u = new URL(url);
     const result = u.pathname.endsWith('/get-cached') ? entry(111, 166, '00.26') : entry(222, 166, '23.19');
@@ -198,4 +198,33 @@ test('YouTube video-format suffixes and notification counters do not reach the l
   assert.equal(h.run("cleanPageTitle('Artist - Song - Official Lyric Video')"), 'Artist - Song');
   assert.equal(h.run("cleanPageTitle('Madonna - Music')"), 'Madonna - Music');
   assert.equal(h.run("cleanPageTitle('Band - Live')"), 'Band - Live');
+});
+
+test('automatic detection sleeps while its source tab is unfocused and resumes without changing saved timing bytes',async()=>{
+ const h=harness(),messages=[];h.data.savedTiming={locked:true,startMs:1234};const original=JSON.stringify(h.data);
+ h.context.chrome.tabs.sendMessage=async(_id,m)=>{messages.push(m);return m.type==='LV_WATCH_STATUS'?{ok:true,version:1,enabled:true,active:false}:{}};
+ h.run('sessions.set(7,{active:true})');await h.run('_detectAndSyncLocked(7)');
+ assert.equal(h.calls.length,0);assert.equal(messages.length,1);assert.equal(h.run('deferredDetections.has(7)'),true);assert.equal(JSON.stringify(h.data),original);
+ h.context.chrome.tabs.sendMessage=async(_id,m)=>m.type==='LV_WATCH_STATUS'?{ok:true,version:1,enabled:true,active:true}:{};
+ assert.equal(await h.run('automaticDetectionAllowed(7)'),true);assert.equal(h.run('pausedTabs.has(7)'),false);
+});
+test('a healthy overlay resumes without reinserting CSS or executing its scripts',async()=>{
+ const h=harness();let css=0,scripts=0;
+ h.context.chrome.tabs.sendMessage=async()=>({ok:true,version:1});
+ h.context.chrome.scripting={insertCSS:async()=>css++,executeScript:async()=>scripts++};
+ assert.equal(await h.run('injectOverlay(7)'),true);assert.equal(css,0);assert.equal(scripts,0);
+ h.context.chrome.tabs.sendMessage=async()=>{throw Error('No receiver')};
+ assert.equal(await h.run('injectOverlay(7)'),true);assert.equal(css,1);assert.equal(scripts,1);
+});
+
+test('stopping an active overlay delivers LV_STOP even after marking the tab paused',async()=>{
+ const h=harness(),messages=[];h.context.chrome.tabs.sendMessage=async(_id,m)=>{messages.push(m);return {}};
+ h.run('sessions.set(7,{active:true})');await h.run('stopSession(7)');
+ assert.equal(messages.filter(m=>m.type==='LV_STOP').length,1);assert.equal(h.run('pausedTabs.has(7)'),true);
+});
+
+test('Spotify automatic retries never reinject or reopen the overlay',async()=>{
+ const h=harness();h.context.setTimeout=f=>setImmediate(f);h.context.seed={host:'open.spotify.com',track:'Fixture title',artist:'Fixture artist'};
+ h.run('var injected=0;getPageHints=async()=>seed;recognize=async()=>null;injectOverlay=async()=>injected++;sendToTab=()=>{};_sendSmartError=()=>{}');
+ await h.run('_detectAndSyncInner(7,null,Date.now())');assert.equal(h.run('injected'),0);
 });

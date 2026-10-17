@@ -1,6 +1,7 @@
 importScripts('score-core.js', 'timing-variant.js', 'pronunciation.js', 'analysis/controller.js', 'score-host.js');
 const LRCLIB_BASE = 'https://lrclib.net/api';
 const sessions = new Map();
+const pausedTabs = new Set(), deferredDetections = new Set();
 let pronunciationIndexPromise;
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if(!['LV_PRONUNCIATION_SUGGEST','LV_PRONUNCIATION_COUNT'].includes(message?.type))return;
@@ -287,7 +288,7 @@ async function getCachedLyricText(track, artist) {
 }
 
 async function lookupDiagnostics(tabId) {
-  const hints=normalizeHints(await getPageHints(tabId)),track=trackFromHints(hints),mediaKey=LvScore.mediaKey(hints);
+  const hints=normalizeHints(await getPageHints(tabId, false)),track=trackFromHints(hints),mediaKey=LvScore.mediaKey(hints);
   const cached=track?await getCachedLyrics(track.title,track.artist,hints):null;
   const text=track?await getCachedLyricText(track.title,track.artist):null;
   return {observedAt:new Date().toISOString(),mediaKey,pageTitle:hints.pageTitle,detected:track?{title:track.title,artist:track.artist,durationMs:track.durationMs}:null,
@@ -372,6 +373,16 @@ chrome.action.onClicked.addListener(async (tab) => {
 chrome.runtime.onMessage.addListener((message, sender) => {
   if (!message || !message.type) return;
 
+  if(message.type==='LV_WATCH_STATE'&&sender.tab?.id){
+    const tabId=sender.tab.id;
+    if(message.active===false){
+      pausedTabs.add(tabId);
+      if(autoRetryTimers.has(tabId)||detectionLocks.has(tabId))deferredDetections.add(tabId);
+      clearTimeout(autoRetryTimers.get(tabId));autoRetryTimers.delete(tabId);
+    }
+    return;
+  }
+
   if (message.type === 'LV_CONTENT_STOP' && sender.tab && sender.tab.id) {
     stopSession(sender.tab.id, 'Stopped');
   }
@@ -393,6 +404,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   // Non-Spotify track change (YT Music, SoundCloud, plain YouTube):
   // Re-detect lyrics WITHOUT tearing down the overlay — just swap to the new track.
   if (message.type === 'LV_TRACK_CHANGED' && sender.tab && sender.tab.id) {
+    pausedTabs.delete(sender.tab.id);
     // FIX: if the MV3 service worker was killed and restarted, `sessions` is
     // empty even though the overlay is clearly alive (it just messaged us!).
     // Previously this message was silently dropped — the #1 cause of
@@ -404,15 +416,15 @@ chrome.runtime.onMessage.addListener((message, sender) => {
       persistSessions();
     }
     session.active = true;
-    // Because content.js now uses a stability timer, we don't need to poll or wait.
-    // The track is guaranteed to be fully loaded and settled in the DOM.
-    injectOverlay(sender.tab.id).then(() => {
-      detectAndSync(sender.tab.id, message.prevKey || '');
-    });
+    if(message.resume&&!message.changed&&!deferredDetections.has(sender.tab.id))return;
+    deferredDetections.delete(sender.tab.id);
+    // A message from the live overlay already proves it is injected.
+    detectAndSync(sender.tab.id, message.prevKey || '');
   }
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  pausedTabs.delete(tabId);deferredDetections.delete(tabId);
   sessions.delete(tabId);
   persistSessions();
   clearTimeout(autoRetryTimers.get(tabId));
@@ -424,6 +436,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
    ══════════════════════════════════════ */
 async function startSession(tab) {
   const tabId = tab.id;
+  pausedTabs.delete(tabId);deferredDetections.delete(tabId);
   sessions.set(tabId, { active: true });
   persistSessions();
 
@@ -472,6 +485,7 @@ async function detectAndSync(tabId, prevKey) {
 }
 
 async function _detectAndSyncLocked(tabId, prevKey) {
+  if(!await automaticDetectionAllowed(tabId))return;
   // Show degraded-aware status
   if (isApiDegraded('lrclib')) {
     sendToTab(tabId, { type: 'LV_STATUS_WARNING', text: 'Lyrics service is busy — trying anyway...' });
@@ -482,8 +496,9 @@ async function _detectAndSyncLocked(tabId, prevKey) {
   // Wrap entire detection in a hard timeout to prevent infinite "Detecting..."
   const detectStart = Date.now();
   let timedOut = false;
+  let detectionTimer;
   const timeoutPromise = new Promise((_, reject) => {
-    setTimeout(() => {
+    detectionTimer=setTimeout(() => {
       timedOut = true;
       reject(new Error('DETECT_TIMEOUT'));
     }, DETECT_TIMEOUT_MS);
@@ -526,12 +541,13 @@ async function _detectAndSyncLocked(tabId, prevKey) {
         text: 'Something went wrong while searching for lyrics. Please try again.'
       });
     }
-  }
+  } finally { clearTimeout(detectionTimer); }
 }
 
 /** Inner detection logic — separated so the outer function can race it against a timeout. */
 async function _detectAndSyncInner(tabId, prevKey, detectStart) {
   const hints = await getPageHints(tabId);
+  if(hints.watchPaused)return;
   if (hints.isAd || hints.mediaReady === false) {
     sendToTab(tabId, { type: 'LV_STATUS', text: hints.isAd ? 'Waiting for the advertisement to finish…' : 'Waiting for the main video clock…' });
     clearTimeout(autoRetryTimers.get(tabId));
@@ -541,6 +557,7 @@ async function _detectAndSyncInner(tabId, prevKey, detectStart) {
   if (LvScore.mediaKey(hints)) {
     try {
       const score = await LvScoreHost.packageFor(tabId, hints);
+      if(!await automaticDetectionAllowed(tabId))return;
       if (score) {
         sendToTab(tabId, { type: 'LV_SCORE_UPDATED', score, mediaKey: LvScore.mediaKey(score.source), tabId });
         return;
@@ -572,6 +589,7 @@ async function _detectAndSyncInner(tabId, prevKey, detectStart) {
 
   // STEP 1: Try immediately — YouTube Music always has metadata ready on first attempt
   const metadataResult = await recognize({ mode: 'metadata', hints });
+  if(!await automaticDetectionAllowed(tabId))return;
   if (metadataResult && metadataResult.ok && hasUsableLyrics(metadataResult)) {
     await handleRecognitionResult(tabId, metadataResult);
     return;
@@ -597,11 +615,13 @@ async function _detectAndSyncInner(tabId, prevKey, detectStart) {
     for (const delay of ytmRetryDelays) {
       await new Promise((r) => setTimeout(r, delay));
       const retryHints = await getPageHints(tabId);
+    if(retryHints.watchPaused)return;
       const retryKey = getHintsTrackKey(retryHints);
       if (prevKey && retryKey === prevKey) continue;
       if (retryKey && attemptedKeys.has(retryKey)) continue; // identical metadata → identical result, skip
       if (retryHints.track) {
         const retryResult = await recognize({ mode: 'metadata', hints: retryHints });
+        if(!await automaticDetectionAllowed(tabId))return;
         if (retryResult && retryResult.ok && hasUsableLyrics(retryResult)) {
           await handleRecognitionResult(tabId, retryResult);
           return;
@@ -610,6 +630,7 @@ async function _detectAndSyncInner(tabId, prevKey, detectStart) {
       }
     }
     const finalHints = await getPageHints(tabId);
+    if(finalHints.watchPaused)return;
     _sendSmartError(tabId, finalHints.track || hints.track || 'this song');
     return;
   }
@@ -622,12 +643,14 @@ async function _detectAndSyncInner(tabId, prevKey, detectStart) {
     for (const delay of scRetryDelays) {
       await new Promise((r) => setTimeout(r, delay));
       const retryHints = await getPageHints(tabId);
+      if(retryHints.watchPaused)return;
       scTrack = retryHints.track || retryHints.pageTitle || scTrack;
       const scKey = getHintsTrackKey(retryHints);
       if (scKey && attemptedKeys.has(scKey)) continue; // same metadata — don't re-query
       if (scTrack) {
         sendToTab(tabId, { type: 'LV_STATUS', text: `Searching lyrics for: ${scTrack}` });
         const retryResult = await recognize({ mode: 'metadata', hints: retryHints });
+        if(!await automaticDetectionAllowed(tabId))return;
         if (retryResult && retryResult.ok && hasUsableLyrics(retryResult)) {
           await handleRecognitionResult(tabId, retryResult);
           return;
@@ -652,16 +675,15 @@ async function _detectAndSyncInner(tabId, prevKey, detectStart) {
     let lastDetectedTrack = hints.track || '';
     for (let attempt = 0; attempt < retryDelays.length; attempt++) {
       await new Promise((r) => setTimeout(r, retryDelays[attempt]));
-      if (attempt >= 2) {
-        try { await injectOverlay(tabId); } catch (_) {}
-      }
       const retryHints = await getPageHints(tabId);
+      if(retryHints.watchPaused)return;
       if (retryHints.track || retryHints.pageTitle) {
         lastDetectedTrack = retryHints.track || retryHints.pageTitle || '';
         const spKey = getHintsTrackKey(retryHints);
         if (spKey && attemptedKeys.has(spKey)) continue; // same metadata — don't re-query
         sendToTab(tabId, { type: 'LV_STATUS', text: `Searching lyrics for: ${lastDetectedTrack}` });
         const retryResult = await recognize({ mode: 'metadata', hints: retryHints });
+        if(!await automaticDetectionAllowed(tabId))return;
         if (retryResult && retryResult.ok && hasUsableLyrics(retryResult)) {
           await handleRecognitionResult(tabId, retryResult);
           return;
@@ -686,6 +708,7 @@ async function _detectAndSyncInner(tabId, prevKey, detectStart) {
   for (const delay of genericDelays) {
     await new Promise((r) => setTimeout(r, delay));
     const retryHints = await getPageHints(tabId);
+      if(retryHints.watchPaused)return;
     lastTrack = retryHints.track || retryHints.pageTitle || lastTrack;
     const genKey = getHintsTrackKey(retryHints);
     if (genKey && attemptedKeys.has(genKey)) continue; // same metadata — don't re-query
@@ -693,6 +716,7 @@ async function _detectAndSyncInner(tabId, prevKey, detectStart) {
       sendToTab(tabId, { type: 'LV_STATUS', text: `Searching lyrics for: ${lastTrack}` });
     }
     const retryResult = await recognize({ mode: 'metadata', hints: retryHints });
+    if(!await automaticDetectionAllowed(tabId))return;
     if (retryResult && retryResult.ok && hasUsableLyrics(retryResult)) {
       await handleRecognitionResult(tabId, retryResult);
       return;
@@ -739,12 +763,14 @@ async function _tryOfflineRescue(tabId) {
  */
 const autoRetryTimers = new Map();
 function scheduleAutoRetry(tabId, attempt = 0) {
+  if(pausedTabs.has(tabId)){if(sessions.has(tabId))deferredDetections.add(tabId);return;}
   if (attempt >= 3) return;
   clearTimeout(autoRetryTimers.get(tabId));
   const delay = 10000 * Math.pow(2, attempt);
   autoRetryTimers.set(tabId, setTimeout(async () => {
     const session = sessions.get(tabId);
     if (!session || !session.active) return;
+    if(!await automaticDetectionAllowed(tabId))return;
     try {
       // Cheap health probe before a full re-detect
       const probe = await apiFetch(`${LRCLIB_BASE}/search?q=test`, 'lrclib', 5000);
@@ -797,6 +823,7 @@ async function _sendSmartError(tabId, trackName) {
 }
 
 async function stopSession(tabId, reason) {
+  pausedTabs.add(tabId);deferredDetections.delete(tabId);
   sessions.delete(tabId);
   persistSessions();
   clearTimeout(autoRetryTimers.get(tabId));
@@ -1464,6 +1491,10 @@ function finiteNumber(value){ const n = Number(value); return Number.isFinite(n)
    ══════════════════════════════════════ */
 async function injectOverlay(tabId) {
   try {
+    const alive=await chrome.tabs.sendMessage(tabId,{type:'LV_OVERLAY_RESUME'});
+    if(alive?.ok&&alive.version===1)return true;
+  } catch (_) {}
+  try {
     await chrome.scripting.insertCSS({ target: { tabId }, files: ['content.css'] });
   } catch {}
 
@@ -1475,7 +1506,24 @@ async function injectOverlay(tabId) {
   }
 }
 
-async function getPageHints(tabId) {
+async function automaticDetectionAllowed(tabId) {
+  try {
+    const status=await chrome.tabs.sendMessage(tabId,{type:'LV_WATCH_STATUS'});
+    if(status?.ok&&status.version===1){
+      if(status.active){pausedTabs.delete(tabId);return true;}
+      pausedTabs.add(tabId);
+      if(status.enabled&&sessions.has(tabId))deferredDetections.add(tabId);
+      return false;
+    }
+    return !pausedTabs.has(tabId); // Compatibility with an already-open older overlay.
+  } catch (_) {
+    if(sessions.has(tabId))deferredDetections.add(tabId);
+    return false;
+  }
+}
+
+async function getPageHints(tabId, automatic = true) {
+  if(automatic && !await automaticDetectionAllowed(tabId))return {watchPaused:true,mediaReady:false};
   try {
     const response = await chrome.tabs.sendMessage(tabId, { type: 'LV_GET_HINTS' });
     return response || {};
@@ -1489,6 +1537,7 @@ async function getPageHints(tabId) {
    ══════════════════════════════════════ */
 async function handleRecognitionResult(tabId, payload) {
   const currentHints = await getPageHints(tabId);
+  if(currentHints.watchPaused)return;
   if (currentHints.isAd || currentHints.mediaReady === false) {
     clearTimeout(autoRetryTimers.get(tabId));
     autoRetryTimers.set(tabId, setTimeout(() => detectAndSync(tabId), 1500));
@@ -1540,5 +1589,6 @@ function hasUsableLyrics(payload) {
 
 function sendToTab(tabId, message) {
   if (!tabId) return;
+  if(pausedTabs.has(tabId)&&message.type!=='LV_STOP'){if(sessions.has(tabId))deferredDetections.add(tabId);return;}
   chrome.tabs.sendMessage(tabId, message).catch(() => {});
 }

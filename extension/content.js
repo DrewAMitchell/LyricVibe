@@ -95,6 +95,9 @@
     offsetWasRestored: false,  // true if offset loaded from per-song memory
     errorShown: false          // true when error screen is up (observer stays active)
   };
+  let overlayEnabled = true, resumeSyncPanel = false;
+  var trackWatch = null;
+  const observationFocused = () => overlayEnabled && !document.hidden && document.hasFocus();
   const timing = { draft: null, view: 'proposed', phraseIndex: 0, dirty: false, busy: false, auditioned: false, priorLoop: null };
   const tapping = { take: null, wordId: null, binding: null, clockMs: null, rate: 1, audio: null, splitDirty: false, heldInput: null, cancelledSpace: false, reviewId: null, correctionUndo: [], listening: false, backAnchorMs: null, backIndex: null, syllableStartKey: null };
   const performanceTake = { armed: false, binding: null, laneId: null, rate: 1, marks: [] };
@@ -2434,6 +2437,7 @@
     },
     show,
     hide: teardown,
+    observation: Object.freeze({status:()=>trackWatch?.status()}),
     hints: getPageHints,
     placement:Object.freeze({getState:()=>({...placement}),set:value=>applyPlacement(value,true)}),
     choreography:Object.freeze({getState:()=>({...choreography}),set:value=>setChoreography({...choreography,...value}),inspect:()=>{const score=timing.draft&&timing.view==='proposed'?timing.draft.score:state.score;return score&&typeof LvChoreography!=='undefined'?LvChoreography.compose(score):{};}}),
@@ -2475,7 +2479,8 @@
 
   /* Universal track-change observer: auto-refresh when song changes
      on ANY supported platform (YouTube Music, SoundCloud, Spotify, etc.) */
-  setupTrackChangeObserver();
+  trackWatch = setupTrackChangeObserver();
+  trackWatch.sync();
 
   /* ══════════════════════════════════════
      MESSAGE LISTENER
@@ -2483,6 +2488,10 @@
   if (typeof chrome === 'undefined' || !chrome.runtime?.onMessage) return; // extension context invalidated
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || !message.type) return;
+    if(message.type==='LV_WATCH_STATUS'){sendResponse({ok:true,version:1,enabled:overlayEnabled,active:observationFocused()&&document.readyState==='complete'&&!trackWatch?.loading()});return;}
+    if(message.type==='LV_OVERLAY_RESUME'){show();sendResponse({ok:true,version:1});return;}
+    // Late automatic lookup replies must not reopen an explicitly closed overlay.
+    if(!overlayEnabled&&['LV_STATUS','LV_STATUS_WARNING','LV_ERROR','LV_API_ERROR','LV_TRACK','LV_SCORE_UPDATED'].includes(message.type))return;
     if(message.type==='LV_TIMING_EDIT_CHECK'){
       const mediaKey=LvScore.mediaKey({url:location.href});
       sendResponse({ok:message.mediaKey===mediaKey,mediaKey,canEdit:!timing.busy&&!timing.dirty&&!transcript.dirty&&!tapping.splitDirty&&!tapPending()&&!countIn.active&&!countIn.preparing});return;
@@ -2543,6 +2552,7 @@
           setSyncNotice(rawTake(retainedTake)?'Timings saved. Reopen Sync to review the retained recording against the current lyrics. Changed phrases stay separate.':'The saved score changed. Reopen Sync to refresh. Any retained take belongs to the previous revision and cannot be applied.');
         }
         state.score = message.score;
+        trackWatch?.accept(message.mediaKey);
         void loadTempo();
         state.scoreSignature = '';
         state.active = true;
@@ -3096,6 +3106,7 @@
      SPOTIFY TIME POLLING — resilient, pause-aware
      ══════════════════════════════════════ */
   function startSpotifyPolling() {
+    if(!observationFocused())return;
     stopSpotifyPolling();
     if (!state.isSpotify) return;
 
@@ -3156,120 +3167,75 @@
      Works on Spotify, YouTube Music, SoundCloud, plain YouTube, etc.
      ══════════════════════════════════════ */
   function setupTrackChangeObserver() {
-    let lastTrackKey = '';
-    let pendingKey = '';
-    let stabilityTimer = 0;
-    let mediaHooked = null;
-    let ytmVideoSrcObserver = null;
-    const isYTMusic = location.hostname.includes('music.youtube.com');
-
-    // Simple track key using only DOM text metadata.
-    // The stability timer below handles slow/partial updates natively!
-    const currentTrackKey = () => {
-      const h = getPageHints();
-      const exactKey = globalThis.LvScore?.mediaKey(h);
-      if (exactKey) return exactKey;
-      const track = (h.track || h.pageTitle || '').trim();
-      const artist = (h.artist || '').trim();
-      return track ? `${track}|||${artist}` : '';
+    let watching=false, navigating=false, timer=0, poll=0, pendingKey='', pendingSince=0;
+    let lastTrackKey='', resumed=false, observer=null;
+    const metadataSelector='title, ytmusic-player-bar .title, ytmusic-player-bar .byline, [data-testid="context-item-info-title"], [data-testid="context-item-info-artist"], .playbackSoundBadge__titleLink, .playbackSoundBadge__lightLink, h1.title, h1 yt-formatted-string';
+    const send=message=>{try{chrome.runtime?.sendMessage(message).catch(()=>{});}catch(_){}};
+    const clear=()=>{clearTimeout(timer);clearInterval(poll);timer=poll=0;observer?.disconnect();observer=null;pendingKey='';pendingSince=0;};
+    const observeMetadata=()=>{
+      observer?.disconnect();
+      observer=new MutationObserver(()=>schedule());
+      for(const node of document.querySelectorAll(metadataSelector))if(!root.contains(node))observer.observe(node,{childList:true,subtree:true,characterData:true});
     };
-
-    const onPotentialChange = () => {
-      const listening = state.active || state.errorShown;
-      if (!listening) {
-        const k = currentTrackKey();
-        if (k) lastTrackKey = k;
+    const schedule=(delay=500)=>{
+      if(!watching||timer)return;
+      timer=setTimeout(check,delay);
+    };
+    const check=()=>{
+      timer=0;
+      if(!observationFocused()){sync();return;}
+      if(document.readyState!=='complete'||navigating)return;
+      const hints=getPageHints(),exact=LvScore.mediaKey(hints);
+      if(hints.isAd||hints.mediaReady===false){pendingKey='';pendingSince=0;return;}
+      const title=(hints.track||hints.pageTitle||'').trim(),artist=(hints.artist||'').trim();
+      const key=exact||(title?title+'|||'+artist:'');
+      if(!key)return;
+      const now=performance.now();
+      if(key!==pendingKey){pendingKey=key;pendingSince=now;schedule(500);return;}
+      if(now-pendingSince<500){schedule(500);return;}
+      const prevKey=lastTrackKey,changed=Boolean(lastTrackKey&&key!==lastTrackKey);
+      if(resumed||changed){
+        lastTrackKey=key;resumed=false;
+        // Resume deferred work or announce a stable identity change, never discard timings.
+        send({type:'LV_TRACK_CHANGED',prevKey,key,resume:true,changed});
+      }else if(!lastTrackKey)lastTrackKey=key;
+      observeMetadata();
+    };
+    const onPageEvent=event=>{if(watching&&(!event.target||!root.contains(event.target)))schedule();};
+    const navStart=()=>{navigating=true;clearTimeout(timer);timer=0;observer?.disconnect();if(watching)send({type:'LV_WATCH_STATE',active:false});cancelLoop();};
+    const navEnd=()=>{navigating=false;if(watching){observeMetadata();resumed=true;schedule();if(state.active)startLoop();}};
+    const sync=()=>{
+      const eligible=observationFocused();
+      if(!eligible){
+        if(watching){watching=false;clear();send({type:'LV_WATCH_STATE',active:false});}
+        cancelLoop();stopSpotifyPolling();cancelBeatClicks();
         return;
       }
-
-      const key = currentTrackKey();
-      if (!key) return;
-
-      if (key !== lastTrackKey) {
-        if (key !== pendingKey) {
-          pendingKey = key;
-          clearTimeout(stabilityTimer);
-          
-          // Wait for DOM to stabilize (prevents partial-update false positives)
-          // Keep these as SHORT as possible — the service worker has its own retries
-          const waitMs = state.isSpotify ? 150 : isYTMusic ? 300 : 100;
-          
-          stabilityTimer = setTimeout(() => {
-            const prevKey = lastTrackKey;
-            lastTrackKey = pendingKey;
-            
-            if (state.isSpotify) {
-              try {
-                chrome.runtime?.sendMessage({ type: 'LV_CONTENT_STOP' }).catch(() => {});
-                setTimeout(() => {
-                  try { chrome.runtime?.sendMessage({ type: 'LV_SPOTIFY_TRACK_CHANGED' }).catch(() => {}); } catch (_) {}
-                }, 100);
-              } catch (_) {}
-            } else {
-              try {
-                cancelLoop();
-                clearRevealTimers();
-                stage.textContent = '';
-                preview.textContent = '';
-                progressFill.style.width = '0%';
-                chrome.runtime?.sendMessage({ type: 'LV_TRACK_CHANGED', prevKey: prevKey || '' }).catch(() => {});
-              } catch (_) {}
-            }
-          }, waitMs);
-        }
-      } else {
-        // Reverted to lastTrackKey before stabilizing, or just noise
-        pendingKey = '';
-        clearTimeout(stabilityTimer);
-      }
+      if(watching)return;
+      watching=true;resumed=true;
+      if(document.readyState==='complete'&&!navigating)observeMetadata();
+      // One low-rate fallback covers replaced metadata nodes and missed SPA events.
+      poll=setInterval(()=>{if(document.readyState==='complete'){navigating=false;schedule();}},5000);
+      schedule();
+      if(state.active){if(state.isSpotify)startSpotifyPolling();startLoop();}
     };
-
-    let throttleTimer = 0;
-    const triggerCheck = () => {
-      clearTimeout(throttleTimer);
-      throttleTimer = setTimeout(onPotentialChange, 50);
-    };
-
-    const observer = new MutationObserver(records=>{if(records.some(record=>record.target!==root&&!root.contains(record.target)))triggerCheck();});
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-
-    const titleEl = document.querySelector('title');
-    if (titleEl) {
-      new MutationObserver(triggerCheck).observe(titleEl, { childList: true, characterData: true });
-    }
-
-    const hookMedia = () => {
-      const media = getMedia();
-      if (!media || media === mediaHooked) return;
-      mediaHooked = media;
-      ['loadedmetadata', 'durationchange', 'play'].forEach((evt) => {
-        media.addEventListener(evt, triggerCheck, { passive: true });
-      });
-
-      if (isYTMusic && media.tagName === 'VIDEO') {
-        if (ytmVideoSrcObserver) ytmVideoSrcObserver.disconnect();
-        ytmVideoSrcObserver = new MutationObserver(triggerCheck);
-        ytmVideoSrcObserver.observe(media, { attributes: true, attributeFilter: ['src'] });
-      }
-    };
-    hookMedia();
-    setInterval(hookMedia, 3000);
-
-    let lastUrl = location.href;
-    setInterval(() => {
-      if (location.href !== lastUrl) {
-        lastUrl = location.href;
-        triggerCheck();
-      }
-    }, isYTMusic ? 400 : 1000);
-
-    setInterval(triggerCheck, 3000);
+    document.addEventListener('visibilitychange',sync);
+    window.addEventListener('focus',sync);window.addEventListener('blur',sync);
+    window.addEventListener('pageshow',sync);
+    window.addEventListener('pagehide',()=>{watching=false;clear();send({type:'LV_WATCH_STATE',active:false});});
+    document.addEventListener('readystatechange',onPageEvent);window.addEventListener('load',onPageEvent);
+    window.addEventListener('popstate',onPageEvent);window.addEventListener('hashchange',onPageEvent);
+    document.addEventListener('yt-navigate-start',navStart);document.addEventListener('yt-navigate-finish',navEnd);
+    for(const name of ['loadedmetadata','durationchange','play'])document.addEventListener(name,onPageEvent,true);
+    return {sync,loading:()=>navigating,accept:key=>{if(key){lastTrackKey=key;pendingKey=key;pendingSince=performance.now();}},
+      status:()=>({watching,loading:navigating,pending:Boolean(timer),polling:Boolean(poll)})};
   }
 
   /* ══════════════════════════════════════
      TRACK START
      ══════════════════════════════════════ */
   function startTrack(payload) {
+    const hints=payload.hints||{};trackWatch?.accept(LvScore.mediaKey(hints)||((hints.track||hints.pageTitle||'').trim()+'|||'+(hints.artist||'').trim()));
     state.score = null;
     state.auditionLoop = null;
     clearRevealTimers();
@@ -3634,9 +3600,10 @@
      ══════════════════════════════════════ */
   function startLoop() {
     cancelLoop();
+    if(!observationFocused()||trackWatch?.loading())return;
 
     function tick() {
-      if (!state.active) return;
+      if (!state.active||!observationFocused()||trackWatch?.loading()) return;
       autoSyncButton.hidden = Boolean(state.score);
 
       const mediaMs = getMediaTimeMs();
@@ -4997,11 +4964,16 @@
      TEARDOWN / SHOW
      ══════════════════════════════════════ */
   function teardown() {
+    overlayEnabled=false;trackWatch?.sync();
+    resumeSyncPanel=resumeSyncPanel||!syncPanel.hidden;
+    cancelCountIn();listenToTake();
+    if(tapping.take?.status==='armed')tapping.take=eventTake(tapping.take)?LvTapTiming.stopEvents(tapping.take):wordTake(tapping.take)?LvTapTiming.stopWordHolds(tapping.take):LvTapTiming.stop(tapping.take);
+    performanceTake.armed=false; // Hiding is not Apply or Discard; retain completed gestures.
     setPreviewPlaying(false);
     hudSizeObserver.disconnect();
     cancelBeatClicks();if(beatClick.audio){beatClick.audio.close().catch(()=>{});beatClick.audio=null;}
     if (tapping.audio) { tapping.audio.close().catch(() => {}); tapping.audio = null; }
-    syncPanel.hidden = true; discardTimingLocal();
+    syncPanel.hidden = true;
     flowTeardown();
     clearRevealTimers();
     cancelLoop();
@@ -5025,14 +4997,17 @@
   }
 
   function show() {
+    const resuming=!overlayEnabled;overlayEnabled=true;
+    if(resuming&&resumeSyncPanel){syncPanel.hidden=false;resumeSyncPanel=false;}
     if (!root.isConnected) {
       root.append(viewport, preview, progress, hud, themePicker, shortcutsPanel, errorPanel);
       mountRoot();
     }
+    trackWatch?.sync();
   }
 
   function setHud(text, isError = false, sticky = false, isWarning = false) {
-    show();
+    if(overlayEnabled)show();
     if(isError)reportError(text);
     hud.classList.toggle('lvx-error', isError);
     hud.classList.toggle('lvx-warning', isWarning && !isError);
