@@ -6,6 +6,14 @@
   "use strict";
 
   const VERSION = "lyricvibe.score.v1";
+  const DISPLAY_CATALOG = Object.freeze({
+    version: 'lyricvibe.display.v1',
+    looks: Object.freeze(['samay','flow','fire','neon','glass','hype','soft','clean','retro','elegant','aurora','matrix','vinyl','cosmic']),
+    motions: Object.freeze(['off','mix','tip','flex','bounce','launch']),
+    wordEffects: Object.freeze(['shake','tilt','pulse']),
+    beatEffects: Object.freeze(['pulse','breath','color']),
+    layouts: Object.freeze(['classic','fall','puzzle','vinyl'])
+  });
   const EFFECTS = new Set(["shake", "tilt", "pulse"]);
   const REVEAL_EASINGS = new Set(["linear", "ease-out", "ease-in-out"]);
   const ID_RE = /^[A-Za-z0-9_-]{11}$/;
@@ -277,6 +285,10 @@
         if (typeof word.startMs !== "number" || !Number.isFinite(word.startMs) || word.startMs < 0 || typeof word.endMs !== "number" || !Number.isFinite(word.endMs) || word.endMs < 0 || word.endMs < word.startMs || word.startMs < phrase.startMs || word.endMs > phrase.endMs || !["estimated", "manual", "aligned"].includes(word.provenance) || typeof word.locked !== "boolean" || !Array.isArray(word.effects)) bad("invalid word timing or fields");
         if (word.excluded !== undefined && typeof word.excluded !== "boolean") bad("word excluded must be boolean when present");
         if(word.displayMode!==undefined&&word.displayMode!=='whole')bad('invalid word displayMode');
+        if(word.appearance!==undefined){
+          const a=word.appearance;
+          if(!a||typeof a!=='object'||Array.isArray(a)||Object.keys(a).some(k=>!['look','motion'].includes(k))||!Object.keys(a).length||a.look!==undefined&&!DISPLAY_CATALOG.looks.includes(a.look)||a.motion!==undefined&&!DISPLAY_CATALOG.motions.includes(a.motion))bad('invalid word appearance');
+        }
         if (word.spokenText !== undefined && (typeof word.spokenText !== "string" || !word.spokenText.trim() || word.spokenText.length > 256 || word.spokenText.includes("|"))) bad("invalid spokenText");
         for (const effect of word.effects) if (!effect || !EFFECTS.has(effect.type) || typeof effect.strength !== "number" || !Number.isFinite(effect.strength) || effect.strength < 0 || effect.strength > 1) bad("invalid effect");
         if (word.reveal !== undefined && !validReveal(word.reveal)) bad("invalid word reveal");
@@ -291,6 +303,21 @@
             if (syllable.reveal !== undefined && !validReveal(syllable.reveal)) bad("invalid syllable reveal");
           }
         }
+      }
+    }
+    if(score.stageRegions!==undefined){
+      if(!Array.isArray(score.stageRegions)||score.stageRegions.length>512)bad('stage regions must be a bounded list');
+      const seen=new Set();
+      for(const region of score.stageRegions){
+        const r=region?.rect;
+        if(!region||typeof region.id!=='string'||!region.id||region.id.length>128||seen.has(region.id)||region.provenance!=='manual'||region.target?.kind!=='phrase'||!score.phrases.some(p=>p.id===region.target.id))bad('invalid stage region identity or target');
+        seen.add(region.id);
+        if(!Number.isSafeInteger(region.startMs)||region.startMs<0||!Number.isSafeInteger(region.endMs)||region.endMs<=region.startMs)bad('stage interval must use increasing source milliseconds');
+        if(!r||['x','y','width','height'].some(k=>typeof r[k]!=='number'||!Number.isFinite(r[k]))||r.x<0||r.y<0||r.width<.02||r.height<.02||r.x+r.width>1.000001||r.y+r.height>1.000001)bad('stage rectangle must fit inside the normalized video surface');
+      }
+      for(let i=0;i<score.stageRegions.length;i++)for(let j=i+1;j<score.stageRegions.length;j++){
+        const a=score.stageRegions[i],b=score.stageRegions[j];
+        if(a.target.id===b.target.id&&a.startMs<b.endMs&&b.startMs<a.endMs)bad('overlapping stage intervals for the same phrase');
       }
     }
     if(score.beatCues!==undefined){
@@ -344,7 +371,16 @@
     if (!operation || typeof operation !== "object" || typeof operation.type !== "string") fail("INVALID_OPERATION", "operation must have a type");
     const next = clone(score);
     const op = operation;
-    if(op.type==='setBeatCue'){
+    if(op.type==='setStageRegion'){
+      if(!op.region||typeof op.region.id!=='string')fail('INVALID_OPERATION','Provide a timed stage region');
+      next.stageRegions=[...(next.stageRegions||[]).filter(r=>r.id!==op.region.id),clone(op.region)];
+    }else if(op.type==='deleteStageRegion'){
+      if(!(next.stageRegions||[]).some(r=>r.id===op.regionId))fail('UNKNOWN_ID','Unknown stage region');
+      next.stageRegions=next.stageRegions.filter(r=>r.id!==op.regionId);
+    }else if(op.type==='setWordAppearance'){
+      const {word}=locateWord(next,op.wordId);
+      if(op.appearance===null)delete word.appearance;else word.appearance=clone(op.appearance);
+    }else if(op.type==='setBeatCue'){
       if(!op.cue||typeof op.cue.id!=='string')fail('INVALID_OPERATION','Provide a beat cue');
       next.beatCues=[...(next.beatCues||[]).filter(c=>c.id!==op.cue.id),clone(op.cue)];
     }else if(op.type==='deleteBeatCue'){
@@ -698,5 +734,6 @@
     return { version: receipt.version, mediaKey: receipt.mediaKey, lyricsHash: receipt.lyricsHash, expectedRevision: receipt.expectedRevision, adapter: receipt.adapter, model: receipt.model, proposals, automaticAdmissionEnabled: false };
   }
 
-  return { VERSION, ScoreError, mediaKey, parseLrc, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment };
+  function stageRegionAt(score,phraseId,sourceMs){return (score.stageRegions||[]).find(r=>r.target.id===phraseId&&sourceMs>=r.startMs&&sourceMs<r.endMs)||null;}
+  return { VERSION, DISPLAY_CATALOG, stageRegionAt, ScoreError, mediaKey, parseLrc, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment };
 });

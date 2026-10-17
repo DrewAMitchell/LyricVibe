@@ -99,7 +99,7 @@
       const gap=font*.12;
       const boxes=words.map((word,index)=>{
         const size=Math.min(maxFont,Math.max(minFont,font*weight(word))),angle=upsideDown&&index%5===2?180:0;
-        const w=Math.max(size*.2,measure(word.text,size))+size*.08,h=size*1.3,vertical=angle===90;
+        const w=Math.max(size*.2,measure(word.text,size,word))+size*.08,h=size*1.3,vertical=angle===90;
         return {index,width:w,height:h,boxWidth:vertical?h:w,boxHeight:vertical?w:h,font:size,angle};
       }).sort((a,b)=>b.boxWidth*b.boxHeight-a.boxWidth*a.boxHeight||a.index-b.index);
       let free=[{x:0,y:0,w:width,h:height}],slots=[],failed=false;
@@ -140,7 +140,7 @@
       words.forEach((word,index)=>rows[Math.min(count-1,Math.floor(index*count/words.length))].push({word,index}));
       for(let scale=maxFont/Math.max(1,...words.map(weight)),attempt=0;attempt<90;attempt++,scale*=.94){
         if(best&&scale<=best.scale)break;
-        const boxes=rows.map(row=>row.map(({word,index})=>{const font=Math.min(maxFont,Math.max(minFont,scale*weight(word)));return {index,font,width:Math.max(font*.2,measure(word.text,font))+font*.08,height:font*1.3,angle:0};}));
+        const boxes=rows.map(row=>row.map(({word,index})=>{const font=Math.min(maxFont,Math.max(minFont,scale*weight(word)));return {index,font,width:Math.max(font*.2,measure(word.text,font,word))+font*.08,height:font*1.3,angle:0};}));
         const gap=scale*.16,rowGap=scale*.12,rowWidths=boxes.map(row=>row.reduce((n,b)=>n+b.width,0)+gap*(row.length-1)),rowHeights=boxes.map(row=>Math.max(...row.map(b=>b.height))),totalHeight=rowHeights.reduce((a,b)=>a+b,0)+rowGap*(count-1);
         if(Math.max(...rowWidths)>width||totalHeight>height){if(scale*1.8<=minFont)break;continue;}
         let y=(height-totalHeight)/2;const slots=[];
@@ -165,7 +165,7 @@
       rows=[];let row={items:[],width:0,height:0};const gap=font*.22;
       for(let i=0;i<words.length;i++){
         const angle=0;
-        const size=font*weight(words[i]),w=Math.max(size*.2,measure(words[i].text,size))+size*.08,h=size*1.3,vertical=Math.abs(angle)===90,bw=vertical?h:w,bh=vertical?w:h;
+        const size=font*weight(words[i]),w=Math.max(size*.2,measure(words[i].text,size,words[i]))+size*.08,h=size*1.3,vertical=Math.abs(angle)===90,bw=vertical?h:w,bh=vertical?w:h;
         if(!singleLine&&row.items.length&&row.width+gap+bw>width){rows.push(row);row={items:[],width:0,height:0};}
         const x=row.width+(row.items.length?gap:0);row.items.push({index:i,width:w,height:h,boxWidth:bw,boxHeight:bh,x,angle,font:size});row.width=x+bw;row.height=Math.max(row.height,bh);
       }
