@@ -307,9 +307,14 @@
   const timingBeatView=sidebarView('timing-beat','Beat','Timing · set tempo and sections',()=>void openTimingView('beat'));
   const stageEditView=sidebarView('stage-edit','Stage Edit','Open Stage Edit for this video',()=>void openStageEdit().then(syncSidebarState));
   sidebarNav.append(sidebarPin,sidebarItems);
-  const tempoButton=document.createElement('button');tempoButton.className='lvx-theme-btn lvx-tempo-button';tempoButton.textContent='♩ — BPM · T';
+  const tempoControls=document.createElement('div');tempoControls.className='lvx-sidebar-tempo';tempoControls.setAttribute('role','group');tempoControls.setAttribute('aria-label','Beat timing');
+  const tempoButton=document.createElement('button');tempoButton.className='lvx-theme-btn lvx-tempo-button';
+  tempoButton.innerHTML='<span class="lvx-tempo-caption">♩ — BPM · T</span><span class="lvx-tempo-position" aria-hidden="true">—</span><span class="lvx-tempo-phase" aria-hidden="true"><i></i><b></b></span>';
+  const tempoCaption=tempoButton.querySelector('.lvx-tempo-caption'),tempoPosition=tempoButton.querySelector('.lvx-tempo-position');
   tempoButton.title='Tap here or press T. The first tap sets beat 1. Beat clicker has exact BPM and Click controls; Sections opens duration blocks.';
   tempoButton.addEventListener('click',()=>void (hasBaselineTempo()?tapTempo():openTempoSetup()));
+  const sidebarDownbeat=document.createElement('button');sidebarDownbeat.type='button';sidebarDownbeat.className='lvx-sidebar-downbeat';sidebarDownbeat.textContent='Beat 1 here';sidebarDownbeat.title='Set beat 1 at the current song position, keeping the BPM';sidebarDownbeat.onclick=()=>syncButton('tempo-downbeat').click();
+  tempoControls.append(tempoButton,sidebarDownbeat);
   const statusGroup = document.createElement('span'); statusGroup.className = 'lvx-hud-status'; statusGroup.append(hudLabel, hudText);
   const speedGroup=document.createElement('span');speedGroup.className='lvx-hud-group lvx-speed-group';
   speedGroup.setAttribute('role','group');speedGroup.setAttribute('aria-label','Playback speed');
@@ -318,7 +323,7 @@
   for(const rate of PLAYBACK_RATES){const option=document.createElement('option');option.value=String(rate);option.textContent=rate+'×';speedSelect.append(option);}
   for(const [rate,label,title]of [[.5,'½×','Half speed'],[.75,'¾×','Three-quarter speed'],[1,'1×','Real-time speed']]){const button=document.createElement('button');button.type='button';button.textContent=label;button.dataset.playbackRate=rate;button.title=title;button.setAttribute('aria-label',title);button.onclick=()=>setPlaybackSpeed(rate);speedGroup.append(button);}
   speedGroup.append(speedSelect);speedSelect.onchange=()=>setPlaybackSpeed(Number(speedSelect.value));
-  hud.append(statusGroup, speedGroup, offsetGroup, editGroup, themeButton, tempoButton, errorButton, endGroup);
+  hud.append(statusGroup, speedGroup, offsetGroup, editGroup, themeButton, tempoControls, errorButton, endGroup);
   sidebar.append(sidebarNav,hud);
   sidebarPin.onclick=()=>{const pinned=sidebar.classList.toggle('lvx-sidebar-pinned');sidebarPin.setAttribute('aria-pressed',String(pinned));sidebarPin.setAttribute('aria-label',pinned?'Unpin controls':'Pin controls open');};
   const syncSidebarState=()=>{
@@ -996,7 +1001,16 @@
     root.style.setProperty('--lvx-bloom-alpha',bloomEnabled?String(.06+.18*pulse):'0');
     root.style.setProperty('--lvx-bloom-radius',`${16+18*pulse}px`);
     const text=e?`♩ ${Math.round(e.bpm)} BPM · T`:`♩ ${tempo.taps.length&&valid?tempo.taps.length+'/4':'—'} BPM · T`;
-    if(tempoButton.textContent!==text)tempoButton.textContent=text;
+    if(tempoCaption.textContent!==text)tempoCaption.textContent=text;
+    const beatsPerBar=tempo.map?.beatsPerBar||4,beatInBar=e?((Math.floor(e.beat)%beatsPerBar)+beatsPerBar)%beatsPerBar+1:null;
+    const position=e?`${beatInBar} / ${beatsPerBar}`:'—';if(tempoPosition.textContent!==position)tempoPosition.textContent=position;
+    const phaseValue=e?e.phase:0,impact=e&&!bloomMotion.matches?Math.pow(1-phaseValue,3):0;
+    tempoButton.style.setProperty('--lvx-beat-phase',phaseValue.toFixed(4));tempoButton.style.setProperty('--lvx-beat-impact',impact.toFixed(4));
+    tempoButton.dataset.phase=phaseValue.toFixed(4);tempoButton.dataset.beat=String(beatInBar??'');tempoButton.dataset.ready=String(Boolean(e));
+    const locked=timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active;
+    tempoButton.disabled=Boolean(locked);sidebarDownbeat.disabled=Boolean(locked||!valid||!getMedia());
+    const accessible=e?`${Math.round(e.bpm)} BPM. Beat ${beatInBar} of ${beatsPerBar}. Tap tempo or press T.`:'Set tempo or tap four beats.';
+    if(tempoButton.getAttribute('aria-label')!==accessible)tempoButton.setAttribute('aria-label',accessible);
     const on=String(Boolean(e&&e.phase<.18));if(tempoButton.dataset.on!==on)tempoButton.dataset.on=on;
     const down=String(Boolean(e&&((Math.floor(e.beat)%(tempo.map.beatsPerBar||4))+(tempo.map.beatsPerBar||4))%(tempo.map.beatsPerBar||4)===0));if(tempoButton.dataset.downbeat!==down)tempoButton.dataset.downbeat=down;
   }

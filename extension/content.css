@@ -2829,4 +2829,18 @@
 #lvx-root .lvx-sidebar{top:24px;transform:none;align-items:flex-start}
 #lvx-root .lvx-sidebar .lvx-hud{display:none}
 #lvx-root .lvx-sidebar:is(:hover,:focus-within,.lvx-sidebar-pinned) .lvx-hud{display:flex}
+#lvx-root .lvx-sidebar-tempo{display:grid;grid-template-columns:minmax(0,1fr) 70px;gap:5px}
+#lvx-root .lvx-sidebar .lvx-sidebar-tempo .lvx-tempo-button{position:relative;display:grid;grid-template-columns:1fr auto;gap:9px 4px;align-items:center;flex:none;width:auto;min-width:0;min-height:58px;margin:0;padding:9px 10px 12px;border:1px solid #637b55;border-radius:10px;background:#263323;color:#e6f4dc;text-align:left;box-sizing:border-box;box-shadow:inset 0 0 18px rgba(199,236,162,calc(var(--lvx-beat-impact,0)*.2));overflow:hidden}
+#lvx-root .lvx-sidebar .lvx-sidebar-tempo .lvx-tempo-button[data-downbeat=true]{border-color:#c6ac71;background:#3d3523;color:#fff0cc}
+#lvx-root .lvx-tempo-caption{font:600 11px/1.2 system-ui;white-space:nowrap}
+#lvx-root .lvx-tempo-position{font:700 10px/1.2 ui-monospace,monospace;white-space:nowrap;color:#d1dabf}
+#lvx-root .lvx-tempo-phase{position:relative;display:block;grid-column:1/-1;height:5px;border-radius:4px;background:#07100899;margin:0 4px}
+#lvx-root .lvx-tempo-phase i{position:absolute;inset:0;background:#b8d99a;border-radius:inherit;transform:scaleX(var(--lvx-beat-phase,0));transform-origin:left}
+#lvx-root .lvx-tempo-phase b{position:absolute;left:calc(var(--lvx-beat-phase,0)*100%);top:50%;width:8px;height:8px;border-radius:50%;background:#ecffcf;transform:translate(-50%,-50%) scale(calc(1 + var(--lvx-beat-impact,0)*.5));box-shadow:0 0 calc(3px + var(--lvx-beat-impact,0)*10px) #c5ee9c}
+#lvx-root [data-downbeat=true] .lvx-tempo-phase :is(i,b){background:#f4ce80}
+#lvx-root .lvx-tempo-button[data-ready=false] .lvx-tempo-phase{opacity:.35}
+#lvx-root .lvx-sidebar-downbeat{min-width:0;border:1px solid #65766b;border-radius:10px;background:#18252a;color:#e8eee4;font:600 11px/1.3 system-ui;padding:5px;cursor:pointer}
+#lvx-root .lvx-sidebar-downbeat:hover{background:#31483c}
+#lvx-root .lvx-sidebar-tempo button:disabled{opacity:.45;cursor:default}
+@media(prefers-reduced-motion:reduce){#lvx-root .lvx-tempo-phase b{transform:translate(-50%,-50%);box-shadow:none}#lvx-root .lvx-sidebar .lvx-sidebar-tempo .lvx-tempo-button{box-shadow:none}}
 @media(max-width:600px){#lvx-root .lvx-sidebar .lvx-speed-group [data-playback-rate]{display:none}}
