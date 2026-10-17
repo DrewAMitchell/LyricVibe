@@ -142,3 +142,13 @@ test('preferred minimum yields to fitting the whole phrase without changing word
  const single=require('../extension/choreography.js').readablePages([{id:'long',text:'SUPERCALIFRAGILISTIC'}],160,300,measure,{mode:'puzzle',minFont:32,maxFont:60});assert.ok(single[0].slots[0].font<32);assert.ok(single[0].slots[0].boxWidth<=160.01);
  const short=require('../extension/choreography.js').readablePages([{id:'short',text:'HI'}],420,170,measure,{mode:'classic',minFont:32,maxFont:60});assert.ok(short[0].slots[0].font>=32,'preferred minimum remains when the phrase fits');
 });
+
+test('backing has one bounded budget while shared space returns full main height',()=>{
+  const {backingSettings,vocalAreas}=require('../extension/choreography.js');
+  assert.deepEqual(backingSettings(),{space:'separate',area:.25});
+  assert.deepEqual(backingSettings({space:'bad',area:5}),{space:'separate',area:.4});
+  assert.equal(backingSettings({area:NaN}).area,.25);
+  assert.deepEqual(vocalAreas(1000,800,true),{main:{x:0,y:0,width:1000,height:600},backing:{x:100,y:600,width:800,height:200}});
+  assert.equal(vocalAreas(1000,800,true,{space:'shared',area:.3}).main.height,800);
+  assert.equal(vocalAreas(1000,800,false).main.height,800);
+});

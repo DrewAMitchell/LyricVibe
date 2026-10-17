@@ -230,5 +230,13 @@
       const scale=R*glyph.font/100;ctx.save();ctx.translate(cx+R*glyph.x,cy+R*glyph.y);ctx.rotate(glyph.angle+Math.PI/2);ctx.globalAlpha=glyph.top?1:.52+.48*glyph.radius;ctx.drawImage(sprite,-sprite.width*scale/2,-75*scale,sprite.width*scale,150*scale);ctx.restore();}
     ctx.restore();return frame;
   }
-  const api={layout,readablePages,arrival,compose,expressionAt,danceAt,vinylTrack,vinylAt,paintVinyl};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
+  function backingSettings(value={}){
+    return {space:value?.space==='shared'?'shared':'separate',area:Number.isFinite(value?.area)?Math.max(.15,Math.min(.4,value.area)):.25};
+  }
+  // All backing lanes share one budget, independent of their phrase count.
+  function vocalAreas(width,height,hasBacking,value){
+    const settings=backingSettings(value),band=hasBacking?height*settings.area:0;
+    return {main:{x:0,y:0,width,height:height-(settings.space==='separate'?band:0)},backing:{x:width*.1,y:height-band,width:width*.8,height:band}};
+  }
+  const api={layout,readablePages,arrival,compose,expressionAt,danceAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

@@ -339,6 +339,11 @@
   const themePicker = document.createElement('div');
   themePicker.className = 'lvx-theme-picker'; themePicker.hidden = true;
   const studio={view:'look',page:0,effectsOpen:false,areaOpen:false,exitOpen:false};
+  let backingDisplay=LvChoreography.backingSettings(),backingLabels={};
+  function backingLabelKey(){const score=timing.draft?.score||state.score;return score?LvScore.mediaKey(score.source):null;}
+  function backingLabelMode(){return backingLabels[backingLabelKey()]||'hidden';}
+  function setBackingLabel(value){const key=backingLabelKey();if(!key)return;backingLabels={...backingLabels,[key]:['header','prefix'].includes(value)?value:'hidden'};state.scoreSignature='';chrome.storage.local.set({lvxBackingLabels:backingLabels}).catch(error=>setHud('Backing names changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
+  function setBackingDisplay(value){backingDisplay=LvChoreography.backingSettings(value);state.scoreSignature='';chrome.storage.local.set({lvxBackingDisplay:backingDisplay}).catch(error=>setHud('Backing display changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
   let choreography={dance:'off',mode:'classic',upsideDown:false,automatic:false,fillStage:true,arrangement:'chaotic',origin:'top-left'},previewPlaying=false,previewFrame=0,previewTime=1600,previewLast=0,previewTheme=state.theme;
   const choreographyPlans=new WeakMap(),choreographyMeasure=document.createElement('canvas').getContext('2d');
   function setChoreography(value){choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(value.dance)?value.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic===true,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
@@ -468,7 +473,12 @@
     settings.open=studio.areaOpen;settings.ontoggle=()=>{if(!settings.isConnected)return;studio.areaOpen=settings.open;if(settings.open){exits.open=false;studio.exitOpen=false;}};
     const exits=document.createElement('details');exits.className='lvx-studio-exits';exits.open=studio.exitOpen;exits.innerHTML='<summary>Phrase exits <span>When the singing stops</span></summary>';exits.append(lingerControls);exits.ontoggle=()=>{if(!exits.isConnected)return;studio.exitOpen=exits.open;if(exits.open){settings.open=false;studio.areaOpen=false;}};
     performanceControls.querySelector('p').textContent='Drag to place lyrics. Long phrases shrink to fit.';
-    panels.stage.append(performanceControls,settings,exits);
+    const backing=document.createElement('section');backing.className='lvx-backing-controls';
+    backing.innerHTML='<h3>Backing vocals</h3><label>Space <select aria-label="Backing vocal space"><option value="separate">Separate area</option><option value="shared">Share main area</option></select></label><label>Area limit <input aria-label="Backing area limit" type="range" min="15" max="40" step="1"><output></output></label><p>All backing parts share this limit. Smaller, plain text at 65% opacity. Drawn Stage Edit regions take priority.</p>';
+    const backingSpace=backing.querySelector('select'),backingArea=backing.querySelector('input'),backingValue=backing.querySelector('output');backingSpace.value=backingDisplay.space;backingArea.value=String(Math.round(backingDisplay.area*100));backingValue.textContent=backingArea.value+'%';
+    const labels=document.createElement('label');labels.innerHTML='Part names · this song <select aria-label="Backing part names"><option value="hidden">Hidden</option><option value="header">Header</option><option value="prefix">Prefix</option></select>';const labelSelect=labels.querySelector('select');labelSelect.value=backingLabelMode();labelSelect.disabled=!backingLabelKey();labelSelect.onchange=()=>setBackingLabel(labelSelect.value);backing.insertBefore(labels,backing.querySelector('p'));
+    backingSpace.onchange=()=>setBackingDisplay({...backingDisplay,space:backingSpace.value});backingArea.oninput=()=>{backingValue.textContent=backingArea.value+'%';setBackingDisplay({...backingDisplay,area:Number(backingArea.value)/100});};
+    panels.stage.append(performanceControls,backing,settings,exits);
     const footer=document.createElement('footer');footer.className='lvx-studio-footer';const current=document.createElement('span');current.className='lvx-studio-current';current.textContent=THEME_LABELS[state.theme]+' · applied';footer.append(current,play,bloomLabel);
     themePicker.replaceChildren(heading,tabs,...Object.values(panels),footer);
     function show(){for(const [id,panel]of Object.entries(panels)){panel.hidden=id!==studio.view;const tab=tabs.querySelector(`[data-studio-tab="${id}"]`);tab.setAttribute('aria-selected',String(!panel.hidden));tab.tabIndex=panel.hidden?-1:0;}previewTheme=studio.view==='motion'?state.theme:previewTheme;renderStylePreview();}
@@ -2705,6 +2715,7 @@
     placement:Object.freeze({getState:()=>({...placement}),set:value=>applyPlacement(value,true)}),
     choreography:Object.freeze({getState:()=>({...choreography}),set:value=>setChoreography({...choreography,...value}),inspect:()=>{const score=timing.draft&&timing.view==='proposed'?timing.draft.score:state.score;return score&&typeof LvChoreography!=='undefined'?LvChoreography.compose(score):{};}}),
     linger:Object.freeze({getState:()=>({...linger}),set:setLinger}),
+    backingDisplay:Object.freeze({getState:()=>({...backingDisplay,labels:backingLabelMode()}),set:setBackingDisplay,setLabels:setBackingLabel}),
     tempo:Object.freeze({getState:()=>JSON.parse(JSON.stringify({mediaKey:tempo.mediaKey,map:tempo.map,taps:tempo.taps,estimate:tempo.estimate,revision:tempo.revision})),at:ms=>LvTapTiming.tempoAt(tempo.map,ms),tap:tapTempo,setMap:updateTempoMap}),
     sync: Object.freeze({ getState: () => JSON.parse(JSON.stringify(timing)), open: openTimingReview,
       selectPhrase: index => navigateTiming(index - timing.phraseIndex), setView: view => { if (['saved','proposed'].includes(view)) syncButton(view).click(); },
@@ -2719,7 +2730,9 @@
 
   /* Load saved preferences (theme, font scale, lite mode) */
   try {
-    chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement','lvxBloomEnabled','lvxChoreography','lvxLinger','lvxRecordOtherParts'], (result) => {
+    chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement','lvxBloomEnabled','lvxChoreography','lvxLinger','lvxRecordOtherParts','lvxBackingDisplay','lvxBackingLabels'], (result) => {
+      backingDisplay=LvChoreography.backingSettings(result?.lvxBackingDisplay);
+      backingLabels=Object.fromEntries(Object.entries(result?.lvxBackingLabels||{}).filter(([key,value])=>['hidden','header','prefix'].includes(value)));
       syncButton('record-other-parts').checked=result?.lvxRecordOtherParts===true;
       linger=LvBeatTrack.lingerSettings(result?.lvxLinger);
       if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic===true,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(c.origin)?c.origin:'top-left'};}
@@ -4127,13 +4140,13 @@
     });
   }
 
-  function renderVinylScore(score,mediaMs){
+  function renderVinylScore(score,mediaMs,area){
     stage.classList.add('lvx-score-stage','lvx-vinyl-stage');stage.classList.remove('lvx-choreography-stage');stage.style.paddingTop='0px';
     let canvas=stage.querySelector('.lvx-vinyl-canvas');
-    if(!canvas){stage.replaceChildren();canvas=document.createElement('canvas');canvas.className='lvx-vinyl-canvas';canvas.setAttribute('role','img');canvas.setAttribute('aria-label','Vinyl lyric history: earlier words wind toward the center');stage.append(canvas);state.scoreSignature='vinyl';}
-    const ctx=canvas.getContext('2d'),dpr=Math.min(2,devicePixelRatio||1),width=Math.max(1,stage.clientWidth),height=Math.max(1,stage.clientHeight),clock=mediaMs-score.offsetMs;canvas.style.marginTop='0px';canvas.style.height=height+'px';
+    if(!canvas){canvas=document.createElement('canvas');canvas.className='lvx-vinyl-canvas';canvas.setAttribute('role','img');canvas.setAttribute('aria-label','Vinyl lyric history: earlier words wind toward the center');stage.prepend(canvas);}
+    const ctx=canvas.getContext('2d'),dpr=Math.min(2,devicePixelRatio||1),width=Math.max(1,area.width),height=Math.max(1,area.height),clock=mediaMs-score.offsetMs;Object.assign(canvas.style,{position:'absolute',left:area.x+'px',top:area.y+'px',width:width+'px',height:height+'px',margin:'0'});
     const pixelW=Math.round(width*dpr),pixelH=Math.round(height*dpr);if(canvas.width!==pixelW||canvas.height!==pixelH){canvas.width=pixelW;canvas.height=pixelH;canvas.__frameKey=null;}
-    if(canvas.__score!==score){ctx.font='800 100px Arial Narrow, Impact, sans-serif';canvas.__track=LvChoreography.vinylTrack(score,text=>ctx.measureText(text).width/100);canvas.__score=score;canvas.__frameKey=null;}
+    if(canvas.__score!==score){ctx.font='800 100px Arial Narrow, Impact, sans-serif';const main={...score,phrases:score.phrases.filter(p=>score.lanes.find(l=>l.id===p.laneId)?.role!=='backing')};canvas.__track=LvChoreography.vinylTrack(main,text=>ctx.measureText(text).width/100);canvas.__score=score;canvas.__frameKey=null;}
     const key=[clock,width,height,bloomMotion.matches].join(':');if(canvas.__frameKey===key)return;canvas.__frameKey=key;ctx.setTransform(dpr,0,0,dpr,0,0);
     const frame=LvChoreography.paintVinyl(ctx,canvas.__track,clock,width,height,{reduced:bloomMotion.matches});canvas.dataset.wordCount=String(frame.words.length);canvas.dataset.glyphCount=String(frame.glyphs.length);canvas.dataset.firstWord=frame.words[0]||'';canvas.dataset.sourceMs=String(mediaMs);canvas.dataset.scoreMs=String(clock);
     if(canvas.__transcript!==frame.text){canvas.__transcript=frame.text;canvas.setAttribute('aria-label','Sung lyric history: '+(frame.text||'waiting for the first word'));}
@@ -4149,7 +4162,8 @@
     if(stageEdit.active&&stageEdit.drag){const p=stagePhrase();if(p){const existing=regionFrame.findIndex(r=>r.target.id===p.id),draft={id:'drag',target:{kind:'phrase',id:p.id},rect:stageEdit.drag.rect};if(existing>=0)regionFrame[existing]=draft;else regionFrame.push(draft);}}
     const regionLayout=regionFrame.length>0;
     if(stage.dataset.regionLayout!==String(regionLayout)){stage.dataset.regionLayout=String(regionLayout);for(const key of ['left','top','width','height'])stage.style[key]=(regionLayout?({left:0,top:0,width:100,height:100})[key]:placement[key])+'%';state.scoreSignature='';}
-    if(choreography.mode==='vinyl'&&!regionLayout&&!stageEdit.active&&!score.phrases.some(p=>mediaMs-score.offsetMs>=p.startMs&&mediaMs-score.offsetMs<p.endMs&&p.words.some(w=>w.appearance))){renderVinylScore(score,mediaMs);return;}
+    const isBacking=phrase=>score.lanes.find(l=>l.id===phrase.laneId)?.role==='backing';
+    const useVinyl=choreography.mode==='vinyl'&&!regionLayout&&!stageEdit.active&&!score.phrases.some(p=>!isBacking(p)&&mediaMs-score.offsetMs>=p.startMs&&mediaMs-score.offsetMs<p.endMs&&p.words.some(w=>w.appearance));
     if(beatDisplayCache.score!==score||beatDisplayCache.map!==tempo.map||beatDisplayCache.linger!==linger){const ends=LvBeatTrack.presentationEnds(score,tempo.map,linger);beatDisplayCache={score,map:tempo.map,linger,ends:ends.phrases,units:ends.units};}
     const active = LvScore.activeAt(score, mediaMs,{displayEnds:beatDisplayCache.ends});
     // Lead-in: an empty lane shows its next phrase dimmed up to 2s early, so a rewind is never a blank screen.
@@ -4166,7 +4180,8 @@
         for (const part of word.syllables || []) { const child = operations.get(part.id); if (child) part.effects = child.effect ? [child.effect] : []; }
       }
     }
-    const signature = `${score.revision}:${timing.draft?.previewRevision ?? 'saved'}:${timing.view}:${state.theme}:${regionFrame.map(r=>r.id).join(',')}:` + active.phrases.map(p => p.id).join('|');
+    if(useVinyl)active.phrases=active.phrases.filter(isBacking);
+    const signature = `${score.revision}:${timing.draft?.previewRevision ?? 'saved'}:${timing.view}:${state.theme}:${useVinyl}:${regionFrame.map(r=>r.id).join(',')}:` + active.phrases.map(p => p.id).join('|');
     if (signature !== state.scoreSignature || !stage.classList.contains('lvx-score-stage')) {
       stage.textContent = '';
       stage.classList.add('lvx-score-stage');
@@ -4201,9 +4216,12 @@
           line.appendChild(span);
         }
         stage.appendChild(line);
+        if(lane?.role==='backing'&&backingLabelMode()!=='hidden'){const label=document.createElement('div');label.className='lvx-backing-label';label.dataset.backingFor=phrase.id;label.textContent=(lane.label||'Backing')+(backingLabelMode()==='prefix'?':':'');stage.append(label);}
       }
       state.scoreSignature = signature;
     }
+    const areas=LvChoreography.vocalAreas(stage.clientWidth,stage.clientHeight,score.phrases.some(p=>isBacking(p)&&p.words.some(w=>!w.excluded)),backingDisplay);
+    if(useVinyl)renderVinylScore(score,mediaMs,areas.main);
     renderBeatEffects(score,mediaMs);
     const cues=typeof LvChoreography==='undefined'?{}:expressionCues(score);
     // Authoring outline only while editing, so you can see where to continue a take while scrubbing.
@@ -4213,7 +4231,8 @@
     for (const phrase of active.phrases) {
       const line = [...stage.children].find(el => el.dataset.phrase === phrase.id);
       if (!line) continue;
-      line.style.opacity = phrase.opacity;
+      const backing=isBacking(phrase);
+      line.style.opacity = phrase.opacity*(backing ? .65 : 1);
       if (takeIds) { const a = phraseAuthoring(phrase, takeIds); line.dataset.authored = a.level; line.dataset.progress = authoringProgress(a); line.dataset.mixed = String(a.mixed); line.title = AUTHORING_LABELS[a.level]; }
       else { delete line.dataset.authored; delete line.dataset.progress; delete line.dataset.mixed; line.removeAttribute('title'); }
       for (let index = 0; index < phrase.words.length; index++) {
@@ -4239,12 +4258,16 @@
           applyReveal(part, syllable, mediaMs - score.offsetMs);
         }
       }
-      const authoredRegion=regionFrame.find(r=>r.target.id===phrase.id),settings=authoredRegion||stageEdit.active||choreography.mode==='vinyl'?{...choreography,mode:'classic',automatic:false,dance:'off'}:choreography;
-      let width=Math.max(1,stage.clientWidth-32),height=Math.max(1,(stage.clientHeight-choreographyTop-16)/Math.max(1,active.phrases.length)-12),rect=null;
-      if(regionLayout){const slot=active.phrases.indexOf(phrase),count=active.phrases.length;rect=authoredRegion?.rect||{x:placement.left/100,y:placement.top/100+placement.height/100*slot/count,width:placement.width/100,height:placement.height/100/count};width=Math.max(1,stage.clientWidth*rect.width);height=Math.max(1,stage.clientHeight*rect.height);}
-      choreographLine(line,phrase.words,atMs,width,height,settings.mode==='puzzle'?(settings.fillStage?Math.max(width,height):placement.maxFontPx):Math.min(placement.maxFontPx,laneFont(phrase,score)),settings.automatic?cues:{},placement.minFontPx,settings);
-      if(rect){Object.assign(line.style,{position:'absolute',left:rect.x*stage.clientWidth+'px',top:rect.y*stage.clientHeight+'px',margin:'0',overflow:'hidden'});line.dataset.region=authoredRegion?.id||'default';}
-      expressLine(line,phrase.words,atMs,cues,settings);
+      const authoredRegion=regionFrame.find(r=>r.target.id===phrase.id),settings=backing||authoredRegion||stageEdit.active||choreography.mode==='vinyl'?{...choreography,mode:'classic',automatic:false,dance:'off'}:choreography;
+      const peers=active.phrases.filter(p=>isBacking(p)===backing),area=backing?areas.backing:areas.main,slot=peers.indexOf(phrase),count=Math.max(1,peers.length);
+      let rect={x:area.x+8,y:area.y+area.height*slot/count+8,width:Math.max(1,area.width-16),height:Math.max(1,area.height/count-16)};
+      if(regionLayout){rect=authoredRegion?{x:authoredRegion.rect.x*stage.clientWidth,y:authoredRegion.rect.y*stage.clientHeight,width:authoredRegion.rect.width*stage.clientWidth,height:authoredRegion.rect.height*stage.clientHeight}:{x:placement.left/100*stage.clientWidth+rect.x*placement.width/100,y:placement.top/100*stage.clientHeight+rect.y*placement.height/100,width:rect.width*placement.width/100,height:rect.height*placement.height/100};}
+      const label=[...stage.children].find(el=>el.dataset.backingFor===phrase.id);
+      if(label){const header=backingLabelMode()==='header',size=header?Math.min(18,rect.height*.25):Math.min(120,rect.width*.25);Object.assign(label.style,{left:rect.x+'px',top:rect.y+'px',width:(header?rect.width:size)+'px',height:(header?size:rect.height)+'px',opacity:String(phrase.opacity*.65),fontSize:Math.min(12,rect.height*.2)+'px'});if(header){rect.y+=size;rect.height=Math.max(1,rect.height-size);}else{rect.x+=size;rect.width=Math.max(1,rect.width-size);}}
+      const {width,height}=rect,maxFont=backing?Math.min(48,placement.maxFontPx*.6):settings.mode==='puzzle'?(settings.fillStage?Math.max(width,height):placement.maxFontPx):Math.min(placement.maxFontPx,laneFont(phrase,score)),minFont=backing?Math.min(maxFont,placement.minFontPx*.6):placement.minFontPx;
+      choreographLine(line,phrase.words,atMs,width,height,maxFont,settings.automatic?cues:{},minFont,settings);
+      Object.assign(line.style,{position:'absolute',left:rect.x+'px',top:rect.y+'px',margin:'0',overflow:'hidden'});line.dataset.region=authoredRegion?.id||'default';
+      if(!backing)expressLine(line,phrase.words,atMs,cues,settings);
     }
   }
   function laneFont(phrase,score){return score.lanes.find(l=>l.id===phrase.laneId)?.role==='backing'?40:80;}

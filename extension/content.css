@@ -2853,3 +2853,14 @@
 #lvx-root .lvx-other-parts { display:grid; gap:4px; margin:10px 0; }
 #lvx-root .lvx-other-parts label { display:flex; align-items:center; gap:7px; font-size:13px; }
 #lvx-root .lvx-other-parts small { color:#b7c5cf; font-size:11px; line-height:1.4; }
+
+/* Backing keeps a quiet, bounded reading layer across all main lyric looks. */
+#lvx-root .lvx-score-backing,#lvx-root .lvx-score-backing .lvx-score-word,#lvx-root .lvx-score-backing .lvx-score-syllable{font-family:'Segoe UI',system-ui,sans-serif!important;font-weight:500!important;font-style:normal!important;text-transform:none!important;letter-spacing:0!important;color:#e1e5e8!important;text-shadow:none!important;-webkit-text-stroke:0!important;background:none!important;filter:none!important;animation:none!important;transform:none!important;scale:none!important;box-shadow:none!important}
+#lvx-root .lvx-backing-label{position:absolute;display:flex;align-items:center;justify-content:center;overflow:hidden;font:500 12px/1.2 'Segoe UI',sans-serif;color:#d4d9de;text-shadow:none;overflow-wrap:anywhere;pointer-events:none}
+#lvx-root .lvx-backing-controls{display:grid;gap:10px;padding:14px 0;border-top:1px solid #ffffff20}
+#lvx-root .lvx-backing-controls h3{margin:0;font-size:13px;font-weight:600}
+#lvx-root .lvx-backing-controls label{display:flex;align-items:center;gap:10px;font-size:12px}
+#lvx-root .lvx-backing-controls select{margin-left:auto;min-width:0;max-width:58%;padding:6px;background:#20242b;color:#eee;border:1px solid #ffffff30;border-radius:4px}
+#lvx-root .lvx-backing-controls input{flex:1;min-width:40px;accent-color:#c2cabb}
+#lvx-root .lvx-backing-controls output{min-width:30px;font-variant-numeric:tabular-nums}
+#lvx-root .lvx-backing-controls p{margin:0;font-size:11px;line-height:1.5;color:#aeb6c0}
