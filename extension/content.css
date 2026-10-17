@@ -2925,6 +2925,7 @@
 #lvx-root .lvx-effect-live[data-state=write]{border-color:#c6ed9b;background:#213323}
 #lvx-root [data-sync=effect-hold][aria-pressed=true]{background:#63452c;border-color:#f1b87d}
 #lvx-root [data-sync=effect-clear-track]{color:#e7c3a8}
+@media(max-width:600px){#lvx-root .lvx-sync-panel:not([hidden]){z-index:60}}
 #lvx-root .lvx-effect-preview{margin:8px 0 12px;padding:10px;border:1px solid #49636c;border-radius:10px;background:#0a171e}
 #lvx-root .lvx-effect-preview[hidden]{display:none}
 #lvx-root .lvx-effect-preview-caption{display:flex;align-items:center;gap:8px;justify-content:space-between;color:#aac3ce;font:11px system-ui}
