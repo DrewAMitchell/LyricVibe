@@ -2889,7 +2889,10 @@
 #lvx-root .lvx-theme-picker .lvx-motion-sample .lvx-tile-stage{height:110px}
 #lvx-root .lvx-theme-picker .lvx-motion-sample[hidden]{display:none!important}
 #lvx-root .lvx-auto-fire{display:flex;align-items:center;gap:8px;font:12px system-ui;color:#c4d5dc;margin-top:12px}
-#lvx-root .lvx-fire-texture{background-image:radial-gradient(ellipse at 25% 90%,#fff7b0 0%,#ffca40 15%,transparent 36%),radial-gradient(ellipse at 75% 20%,#fffbd4 0%,#ff8b18 22%,transparent 47%),linear-gradient(0deg,#a4210c,#ff6810 25%,#ffe55b 53%,#c92d08 75%,#ffaf24);background-size:80% 190%,70% 220%,100% 240%;background-position:0 var(--lvx-fire-position,50%),100% var(--lvx-fire-position,50%),50% var(--lvx-fire-position,50%);background-clip:text;-webkit-background-clip:text;color:transparent!important;-webkit-text-fill-color:transparent;text-shadow:none!important;filter:drop-shadow(0 0 3px #ff671b88)}
+#lvx-root .lvx-fire-texture,#lvx-root .lvx-fire-texture .lvx-score-syllable,#lvx-root .lvx-fire-texture .lvx-dance-letter{background-image:radial-gradient(ellipse at 25% 90%,#fff7b0 0%,#ffca40 15%,transparent 36%),radial-gradient(ellipse at 75% 20%,#fffbd4 0%,#ff8b18 22%,transparent 47%),linear-gradient(0deg,#a4210c,#ff6810 25%,#ffe55b 53%,#c92d08 75%,#ffaf24);background-size:80% 190%,70% 220%,100% 240%;background-position:0 var(--lvx-fire-position,50%),100% var(--lvx-fire-position,50%),50% var(--lvx-fire-position,50%);background-clip:text;-webkit-background-clip:text;color:transparent!important;-webkit-text-fill-color:transparent;text-shadow:none!important;filter:drop-shadow(0 0 3px #ff671b88)}
+/* Transformed glyphs need their own paint surface: ancestor text clipping can
+   composite every glyph at the same origin in Chromium. */
+#lvx-root .lvx-fire-texture:has(.lvx-dance-letter,.lvx-score-syllable),#lvx-root .lvx-fire-texture .lvx-score-syllable:has(.lvx-dance-letter){background-image:none;filter:none}
 #lvx-root .lvx-fire-texture>span{color:inherit!important;-webkit-text-fill-color:inherit}
 @media(max-width:680px){#lvx-root .lvx-theme-picker .lvx-theme-grid{grid-template-columns:repeat(4,minmax(0,1fr))}#lvx-root .lvx-theme-picker .lvx-motion-sample .lvx-tile-stage{height:85px}#lvx-root .lvx-recording-playback{gap:5px;bottom:12px;padding:6px}#lvx-root .lvx-recording-playback :is(button,select){padding:6px;font-size:11px}}
 
@@ -2909,3 +2912,29 @@
 
 #lvx-root .lvx-groove-direction{display:flex;align-items:center;gap:8px;font:12px system-ui;margin:8px 0 12px;color:#c6d6dd}
 #lvx-root .lvx-effect-pads [data-effect=clear]{grid-column:1 / -1;min-height:30px!important}
+#lvx-root .lvx-effect-preview{margin:8px 0 12px;padding:10px;border:1px solid #49636c;border-radius:10px;background:#0a171e}
+#lvx-root .lvx-effect-preview[hidden]{display:none}
+#lvx-root .lvx-effect-preview-caption{display:flex;align-items:center;gap:8px;justify-content:space-between;color:#aac3ce;font:11px system-ui}
+#lvx-root .lvx-effect-preview-caption button{min-height:28px;padding:4px 8px;font-size:11px}
+#lvx-root .lvx-effect-preview-line{display:flex;align-items:center;justify-content:center;gap:.3em;min-height:86px;overflow:hidden;font:700 29px/1.5 system-ui;color:var(--lvx-color-main);padding:12px 4px;box-sizing:border-box}
+#lvx-root .lvx-effect-preview-line .lvx-score-word{opacity:1;white-space:nowrap;flex:0 1 auto;min-width:0;font:inherit;letter-spacing:0}
+#lvx-root .lvx-effect-pads [aria-pressed=true]{border-color:#d9edc1;background:#314936}
+/* The control palette belongs to the viewport, independently of lyric regions. */
+#lvx-root .lvx-sidebar{display:grid;grid-template-columns:112px minmax(0,1fr);gap:8px;width:168px;max-height:calc(100% - 16px);overflow:auto;overscroll-behavior:contain;z-index:50;transition:none;transform:none}
+#lvx-root .lvx-sidebar:is(:hover,:focus-within,.lvx-sidebar-pinned){width:min(370px,calc(100% - 16px))}
+#lvx-root .lvx-control-header{grid-column:1/-1;display:flex;gap:4px;align-items:center;position:sticky;top:0;z-index:1;padding:4px;border:1px solid #4a6571;border-radius:10px;background:#10212bf5;box-sizing:border-box}
+#lvx-root .lvx-control-header button{border:0;border-radius:6px;background:#223943;color:#e8f4f6;font:600 12px system-ui;min-height:30px;min-width:30px;padding:5px 7px;cursor:pointer}
+#lvx-root .lvx-control-header .lvx-control-handle{flex:1;min-width:0;white-space:nowrap;text-align:left;cursor:grab;touch-action:none;user-select:none}
+#lvx-root .lvx-control-handle:active{cursor:grabbing}
+#lvx-root .lvx-sidebar-nav{min-width:0;max-height:none}
+#lvx-root .lvx-sidebar .lvx-hud{max-height:none}
+#lvx-root .lvx-sidebar[data-orientation=horizontal]:is(:hover,:focus-within,.lvx-sidebar-pinned){width:min(900px,calc(100% - 16px));grid-template-columns:minmax(0,1fr)}
+#lvx-root .lvx-sidebar[data-orientation=horizontal] .lvx-sidebar-nav{flex-direction:row;align-items:stretch}
+#lvx-root .lvx-sidebar[data-orientation=horizontal] .lvx-sidebar-pin{flex:0 0 38px;height:auto}
+#lvx-root .lvx-sidebar[data-orientation=horizontal] .lvx-sidebar-items{flex:1;flex-direction:row;flex-wrap:wrap;gap:3px}
+#lvx-root .lvx-sidebar[data-orientation=horizontal] .lvx-sidebar-items button{width:auto;flex:1 0 auto;text-align:center;padding:6px 8px}
+#lvx-root .lvx-sidebar[data-orientation=horizontal]:is(:hover,:focus-within,.lvx-sidebar-pinned) .lvx-hud{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;width:auto}
+#lvx-root .lvx-sidebar[data-orientation=horizontal] .lvx-hud>*{order:0}
+#lvx-root .lvx-sidebar[data-orientation=horizontal] .lvx-hud-status{grid-column:1/-1;min-height:18px}
+#lvx-root .lvx-sidebar[data-orientation=horizontal] .lvx-hud-offset{align-self:start}
+@media(max-width:680px){#lvx-root .lvx-sidebar[data-orientation=horizontal]:is(:hover,:focus-within,.lvx-sidebar-pinned) .lvx-hud{grid-template-columns:repeat(2,minmax(0,1fr))}}
