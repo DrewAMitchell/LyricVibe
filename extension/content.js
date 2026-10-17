@@ -1179,7 +1179,7 @@
       : word ? `Selected: “${word.text}” · ${mode === 'syllable' ? `${word.syllables?.length || 0} authored syllables` : 'word boundaries'}` : 'Choose a word to begin.';
     const cue = syncPanel.querySelector('.lvx-perform-cue');
     cue.dataset.recording = String(take?.status === 'armed');
-    cue.querySelector('small').textContent = take ? `${take.mode.toUpperCase()} ${Math.min(take.index+1,take.units.length)} / ${take.units.length} · ${take.status === 'armed' ? take.pendingStartMs === null ? 'NEXT TO RECORD' : 'RECORDING' : 'REVIEW'}` : `${mode.toUpperCase()} MODE · READY`;
+    cue.querySelector(':scope > small').textContent = take ? `${take.mode.toUpperCase()} ${Math.min(take.index+1,take.units.length)} / ${take.units.length} · ${take.status === 'armed' ? take.pendingStartMs === null ? 'NEXT TO RECORD' : 'RECORDING' : 'REVIEW'}` : `${mode.toUpperCase()} MODE · READY`;
     cue.querySelector('.lvx-perform-instruction').textContent = take?.status === 'armed' ? (take.pendingStartMs === null ? 'Space starts the outlined lyric' : 'Release Space at its end') : take ? `${take.marks.length} completed · correct, use, continue or undo` : `Hold Space for each ${mode}`;
     if (mode === 'syllable' && (!take || take.status === 'armed')) cue.querySelector('.lvx-perform-instruction').textContent = 'One press per syllable entrance · phrase bounds stay fixed';
     if(mode==='syllable'&&take?.status==='complete')syncPanel.querySelector('.lvx-tap-status').textContent=`${take.units.length} / ${take.units.length} syllables · listen, retake or keep this phrase`;
@@ -1188,15 +1188,15 @@
       syncPanel.querySelector('.lvx-tap-panel > .lvx-sync-hint').textContent='Tap Space once per syllable as the song plays. The current word’s saved frame owns your taps: two presses make two syllables. Continue through this vocal track, then Stop and Use take in preview. Untapped words stay unchanged.';
       cue.querySelector('.lvx-perform-instruction').textContent=take?.status==='armed'?'Tap each syllable · word edges stay fixed':'Start from the selected word · dictionary counts are optional';
       if(take)syncPanel.querySelector('.lvx-tap-status').textContent=`${take.marks.length} syllables in ${new Set(take.marks.map(m=>m.wordId)).size} words · ${take.status==='armed'?'continuous recording':'take retained · use or discard'}`;
-      cue.querySelector('small').textContent=take?.status==='armed'?'CONTINUOUS SYLLABLES · RECORDING':take?'CONTINUOUS SYLLABLES · REVIEW':'CONTINUOUS SYLLABLES · READY';
+      cue.querySelector(':scope > small').textContent=take?.status==='armed'?'CONTINUOUS SYLLABLES · RECORDING':take?'CONTINUOUS SYLLABLES · REVIEW':'CONTINUOUS SYLLABLES · READY';
     }
     if(phraseStream()){
       syncPanel.querySelector('.lvx-tap-panel > .lvx-sync-hint').textContent='Tap Space at every syllable entrance. Phrase edges contain the take; old word timings are ignored. Suggested counts advance the cue, and you can correct it live.';
       cue.querySelector('.lvx-perform-instruction').textContent='Space: next syllable · ← / →: move cue · Ctrl + ← / →: reassign last tap';
-      cue.querySelector('small').textContent=take?.status==='armed'?'PHRASE-GUIDED SYLLABLES · RECORDING':take?'PHRASE-GUIDED SYLLABLES · REVIEW':'PHRASE-GUIDED SYLLABLES · READY';
+      cue.querySelector(':scope > small').textContent=take?.status==='armed'?'PHRASE-GUIDED SYLLABLES · RECORDING':take?'PHRASE-GUIDED SYLLABLES · REVIEW':'PHRASE-GUIDED SYLLABLES · READY';
       if(take?.status==='stopped'&&tapping.seekPhraseId){
         cue.querySelector('.lvx-perform-instruction').textContent='Continue keeps existing taps until your first new press. Undo mark restores replaced input.';
-        cue.querySelector('small').textContent='PHRASE AT PLAYHEAD · READY TO RETAKE';
+        cue.querySelector(':scope > small').textContent='PHRASE AT PLAYHEAD · READY TO RETAKE';
       }
     }
     if (mode!=='syllable' && syncButton('tap-cadence').value === 'hold' && (!take || take.status === 'armed')) cue.querySelector('.lvx-perform-instruction').textContent = take?.pendingStartMs !== null && take ? `Release Space when this ${mode} ends` : `Hold Space while the outlined ${mode} is sung`;
@@ -1210,24 +1210,25 @@
     syncButton('tap-skip').disabled=timing.busy||!take||take.index>=take.units.length-1;
     if(eventPass()){
       syncPanel.querySelector('.lvx-tap-panel > .lvx-sync-hint').textContent='Tap Space for every syllable you hear. Each press is a point cue, not a measured beginning or end. Group and review after Stop, or choose holds to capture durations.';
-      cue.querySelector('small').textContent=take?.status==='armed'?'PERFORMANCE EVENTS · RECORDING':'PERFORMANCE EVENTS · READY';
+      cue.querySelector(':scope > small').textContent=take?.status==='armed'?'PERFORMANCE EVENTS · RECORDING':'PERFORMANCE EVENTS · READY';
       cue.querySelector('.lvx-perform-instruction').textContent='Space records a point cue · no word cursor · sound cues muted';
       syncPanel.querySelector('.lvx-tap-status').textContent=take?tapCount(take)+' events · '+(take.status==='armed'?'recording exact timestamps':'retained for word assignment'):'Start, then tap every syllable you hear';
       syncButton('tap-use').hidden=true;
       if(syllableHold(take)||!take&&syncButton('tap-syllable-flow').value==='holds'){
         syncPanel.querySelector('.lvx-tap-panel > .lvx-sync-hint').textContent='Hold Space from each syllable’s beginning to its end. Release during rests. Both boundaries are recorded; word grouping follows Stop. Seeking or losing focus cancels only an unfinished hold.';
-        cue.querySelector('small').textContent=take?.status==='armed'?'SYLLABLE HOLDS · RECORDING':'SYLLABLE HOLDS · READY';
+        cue.querySelector(':scope > small').textContent=take?.status==='armed'?'SYLLABLE HOLDS · RECORDING':'SYLLABLE HOLDS · READY';
         cue.querySelector('.lvx-perform-instruction').textContent=take?.pendingStartMs!=null?'Release Space at the syllable end':'Hold Space for each syllable · release during rests';
         syncButton('tap-mark').textContent=take?.pendingStartMs!=null?'Release at syllable end':'Hold for syllable · Space';
         syncPanel.querySelector('.lvx-tap-status').textContent=take?tapCount(take)+' syllables held · '+(take.pendingStartMs!=null?'holding now':take.status==='armed'?'ready for next syllable':'retained for word assignment'):'Start at the first phrase at ½×, then hold each syllable';
       }
     }else if(wordPass()){
       syncPanel.querySelector('.lvx-tap-panel > .lvx-sync-hint').textContent='Hold Space while each word is sung and release when it ends. Your recorded syllable taps stay fixed: each press claims the taps that follow it, and each release ends the word’s last syllable.';
-      cue.querySelector('small').textContent=take?.status==='armed'?'WORD PASS · RECORDING':'WORD PASS · READY';
+      cue.querySelector(':scope > small').textContent=take?.status==='armed'?'WORD PASS · RECORDING':'WORD PASS · READY';
       cue.querySelector('.lvx-perform-instruction').textContent=wordTake(take)&&take.pendingStartMs!==null?'Release Space when this word ends':'Hold Space for the outlined word · Back/Skip if you lose your place';
       syncPanel.querySelector('.lvx-tap-status').textContent=(wordTake(take)?(take.retime?`Retiming phrase ${phraseOrdinal(take.retime.phraseId)} · `:'')+`${take.holds.length} / ${take.units.length} words held · ${take.syllableEvents.length} syllable taps`:'Start, then hold Space for each word')+(retimeFlags.items.length?` · ⚑ ${retimeFlags.items.length} flagged`:'');
       syncButton('tap-use').hidden=true;
     }else syncButton('tap-use').hidden=false;
+    const recordingLane=timing.draft?.score.lanes.find(l=>l.id===timingPhrase()?.laneId);if(take&&recordingLane?.role==='backing'){const label=cue.querySelector(':scope > small');label.textContent=`RECORD ${recordingLane.label||'BACKING'} · `+label.textContent;}
     refreshTranscriptEditor();
     if(state.score&&retimeFlags.mediaKey!==LvScore.mediaKey(state.score.source))void loadRetimeFlags();
     if(state.score&&tempo.mediaKey!==LvScore.mediaKey(state.score.source))void loadTempo();
@@ -1345,7 +1346,28 @@
     span.replaceChildren();
     for(const syllable of word.syllables){const part=document.createElement('span');part.className='lvx-guide-syllable';part.textContent=syllable.text;part.dataset.guideSyllable=syllable.id;part.dataset.start=syllable.startMs;part.dataset.end=syllable.endMs;span.append(part);}
   }
+  function refreshMainReference(now){
+    const score=timing.draft?.score,selected=timingPhrase(),backing=score?.lanes.find(l=>l.id===selected?.laneId)?.role==='backing';
+    const hosts=[syncPanel.querySelector('.lvx-perform-cue'),stage.querySelector('.lvx-capture-transcript')].filter(Boolean);
+    if(!backing||!tapping.take){for(const host of hosts)host.querySelector('.lvx-main-reference')?.remove();return;}
+    const anchor=score.phrases.find(p=>p.id===partRun?.steps[partRun.index]?.anchorId),mainLane=score.lanes.find(l=>l.id===anchor?.laneId&&l.role==='lead')||score.lanes.find(l=>l.role==='lead');
+    const phrases=score.phrases.filter(p=>p.laneId===mainLane?.id&&p.words.some(w=>!w.excluded)).sort((a,b)=>a.startMs-b.startMs);
+    const main=phrases.find(p=>now>=p.startMs&&now<p.endMs)||phrases.findLast(p=>p.startMs<=now)||phrases[0];
+    for(const host of hosts){
+      let reference=host.querySelector('.lvx-main-reference');if(!main){reference?.remove();continue;}
+      if(!reference){reference=document.createElement('section');reference.className='lvx-main-reference';reference.setAttribute('aria-label','Main lyrics timing reference');host.prepend(reference);}
+      const key=timing.draft.previewRevision+':'+main.id;
+      if(reference.dataset.key!==key){
+        reference.dataset.key=key;reference.dataset.phrase=main.id;reference.replaceChildren();
+        const label=document.createElement('small'),coverage=LvScore.phraseTimingCoverage(main),precision=coverage.word.status==='complete'?'words timed':coverage.phrase.status==='complete'?'phrase timed · word positions estimated':'estimated timing';
+        label.textContent=`MAIN · ${mainLane.label||'Lead'} · ${precision}`;
+        const line=document.createElement('p');for(const word of main.words.filter(w=>!w.excluded)){const span=document.createElement('span');span.className='lvx-context-word';span.textContent=word.text;appendCaptureReference(span,{id:word.id,wordId:word.id},main);line.append(span,document.createTextNode(' '));}reference.append(label,line);
+      }
+      reference.dataset.phase=now<main.startMs?'upcoming':now<main.endMs?'singing':'finished';
+    }
+  }
   function refreshCapturePlayback(now) {
+    refreshMainReference(now);
     for(const span of root.querySelectorAll('.lvx-context-word,.lvx-capture-transcript [data-unit],.lvx-guide-syllable,.lvx-tap-blocks button')){
       const playing=!span.querySelector('.lvx-guide-syllable')&&now>=Number(span.dataset.start)&&now<Number(span.dataset.end);
       span.classList.toggle('lvx-estimated-playing',playing);
@@ -4006,6 +4028,7 @@
       stage.replaceChildren();
       const context=document.createElement('div');context.className='lvx-capture-transcript';
       const label=document.createElement('small');label.textContent=wordTake(take)?`WORD PASS · ${take.holds.length} / ${take.units.length} words · hold Space per word`:eventTake(take)?(syllableHold(take)?'SYLLABLE HOLDS · '+take.events.length+' complete · hold Space':'PERFORMANCE EVENTS · '+take.events.length+' taps · Space records'):streamTake(take)?`PHRASE-GUIDED SYLLABLES · ${take.marks.length} taps · Space at each entrance`:frameTake(take)?`CONTINUOUS SYLLABLES · ${take.marks.length} taps · Space at each entrance`:take.status==='complete'?'PASS COMPLETE · LEFT TO RERECORD':`${take.mode.toUpperCase()} ${take.index+1} / ${take.units.length} · ${take.pendingStartMs===null?'NEXT TO RECORD':'RECORDING'}`;context.append(label);
+      const lane=timing.draft.score.lanes.find(l=>l.id===phrase.laneId);if(lane?.role==='backing')label.textContent=`RECORD ${lane.label||'BACKING'} · `+label.textContent;
       const recorded=LvTapTiming.captureProgress(take,phrase,timingOffsetMs()),recordedIds=new Set(recorded.wordIds);
       context.dataset.recorded=String(recorded.phraseRecorded);
       const line=document.createElement('p');
