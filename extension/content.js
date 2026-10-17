@@ -113,7 +113,11 @@
   const viewport = document.createElement('div');viewport.className='lvx-viewport';viewport.append(stage);
   const placementDefaults={left:0,top:0,width:100,height:100,minFontPx:28,maxFontPx:128};
   let placement={...placementDefaults},placementEditing=false,lyricsOnly=false;
-  function setLyricsOnly(value){lyricsOnly=Boolean(value);root.classList.toggle('lvx-lyrics-only',lyricsOnly);if(lyricsOnly){setPlacementEditing(false);toggleThemePicker(false);toggleShortcutsPanel(false);}if(state.score)renderScore(getMediaTimeMs());}
+  function setLyricsOnly(value){lyricsOnly=Boolean(value);root.classList.toggle('lvx-lyrics-only',lyricsOnly);clearTimeout(controlsNoticeTimer);controlsNotice.hidden=!lyricsOnly;if(lyricsOnly){controlsNoticeTimer=setTimeout(()=>{controlsNotice.hidden=true;},4500);setPlacementEditing(false);toggleThemePicker(false);toggleShortcutsPanel(false);}if(state.score)renderScore(getMediaTimeMs());}
+  let controlsNoticeTimer=0;
+  const controlsNotice=document.createElement('div');controlsNotice.className='lvx-controls-notice';controlsNotice.hidden=true;controlsNotice.setAttribute('role','status');controlsNotice.setAttribute('aria-live','polite');
+  controlsNotice.innerHTML='<span>Controls hidden · press <kbd>\\</kbd> or <kbd>Esc</kbd> to bring them back</span><button type="button">Show controls</button>';
+  controlsNotice.querySelector('button').onclick=()=>setLyricsOnly(false);
   function setPlacementEditing(value){placementEditing=Boolean(value);if(placementEditing){setLyricsOnly(false);toggleThemePicker(false);}bounds.hidden=!placementEditing;root.classList.toggle('lvx-adjusting-area',placementEditing);}
   const bounds=document.createElement('div');bounds.className='lvx-placement-bounds';bounds.hidden=true;
   bounds.setAttribute('aria-label','Lyric placement bounds');
@@ -305,9 +309,10 @@
   /* Display picker: one tile per theme, animated with this video's own lyrics. */
   const themePicker = document.createElement('div');
   themePicker.className = 'lvx-theme-picker'; themePicker.hidden = true;
-  let choreography={dance:'off',mode:'classic',upsideDown:false,automatic:true,fillStage:true,arrangement:'chaotic',origin:'top-left'},previewPlaying=false,previewFrame=0,previewTime=1600,previewLast=0,previewTheme=state.theme;
+  const studio={view:'look',page:0,effectsOpen:false,areaOpen:false,exitOpen:false};
+  let choreography={dance:'off',mode:'classic',upsideDown:false,automatic:false,fillStage:true,arrangement:'chaotic',origin:'top-left'},previewPlaying=false,previewFrame=0,previewTime=1600,previewLast=0,previewTheme=state.theme;
   const choreographyPlans=new WeakMap(),choreographyMeasure=document.createElement('canvas').getContext('2d');
-  function setChoreography(value){choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(value.dance)?value.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic!==false,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
+  function setChoreography(value){choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(value.dance)?value.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic===true,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
   function previewTick(now){
     if(themePicker.hidden||!previewPlaying||document.hidden){previewFrame=0;previewLast=0;return;}
     if(previewLast)previewTime+=Math.min(now-previewLast,100);previewLast=now;renderStylePreview(true);previewFrame=requestAnimationFrame(previewTick);
@@ -315,13 +320,13 @@
   function renderStylePreview(activeOnly=false){
     for(const tile of themePicker.querySelectorAll('.lvx-theme-tile')){
       const selected=tile.dataset.theme===previewTheme;if(activeOnly&&!selected)continue;tile.dataset.previewing=String(selected);
-      if(activeOnly&&(tile.offsetTop+tile.offsetHeight<themePicker.scrollTop||tile.offsetTop>themePicker.scrollTop+themePicker.clientHeight))continue;
+      if(!tile.getClientRects().length)continue;
       const line=tile.querySelector('.lvx-tile-line'),words=[...line.children].map((n,i)=>{const parts=[...n.querySelectorAll('[data-syllable]')];return {id:'preview-'+i,text:n.textContent,startMs:500+i*450,endMs:950+i*450,syllables:parts.map((part,j)=>({id:part.dataset.syllable,text:part.textContent,startMs:500+i*450+j*450/parts.length,endMs:500+i*450+(j+1)*450/parts.length}))};});
       if(choreography.mode==='vinyl'){
         line.hidden=true;const box=tile.querySelector('.lvx-tile-stage');let canvas=box.querySelector('canvas');if(!canvas){canvas=document.createElement('canvas');canvas.className='lvx-vinyl-tile';box.append(canvas);}const width=Math.max(1,box.clientWidth),height=Math.max(1,box.clientHeight),ctx=canvas.getContext('2d');if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height;}if(!canvas.__track){ctx.font='800 100px Arial Narrow, Impact, sans-serif';canvas.__track=LvChoreography.vinylTrack({phrases:[{id:'preview',words}]},text=>ctx.measureText(text).width/100);}LvChoreography.paintVinyl(ctx,canvas.__track,selected?previewTime%(words.length*450+1600):words.length*450+700,width,height,{reduced:bloomMotion.matches});continue;
       }
       const clock=selected?previewTime%(words.length*450+1600):words.length*450+700;
-      choreographLine(line,words,clock,tile.querySelector('.lvx-tile-stage').clientWidth-16,110,14);
+      choreographLine(line,words,clock,tile.querySelector('.lvx-tile-stage').clientWidth-16,Math.max(80,tile.querySelector('.lvx-tile-stage').clientHeight-16),14);
       if(typeof LvChoreography!=='undefined')expressLine(line,words,clock,LvChoreography.compose({source:{durationMs:words.length*450+1800},phrases:[{id:'preview',laneId:'lead',words}]}));
     }
   }
@@ -340,6 +345,7 @@
     return (line || 'Your lyrics, your style').split(/\s+/).slice(0, 6).map(text=>({text}));
   }
   function buildThemePicker() {
+    for(const [selector,key]of [['.lvx-word-effects','effectsOpen'],['.lvx-placement-settings','areaOpen'],['.lvx-studio-exits','exitOpen']]){const prior=themePicker.querySelector(selector);if(prior)studio[key]=prior.open;}
     const words = themePreviewWords();
     themePicker.replaceChildren();
     const heading = document.createElement('div'); heading.className = 'lvx-theme-picker-head';
@@ -351,15 +357,15 @@
     const textSizes=document.createElement('div');textSizes.className='lvx-performance-sizes';
     textSizes.innerHTML=['minFontPx','maxFontPx'].map(key=>`<label>${key==='minFontPx'?'Minimum text (preferred)':'Maximum text'} <span>px</span><input aria-label="${key==='minFontPx'?'Minimum lyric text size':'Maximum lyric text size'}" data-placement="${key}" type="number" min="12" max="${key==='minFontPx'?96:200}" value="${placement[key]}" step="1"></label>`).join('');
     textSizes.addEventListener('change',event=>{const key=event.target.dataset.placement,value=Number(event.target.value);if(key&&event.target.value.trim()&&Number.isFinite(value)){applyPlacement({...placement,[key]:value},true);syncPlacementFields();}});performanceControls.append(textSizes);textSizes.querySelector('[data-placement="maxFontPx"]').disabled=choreography.mode==='puzzle'&&choreography.fillStage;textSizes.querySelector('[data-placement="maxFontPx"]').title='Turn off Fit puzzle to lyric area to use this maximum.';for(const input of textSizes.querySelectorAll('input'))if(choreography.mode==='vinyl')input.disabled=true;
-    const sizeHint=document.createElement('small');sizeHint.textContent='Shrinks below the minimum only when needed to keep the whole phrase visible. Vinyl keeps its shrinking history.';performanceControls.append(sizeHint);
+    const sizeHint=document.createElement('small');sizeHint.textContent='Vinyl uses its own size and motion.';performanceControls.append(sizeHint);sizeHint.hidden=choreography.mode!=='vinyl';
     const motionControls=document.createElement('div');motionControls.className='lvx-motion-controls';
-    motionControls.innerHTML='<label>Layout <select aria-label="Lyric choreography"><option value="classic">Classic</option><option value="fall">Falling words</option><option value="puzzle">Word puzzle</option><option value="vinyl">Vinyl history</option></select></label><label><input type="checkbox"> Allow upside-down words</label><label>Expression <select aria-label="Automatic lyric expression"><option value="auto">Automatic</option><option value="off">Authored only</option></select></label><button type="button" data-preview-play>Play preview</button><span>Expression works in every layout. Your authored effects take priority.</span>';
+    motionControls.innerHTML='<label>Layout <select aria-label="Lyric choreography"><option value="classic">Classic</option><option value="fall">Falling words</option><option value="puzzle">Word puzzle</option><option value="vinyl">Vinyl history</option></select></label><label><input type="checkbox"> Allow upside-down words</label><label>Expression <select aria-label="Automatic lyric expression"><option value="auto">Automatic</option><option value="off">Static + authored</option></select></label><button type="button" data-preview-play>Play preview</button><span>Expression works in every layout. Your authored effects take priority.</span>';
     const motionSelect=motionControls.querySelector('select'),upside=motionControls.querySelector('input');motionSelect.value=choreography.mode;upside.checked=choreography.upsideDown;upside.disabled=choreography.mode!=='puzzle';
     motionSelect.onchange=()=>{setChoreography({...choreography,mode:motionSelect.value});buildThemePicker();};upside.onchange=()=>{setChoreography({...choreography,upsideDown:upside.checked});renderStylePreview();};motionControls.querySelector('button').onclick=()=>setPreviewPlaying(!previewPlaying);themePicker.append(motionControls);
     const expressionSelect=motionControls.querySelector('[aria-label="Automatic lyric expression"]');expressionSelect.value=choreography.automatic?'auto':'off';expressionSelect.disabled=choreography.mode==='vinyl';if(choreography.mode==='vinyl')motionControls.querySelector('span').textContent='Vinyl history uses its own spiral motion and cream/red palette.';expressionSelect.onchange=()=>{setChoreography({...choreography,automatic:expressionSelect.value==='auto'});buildThemePicker();};
 
     const danceLabel=document.createElement('label'),danceSelect=document.createElement('select');danceLabel.append(document.createTextNode('Word dance '));danceSelect.setAttribute('aria-label','Word dance');for(const [value,text] of [['off','Off'],['mix','Mix'],['tip','Backward fall'],['flex','Flex'],['bounce','Bounce'],['launch','Launch']]){const option=document.createElement('option');option.value=value;option.textContent=text;danceSelect.append(option);}danceSelect.value=choreography.dance;danceSelect.disabled=choreography.mode==='vinyl';danceSelect.title=choreography.mode==='vinyl'?'Vinyl history uses continuous spiral motion.':'';danceSelect.onchange=()=>{setChoreography({...choreography,dance:danceSelect.value});buildThemePicker();};danceLabel.append(danceSelect);motionControls.append(danceLabel);
-    const fillLabel=document.createElement('label'),fillToggle=document.createElement('input');fillToggle.type='checkbox';fillToggle.checked=choreography.fillStage;fillToggle.disabled=choreography.mode!=='puzzle';fillToggle.onchange=()=>{setChoreography({...choreography,fillStage:fillToggle.checked});buildThemePicker();};fillLabel.append(fillToggle,document.createTextNode('Fit puzzle to lyric area'));performanceControls.append(fillLabel);
+    const fillLabel=document.createElement('label'),fillToggle=document.createElement('input');fillToggle.type='checkbox';fillToggle.checked=choreography.fillStage;fillToggle.disabled=choreography.mode!=='puzzle';fillToggle.onchange=()=>{setChoreography({...choreography,fillStage:fillToggle.checked});buildThemePicker();};fillLabel.append(fillToggle,document.createTextNode('Fit puzzle to lyric area'));performanceControls.append(fillLabel);fillLabel.hidden=choreography.mode!=='puzzle';
     for(const [key,label,options] of [['arrangement','Puzzle arrangement',[['chaotic','Chaotic'],['ordered','Ordered']]],['origin','Puzzle home corner',[['top-left','Top left'],['top-right','Top right'],['bottom-left','Bottom left'],['bottom-right','Bottom right']]]]){const field=document.createElement('label'),select=document.createElement('select');field.append(document.createTextNode(key==='arrangement'?'Arrangement ':'Home corner '));select.setAttribute('aria-label',label);for(const [value,text] of options){const option=document.createElement('option');option.value=value;option.textContent=text;select.append(option);}select.value=choreography[key];select.disabled=choreography.mode!=='puzzle';select.onchange=()=>{setChoreography({...choreography,[key]:select.value});buildThemePicker();};field.append(select);motionControls.append(field);}
     const bloomLabel=document.createElement('label');bloomLabel.className='lvx-bloom-setting';
     const bloomToggle=document.createElement('input');bloomToggle.type='checkbox';bloomToggle.checked=bloomEnabled;
@@ -394,11 +400,49 @@
       stageEl.append(line);
       const label = document.createElement('span'); label.className = 'lvx-tile-name'; label.textContent = THEME_LABELS[name] || name.toUpperCase();
       tile.append(stageEl, label);
-      tile.addEventListener('click', () => { applyTheme(name); setHud(`Display: ${THEME_LABELS[name]}`, false, false); toggleThemePicker(false); });
+      tile.addEventListener('click', () => { applyTheme(name);previewTheme=name;for(const item of themePicker.querySelectorAll('.lvx-theme-tile'))item.setAttribute('aria-pressed',String(item.dataset.theme===name));themePicker.querySelector('.lvx-studio-current').textContent=THEME_LABELS[name]+' · applied';renderStylePreview(); });
       const compare=()=>{previewTheme=name;previewTime=previewPlaying?0:1600;previewLast=0;renderStylePreview();};tile.addEventListener('pointerenter',compare);tile.addEventListener('focus',compare);
       grid.append(tile);
     }
+    organizeStyleStudio({heading,performanceControls,motionControls,danceLabel,bloomLabel,lingerControls,settings,grid});
     themePicker.dataset.motion=choreography.mode;setPreviewPlaying(previewPlaying);
+  }
+  function organizeStyleStudio({heading,performanceControls,motionControls,danceLabel,bloomLabel,lingerControls,settings,grid}){
+    heading.className='lvx-studio-heading';heading.innerHTML='<div><small>LYRICVIBE / DISPLAY</small><h2>Set the stage.</h2></div><button type="button" aria-label="Close display studio">✕</button>';
+    heading.querySelector('button').onclick=()=>{toggleThemePicker(false);themeButton.focus();};
+    const tabs=document.createElement('div');tabs.className='lvx-studio-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Display studio');
+    const panels={};
+    for(const [id,label]of [['look','Look'],['motion','Motion'],['stage','Stage']]){
+      const tab=document.createElement('button');tab.type='button';tab.textContent=label;tab.id='lvx-style-tab-'+id;tab.dataset.studioTab=id;tab.setAttribute('role','tab');tab.setAttribute('aria-controls','lvx-style-'+id);tabs.append(tab);
+      const panel=document.createElement('section');panel.className='lvx-studio-page';panel.id='lvx-style-'+id;panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby',tab.id);panels[id]=panel;
+      tab.onclick=()=>{studio.view=id;show();};
+    }
+    tabs.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;const buttons=[...tabs.children],at=buttons.indexOf(document.activeElement);if(at<0)return;event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?buttons.length-1:(at+(event.key==='ArrowRight'?1:-1)+buttons.length)%buttons.length;buttons[next].click();buttons[next].focus();};
+    const caption=document.createElement('p');caption.className='lvx-studio-caption';caption.textContent='Your lyrics, in a different light. Choose a look to apply it.';
+    const pager=document.createElement('div');pager.className='lvx-studio-pager';pager.innerHTML='<button type="button" aria-label="Previous looks">←</button><span role="status"></span><button type="button" aria-label="Next looks">→</button>';
+    const tiles=[...grid.children],pageSize=window.innerWidth<=680?4:6,total=Math.ceil(tiles.length/pageSize);
+    studio.page=clamp(studio.page,0,total-1);
+    function pageLooks(){tiles.forEach((tile,i)=>tile.hidden=Math.floor(i/pageSize)!==studio.page);pager.querySelector('span').textContent=`Looks ${studio.page*pageSize+1}–${Math.min(tiles.length,(studio.page+1)*pageSize)} of ${tiles.length}`;pager.firstElementChild.disabled=studio.page===0;pager.lastElementChild.disabled=studio.page===total-1;const visible=tiles.filter(t=>!t.hidden);if(!visible.some(t=>t.dataset.theme===previewTheme))previewTheme=visible[0].dataset.theme;renderStylePreview();}
+    pager.firstElementChild.onclick=()=>{studio.page--;pageLooks();};pager.lastElementChild.onclick=()=>{studio.page++;pageLooks();};
+    panels.look.append(caption,grid,pager);
+    const layout=motionControls.querySelector('label'),upside=motionControls.querySelectorAll('label')[1],expression=motionControls.querySelector('[aria-label="Automatic lyric expression"]').closest('label'),play=motionControls.querySelector('[data-preview-play]');
+    const puzzleOptions=[...motionControls.querySelectorAll('label')].filter(label=>label.querySelector('[aria-label="Puzzle arrangement"],[aria-label="Puzzle home corner"]'));
+    const layoutRow=document.createElement('div');layoutRow.className='lvx-studio-layout';layoutRow.append(layout);if(choreography.mode==='puzzle')layoutRow.append(...puzzleOptions,upside);
+    const effects=document.createElement('details');effects.className='lvx-word-effects';effects.open=studio.effectsOpen;effects.innerHTML='<summary>Word effects <span>Accents · sustains · moves</span></summary><div class="lvx-effects-settings"></div><dl class="lvx-effect-vocabulary"><div><dt>Accents</dt><dd>Pulse · Tilt · Shake</dd></div><div><dt>Sustains</dt><dd>Breathe · Color · Wobble</dd></div><div><dt>Moves</dt><dd>Topple · Flex · Bounce · Launch</dd></div></dl><p class="lvx-studio-note">Record accents in Timing → Effects. Sustains follow held notes when Expression is Automatic.</p>';
+    effects.querySelector('.lvx-effects-settings').append(expression,danceLabel);effects.ontoggle=()=>{if(effects.isConnected)studio.effectsOpen=effects.open;};
+    const tip=danceLabel.querySelector('option[value=tip]');if(tip)tip.textContent='Topple · backward fall';
+    const sample=tiles.find(t=>t.dataset.theme===state.theme).cloneNode(true);sample.removeAttribute('aria-pressed');sample.removeAttribute('type');sample.setAttribute('aria-label','Current lyric motion preview');sample.classList.add('lvx-motion-sample');sample.onclick=()=>setPreviewPlaying(!previewPlaying);
+    sample.querySelector('.lvx-tile-name').textContent='CURRENT LOOK · '+THEME_LABELS[state.theme];sample.onfocus=sample.onpointerenter=()=>{previewTheme=state.theme;renderStylePreview();};
+    panels.motion.append(layoutRow,sample,effects);
+    motionControls.remove();
+    settings.open=studio.areaOpen;settings.ontoggle=()=>{if(!settings.isConnected)return;studio.areaOpen=settings.open;if(settings.open){exits.open=false;studio.exitOpen=false;}};
+    const exits=document.createElement('details');exits.className='lvx-studio-exits';exits.open=studio.exitOpen;exits.innerHTML='<summary>Phrase exits <span>When the singing stops</span></summary>';exits.append(lingerControls);exits.ontoggle=()=>{if(!exits.isConnected)return;studio.exitOpen=exits.open;if(exits.open){settings.open=false;studio.areaOpen=false;}};
+    performanceControls.querySelector('p').textContent='Drag to place lyrics. Long phrases shrink to fit.';
+    panels.stage.append(performanceControls,settings,exits);
+    const footer=document.createElement('footer');footer.className='lvx-studio-footer';const current=document.createElement('span');current.className='lvx-studio-current';current.textContent=THEME_LABELS[state.theme]+' · applied';footer.append(current,play,bloomLabel);
+    themePicker.replaceChildren(heading,tabs,...Object.values(panels),footer);
+    function show(){for(const [id,panel]of Object.entries(panels)){panel.hidden=id!==studio.view;const tab=tabs.querySelector(`[data-studio-tab="${id}"]`);tab.setAttribute('aria-selected',String(!panel.hidden));tab.tabIndex=panel.hidden?-1:0;}previewTheme=studio.view==='motion'?state.theme:previewTheme;renderStylePreview();}
+    pageLooks();show();
   }
   function toggleThemePicker(force) {
     const open = force ?? themePicker.hidden;
@@ -787,7 +831,7 @@
     syncButton('tempo-save').textContent=required?'Set BPM & continue':'Set BPM';
     const summary=syncPanel.querySelector('.lvx-tempo-panel summary');summary.firstChild.nodeValue=required?'Baseline BPM ':'Beat clicker ';summary.querySelector('span').textContent=required?'type it or tap four beats':'T · tap the beat';
     syncButton('tempo-sections').disabled=!state.score||required;
-    if(required){syncPanel.hidden=false;syncPanel.querySelector('.lvx-tempo-panel').open=true;}
+    if(required){syncPanel.hidden=false;syncPanel.querySelector('.lvx-tempo-panel').open=true;if(typeof timingWorkspace!=='undefined'&&timingWorkspace.tabs)setTimingWorkspace('beat');}
     return required;
   }
   async function openTempoSetup(editAfter=false){
@@ -1322,9 +1366,11 @@
       const warning=meta.querySelector('.lvx-capture-flag'),receipt=meta.querySelector('.lvx-capture-receipt');
       visible(warning,Boolean(frame.flagged));text(warning,'Flagged last pass');
       visible(receipt,recorded.phraseRecorded);text(receipt,recorded.phraseRecorded?(eventTake(take)?recorded.eventCount+(syllableHold(take)?' syllables held':' entrances captured'):take.mode==='phrase'?'Phrase captured':recorded.wordIds.length+' words captured'):'');
+      meta.hidden=take?.status!=='armed'&&!frame.flagged&&!recorded.phraseRecorded;
       let countdown=host.querySelector('.lvx-capture-countdown');
       if(!countdown){countdown=document.createElement('div');countdown.className='lvx-capture-countdown';countdown.innerHTML='<span></span><div class="lvx-countdown-track"><i></i></div>';meta.after(countdown);}
       const counting=remaining&&remaining.remainingMs>0;visible(countdown,Boolean(counting));
+      countdown.hidden=take?.status!=='armed'&&!counting;
       if(counting){text(countdown.querySelector('span'),'Starts in '+(remaining.remainingMs/1000).toFixed(1)+'s');countdown.querySelector('i').style.transform='scaleX('+(1-remaining.progress)+')';}
       if(host===cue){let hint=host.querySelector('.lvx-idle-hint');if(!hint){hint=document.createElement('p');hint.className='lvx-idle-hint';host.append(hint);}visible(hint,idle);text(hint,eventTake(take)?'Space: tap · ← back · Shift+← 5s':'Space: hold · ← back · → skip · F flag');hint.title=captureGuidanceText();}
     }
@@ -1533,6 +1579,7 @@
   async function armTapTake() {
     const mode=syncButton('tap-mode').value;
     if (timing.busy || !timing.draft || timing.dirty || (mode!=='syllable'&&tapping.splitDirty) || effectPending() || tapping.take?.status === 'armed'&&!getMedia()?.paused || tapping.take?.status === 'complete'&&!rawTake(tapping.take)) return;
+    if(typeof setTimingWorkspace==='function')setTimingWorkspace('record');
     let word = tapWord(), phrase = timingPhrase();const media = getMedia();
     if (!word || !media || isAdvertisement() || youtubeMediaState()?.clockUsable === false || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source)) { setSyncNotice('Wait for this video’s main audio before starting a take.'); return; }
     try {
@@ -2237,6 +2284,7 @@
     syncPanel.setAttribute('aria-busy', String(timing.busy));
     syncButton('close').disabled = timing.busy;
     root.classList.toggle('lvx-sync-open', !syncPanel.hidden);
+    if(typeof timingWorkspace!=='undefined'&&timingWorkspace.tabs){const live=tapping.take?.status==='armed'||performanceTake.armed||countIn.active;for(const tab of timingWorkspace.tabs.children)tab.disabled=Boolean(live&&tab.dataset.workspace!==timingWorkspace.view);}
     for (const control of [offsetInput, syncEarlier, syncLater]) control.disabled = Boolean(draft)||!hasBaselineTempo();
     syncButton('saved').setAttribute('aria-pressed', String(timing.view === 'saved'));
     syncButton('proposed').setAttribute('aria-pressed', String(timing.view === 'proposed'));
@@ -2269,6 +2317,7 @@
     await loadTempo();
     if(!hasBaselineTempo()){await openTempoSetup(true);return;}
     if (!syncPanel.hidden && timing.draft) { syncPanel.focus(); return; }
+    if(timingWorkspace?.view==='beat')setTimingWorkspace('record');
     timing.priorLoop = state.auditionLoop; syncPanel.hidden = false; timing.busy = true; refreshTimingPanel();
     timing.openError=null;setSyncNotice('Opening your saved lyrics and timings…');
     try {
@@ -2427,7 +2476,47 @@
     event.stopPropagation();
     if (event.key === 'Escape') { event.preventDefault(); closeTimingReview(); }
   });
-  root.append(viewport, preview, progress, hud, themePicker, shortcutsPanel, syncPanel, errorPanel);
+  var timingWorkspace={view:'record',tabs:null};
+  function setTimingWorkspace(view){
+    if(!['record','review','effects','beat'].includes(view))return;
+    if((tapping.take?.status==='armed'||performanceTake.armed||countIn.active)&&timingWorkspace.view!==view)return;
+    timingWorkspace.view=view;syncPanel.dataset.workspace=view;
+    for(const tab of timingWorkspace.tabs?.children||[]){const active=tab.dataset.workspace===view;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;}
+    for(const panel of syncPanel.querySelectorAll('[data-workspace-page]'))panel.hidden=panel.dataset.workspacePage!==view;
+  }
+  function buildTimingWorkspace(){
+    const tabs=document.createElement('div');tabs.className='lvx-workspace-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Timing workspace');timingWorkspace.tabs=tabs;
+    const panes={};
+    for(const [id,label]of [['record','Record'],['review','Refine'],['effects','Effects'],['beat','Beat']]){
+      const button=document.createElement('button');button.type='button';button.textContent=label;button.dataset.workspace=id;button.id='lvx-workspace-tab-'+id;button.setAttribute('role','tab');button.setAttribute('aria-controls','lvx-workspace-'+id);button.onclick=()=>setTimingWorkspace(id);tabs.append(button);
+      const pane=document.createElement('section');pane.dataset.workspacePage=id;pane.id='lvx-workspace-'+id;pane.setAttribute('role','tabpanel');pane.setAttribute('aria-labelledby',button.id);panes[id]=pane;
+    }
+    tabs.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;const buttons=[...tabs.children].filter(b=>!b.disabled),at=buttons.indexOf(document.activeElement);if(at<0)return;event.preventDefault();const n=event.key==='Home'?0:event.key==='End'?buttons.length-1:(at+(event.key==='ArrowRight'?1:-1)+buttons.length)%buttons.length;buttons[n].click();buttons[n].focus();};
+    syncPanel.querySelector('header').after(tabs);syncPanel.querySelector('footer').before(...Object.values(panes));
+    const capture=syncPanel.querySelector('.lvx-tap-panel'),effects=syncPanel.querySelector('.lvx-effect-panel'),beat=syncPanel.querySelector('.lvx-tempo-panel');
+    for(const [section,id]of [[capture,'record'],[effects,'effects'],[beat,'beat']]){section.open=true;section.classList.add('lvx-workspace-section');panes[id].append(section);}
+    // Primary capture actions stay above the cue at every viewport height.
+    capture.querySelector('.lvx-perform-cue').before(capture.querySelector('.lvx-perform-actions'));
+    const transport=document.createElement('div');transport.className='lvx-capture-transport';transport.append(syncButton('capture-rewind'),syncButton('capture-forward'),syncButton('retime-flag'));capture.querySelector('.lvx-perform-actions').after(transport);
+    const gap=document.createElement('details');gap.className='lvx-effect-gap';gap.innerHTML='<summary>Phrase exit <span>Override this phrase</span></summary>';
+    const gapHint=syncButton('gap-default').nextElementSibling;
+    gap.append(syncButton('gap-beats').closest('label'),syncButton('gap-use'),syncButton('gap-default'),gapHint);effects.append(gap);
+    const exact=syncText.closest('details');exact.querySelector('summary').firstChild.nodeValue='Exact word timings ';panes.review.append(exact);
+    for(const selector of ['.lvx-event-review','.lvx-mark-correction','.lvx-tap-timeline','.lvx-syllable-review'])panes.review.append(syncPanel.querySelector(selector));
+    const reviewActions=document.createElement('div');reviewActions.className='lvx-review-actions';reviewActions.append(syncButton('events-restore'),syncButton('transcript-open'),syncButton('light-editor'));panes.review.prepend(reviewActions);
+    syncPanel.querySelector('footer').before(syncPanel.querySelector('.lvx-transcript-editor'));
+    const takeActions=syncButton('tap-use').parentElement;panes.review.append(takeActions);
+    const reviewHint=document.createElement('p');reviewHint.className='lvx-studio-note';reviewHint.textContent='Review the last recording, correct a mark or open the full editor. Your take and preview stay intact when you switch views.';panes.review.prepend(reviewHint);
+    const housekeeping=syncButton('export').parentElement;const advanced=document.createElement('details');advanced.className='lvx-review-files';advanced.innerHTML='<summary>Files & reset <span>Export or discard</span></summary>';advanced.append(housekeeping);panes.review.append(advanced);
+    // Shared audition controls belong to refinement; recording has its own Start/Stop.
+    for(const selector of ['.lvx-sync-tabs','.lvx-sync-transport','.lvx-sync-loop.lvx-toggle-host']){const element=syncPanel.querySelector(selector);if(element)panes.review.prepend(element);}
+    syncPanel.querySelector('header').after(tabs);
+    syncPanel.querySelector('footer').before(...Object.values(panes));
+    syncPanel.querySelector('.lvx-sync-eyebrow').textContent='LYRICVIBE / TIMING';
+    setTimingWorkspace('record');
+  }
+  buildTimingWorkspace();
+  root.append(viewport, preview, progress, hud, themePicker, shortcutsPanel, syncPanel, errorPanel,controlsNotice);
   function mountRoot() {
     const surface = document.fullscreenElement;
     if (surface && !['VIDEO', 'AUDIO'].includes(surface.tagName)) surface.appendChild(root);
@@ -2468,7 +2557,7 @@
   try {
     chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement','lvxBloomEnabled','lvxChoreography','lvxLinger'], (result) => {
       linger=LvBeatTrack.lingerSettings(result?.lvxLinger);
-      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic!==false,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(c.origin)?c.origin:'top-left'};}
+      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic===true,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(c.origin)?c.origin:'top-left'};}
       bloomEnabled=result?.lvxBloomEnabled!==false;
       if(result?.lvxPlacement)try{applyPlacement(result.lvxPlacement);}catch(error){setHud(error.message,true,true);}
       if (result && result.lvxTheme && THEMES.includes(result.lvxTheme)) {
@@ -4982,6 +5071,7 @@
      TEARDOWN / SHOW
      ══════════════════════════════════════ */
   function teardown() {
+    clearTimeout(controlsNoticeTimer);controlsNotice.hidden=true;
     overlayEnabled=false;trackWatch?.sync();
     resumeSyncPanel=resumeSyncPanel||!syncPanel.hidden;
     cancelCountIn();listenToTake();
@@ -5018,7 +5108,7 @@
     const resuming=!overlayEnabled;overlayEnabled=true;
     if(resuming&&resumeSyncPanel){syncPanel.hidden=false;resumeSyncPanel=false;}
     if (!root.isConnected) {
-      root.append(viewport, preview, progress, hud, themePicker, shortcutsPanel, errorPanel);
+      root.append(viewport, preview, progress, hud, themePicker, shortcutsPanel, errorPanel,controlsNotice);
       mountRoot();
     }
     trackWatch?.sync();
