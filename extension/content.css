@@ -2849,3 +2849,7 @@
 .lvx-completion-grid{display:grid;grid-template-columns:48px repeat(3,minmax(0,1fr));gap:4px;align-items:center}.lvx-completion-grid>small{font-size:10px;text-align:center;color:#b0c3c7}.lvx-completion-grid>strong{font-size:11px;overflow-wrap:anywhere}
 #lvx-root .lvx-completion-grid button{display:flex;flex-direction:column;gap:2px;align-items:center;justify-content:center;min-width:0;padding:6px 2px;border:1px solid #ffffff16;border-radius:7px;background:#ffffff06;color:#b9cbd0;font-size:10px;line-height:1.2;transition:background .18s ease-out,border-color .18s ease-out}
 #lvx-root .lvx-completion-grid button small{font-size:10px;opacity:.8}#lvx-root .lvx-completion-grid button[data-status=partial]{color:#f5cd81;border-color:#dba34855}#lvx-root .lvx-completion-grid button[data-status=complete]{color:#9be7c5;border-color:#72d9b03b;opacity:1}#lvx-root .lvx-completion-grid button[data-current=true]{background:#ffffff0c}#lvx-root .lvx-completion-grid button:enabled:hover{background:#ffffff1a;border-color:#a3e3ec}#lvx-root .lvx-completion-grid button:focus-visible{outline:2px solid #a3e3ec;outline-offset:1px}.lvx-completion-hint{display:block;margin-top:7px;line-height:1.35}
+
+#lvx-root .lvx-other-parts { display:grid; gap:4px; margin:10px 0; }
+#lvx-root .lvx-other-parts label { display:flex; align-items:center; gap:7px; font-size:13px; }
+#lvx-root .lvx-other-parts small { color:#b7c5cf; font-size:11px; line-height:1.4; }

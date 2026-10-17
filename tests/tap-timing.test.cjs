@@ -1308,3 +1308,35 @@ test('reopening word-hold recordings preserves holds and syllable releases and r
   for(const syllableEvents of [[...packet.syllableEvents,packet.syllableEvents[0]],[{id:'e1',sourceMs:410,releaseMs:400}]])assert.throws(()=>tap.restoreWordHoldRecording({...packet,syllableEvents}),{code:'INVALID_RECORDING'});
   restored.holds[0].pressMs=500;assert.equal(packet.holds[0].pressMs,400);
 });
+
+
+test('other-part itinerary groups arbitrary named lanes and keeps uninterrupted main runs', () => {
+  const phrase=(id,laneId,startMs,endMs,excluded=false)=>({id,laneId,startMs,endMs,words:[{id:id+'w',excluded}]});
+  const score={lanes:[{id:'main',label:'Solo'},{id:'harmony',label:'High harmony'},{id:'reply',label:'Crowd'}],phrases:[
+    phrase('a','main',1000,3000),phrase('b','main',5000,7000),phrase('c','main',9000,11000),
+    phrase('h1','harmony',2000,2800),phrase('h2','harmony',2800,3300),phrase('r','reply',3000,4000),
+    phrase('hidden','reply',2000,3000,true),phrase('intro','reply',0,500)]};
+  const before=JSON.stringify(score),steps=tap.planOtherParts(score,'a');
+  assert.deepEqual(steps.map(s=>s.phraseIds),[['a'],['h1','h2'],['r'],['b','c']]);
+  assert.deepEqual(steps.map(s=>s.label),['Solo','High harmony','Crowd','Solo']);
+  assert.deepEqual(steps.map(s=>s.anchorId),['a','a','a','b']);
+  assert.equal(JSON.stringify(score),before,'planning cannot retime or relabel a score');
+  assert.deepEqual(tap.planOtherParts(score,'b'),[],'starting later never captures earlier parts');
+  assert.equal(tap.planOtherParts(score,'a',{scope:'phrase'}).length,3,'explicit phrase scope never grows into later main phrases');
+});
+
+test('a reply at a shared boundary belongs once to the preceding phrase', () => {
+  const p=(id,laneId,startMs,endMs)=>({id,laneId,startMs,endMs,words:[{id:id+'w'}]});
+  const score={lanes:[{id:'lead',label:'Lead'},{id:'echo',label:'Echo'}],phrases:[p('a','lead',0,2000),p('b','lead',2000,4000),p('r','echo',2000,3000)]};
+  assert.deepEqual(tap.planOtherParts(score,'a').map(s=>s.phraseIds),[['a'],['r'],['b']]);
+  assert.deepEqual(tap.planOtherParts(score,'b'),[]);
+  assert.deepEqual(tap.planOtherParts(score,'missing'),[]);
+});
+
+
+test('a response in the following rest remains with its main phrase after retiming', () => {
+  const p=(id,laneId,startMs,endMs)=>({id,laneId,startMs,endMs,words:[{id:id+'w'}]});
+  const score={lanes:[{id:'lead',label:'Solo'},{id:'reply',label:'Reply'}],phrases:[p('a','lead',1000,2800),p('b','lead',5000,7000),p('r','reply',3200,4000)]};
+  assert.deepEqual(tap.planOtherParts(score,'a').map(s=>s.phraseIds),[['a'],['r'],['b']]);
+  assert.deepEqual(tap.planOtherParts(score,'b'),[]);
+});

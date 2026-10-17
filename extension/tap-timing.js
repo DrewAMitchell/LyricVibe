@@ -8,6 +8,43 @@
   const clone = value => JSON.parse(JSON.stringify(value));
   const integerTime = n => Number.isSafeInteger(n) && n >= 0;
 
+  // Freeze a recording itinerary before a take. Time ranges are suggestions for
+  // association, never edits to the score. A shared boundary belongs to the
+  // preceding phrase so parenthetical replies placed at its end stay with it.
+  // A reply in the following rest stays with that phrase until the next main
+  // entrance; tightening a recorded main end must not orphan its response.
+  function planOtherParts(score, phraseId, {scope = 'lane'} = {}) {
+    const visible = score.phrases.filter(p => p.words.some(w => !w.excluded));
+    const selected = visible.find(p => p.id === phraseId);
+    if (!selected) return [];
+    const primary = visible.filter(p => p.laneId === selected.laneId).sort((a,b)=>a.startMs-b.startMs);
+    const anchors = scope === 'phrase' ? [selected] : primary.slice(primary.indexOf(selected));
+    const groups = new Map(anchors.map(p=>[p.id,[]]));
+    for (const part of visible.filter(p=>p.laneId!==selected.laneId)) {
+      const owner = primary.find(p=>part.startMs===p.endMs) ||
+        [...primary].reverse().find(p=>part.startMs>=p.startMs) ||
+        primary.find(p=>part.startMs<p.startMs && part.endMs>p.startMs);
+      if (owner && groups.has(owner.id)) groups.get(owner.id).push(part);
+    }
+    if (![...groups.values()].some(parts=>parts.length)) return [];
+    const steps = []; let run = [];
+    const step = (phrases, anchor, other) => ({laneId:phrases[0].laneId,
+      label:score.lanes.find(l=>l.id===phrases[0].laneId)?.label || phrases[0].laneId,
+      phraseIds:phrases.map(p=>p.id), anchorId:anchor.id, other});
+    for (const anchor of anchors) {
+      run.push(anchor);
+      const parts = groups.get(anchor.id);
+      if (!parts.length) continue;
+      steps.push(step(run,run[0],false));run=[];
+      for (const lane of score.lanes) {
+        const samePart=parts.filter(p=>p.laneId===lane.id).sort((a,b)=>a.startMs-b.startMs);
+        if (samePart.length) steps.push(step(samePart,anchor,true));
+      }
+    }
+    if (run.length) steps.push(step(run,run[0],false));
+    return steps;
+  }
+
   // Lead-in guidance is derived from source-media time so pause, seek, and
   // playback-rate changes are handled by the caller's current media clock.
   function leadInProgress(nowMs, startMs, leadInMs) {
@@ -1425,5 +1462,5 @@
   return { begin, mark, release, undo, stop, adjust, reposition, followPlayback, punchIn, moveCursor, reassignLast, restoreWordFrameTake, rewindToPhrase, restorePhraseStreamTake,
     beginEvents, markEvent, pressEventHold, releaseEventHold, stopEvents, undoEvent, rewindEvents, associateEvents, restoreEventRecording,
     beginWordHolds, restoreWordHoldRecording, pressWord, releaseWord, skipWords, undoWordHold, stopWordHolds, rewindWordHolds, retimePhraseHolds, associateWordHolds, wordHoldsFromPairs, estimateTempo,
-    leadInProgress, captureProgress, validateTempoMap, tempoMapFromEstimate, setTempoPoint, removeTempoPoint, tempoAt, tempoTimeAtBeat };
+    planOtherParts, leadInProgress, captureProgress, validateTempoMap, tempoMapFromEstimate, setTempoPoint, removeTempoPoint, tempoAt, tempoTimeAtBeat };
 });
