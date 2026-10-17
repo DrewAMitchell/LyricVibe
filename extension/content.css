@@ -2918,7 +2918,13 @@
 #lvx-root .lvx-sync-panel[data-workspace=effects] .lvx-effect-pads button{min-height:44px}
 
 #lvx-root .lvx-groove-direction{display:flex;align-items:center;gap:8px;font:12px system-ui;margin:8px 0 12px;color:#c6d6dd}
-#lvx-root .lvx-effect-pads [data-effect=clear]{grid-column:1 / -1;min-height:30px!important}
+#lvx-root .lvx-effect-live{display:flex;flex-direction:column;gap:5px;padding:10px 12px;border-left:3px solid #749d9c;background:#101f24;border-radius:5px;margin:8px 0;color:#e6f1ee}
+#lvx-root .lvx-effect-live span{font-size:12px;overflow-wrap:anywhere}
+#lvx-root .lvx-effect-live small{font-size:11px;color:#a9bdbb}
+#lvx-root .lvx-effect-live[data-state=clear]{border-color:#f1b87d;background:#34251c}
+#lvx-root .lvx-effect-live[data-state=write]{border-color:#c6ed9b;background:#213323}
+#lvx-root [data-sync=effect-hold][aria-pressed=true]{background:#63452c;border-color:#f1b87d}
+#lvx-root [data-sync=effect-clear-track]{color:#e7c3a8}
 #lvx-root .lvx-effect-preview{margin:8px 0 12px;padding:10px;border:1px solid #49636c;border-radius:10px;background:#0a171e}
 #lvx-root .lvx-effect-preview[hidden]{display:none}
 #lvx-root .lvx-effect-preview-caption{display:flex;align-items:center;gap:8px;justify-content:space-between;color:#aac3ce;font:11px system-ui}
