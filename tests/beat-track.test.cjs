@@ -82,3 +82,7 @@ test('the final phrase in one lane yields to continuing vocals instead of sticki
   assert.equal(beats.displayEnds(continuing,null,{mode:'next'})[last.id],undefined,'already singing voice prevents a stale final-lane hold');
   assert.ok(beats.displayEnds(s,map,{mode:'beats',beats:32})[last.id]>10000,'explicit beat duration retains lane independence');
 });
+
+test('Bounce and Glow beat cues preserve timing, replay deterministically and respect reduced motion',()=>{
+ for(const effect of ['bounce','glow']){const s=score(),c={...cue,effect};const n=core.applyOperation(s,{type:'setBeatCue',cue:c},s.revision);assert.deepEqual(n.phrases,s.phrases);core.validateScore(JSON.parse(JSON.stringify(n)));const at=3250,first=beats.cueAt(c,map,at);beats.cueAt(c,map,3750);assert.deepEqual(beats.cueAt(c,map,at),first);if(effect==='bounce')assert.ok(first.y<0);else assert.ok(first.brightness>1.2);const reduced=beats.cueAt(c,map,at,true);assert.equal(reduced.y||0,0);assert.equal(reduced.scale,1);}
+});

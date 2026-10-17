@@ -44,6 +44,8 @@
     const elapsed=beat-cue.beat,phase=elapsed-Math.floor(elapsed),strength=cue.strength;
     if(reducedMotion)return {scale:1,brightness:1+.12*strength,hue:0,glow:.12*strength};
     const pulse=Math.max(0,1-phase/.35)**2;
+    if(cue.effect==='bounce')return {scale:1,brightness:1+.1*strength,hue:0,glow:0,y:-Math.sin(Math.PI*phase)*12*strength};
+    if(cue.effect==='glow')return {scale:1,brightness:1+.5*strength,hue:0,glow:.5*strength};
     if(cue.effect==='breath'){const wave=(1-Math.cos(2*Math.PI*elapsed/4))/2;return {scale:1+.05*strength*wave,brightness:1+.2*strength*wave,hue:0,glow:.2*strength*wave};}
     if(cue.effect==='color')return {scale:1,brightness:1+.2*strength,hue:35*strength*Math.sin(2*Math.PI*elapsed/4),glow:.2*strength};
     return {scale:1+.09*strength*pulse,brightness:1+.35*strength*pulse,hue:0,glow:.3*strength*pulse};

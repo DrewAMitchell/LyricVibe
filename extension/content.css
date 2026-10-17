@@ -2895,3 +2895,14 @@
 
 #lvx-root .lvx-theme-picker{z-index:60}
 @media(max-height:680px){#lvx-root .lvx-theme-picker .lvx-motion-sample .lvx-tile-stage{height:70px}}
+
+#lvx-root .lvx-effect-targets{display:flex;gap:6px;margin:12px 0}
+#lvx-root .lvx-effect-targets button{flex:1;min-height:36px;border:1px solid #425746;border-radius:7px;background:#162219;color:#cbdac7;font:600 12px system-ui;cursor:pointer}
+#lvx-root .lvx-effect-targets button[aria-pressed=true]{background:#d9edc1;color:#182319}
+#lvx-root .lvx-beat-target{translate:0 var(--lvx-beat-y,0px)}
+@media(prefers-reduced-motion:reduce){#lvx-root .lvx-beat-target{translate:none}}
+
+#lvx-root .lvx-sync-panel{z-index:45}
+#lvx-root .lvx-sync-panel[data-workspace=effects] .lvx-completion{display:none}
+#lvx-root .lvx-sync-panel .lvx-effect-pads{grid-template-columns:repeat(3,minmax(0,1fr))}
+#lvx-root .lvx-sync-panel[data-workspace=effects] .lvx-effect-pads button{min-height:44px}

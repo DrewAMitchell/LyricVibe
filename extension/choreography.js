@@ -42,6 +42,8 @@
     if(effects.length){
       out.reason='authored';
       for(const effect of effects){const strength=Math.max(0,Math.min(1,effect.strength??.3));
+        if(effect.type==='glow')out.brightness=1+strength*(reduced?.2:.5*envelope);
+        if(!reduced&&effect.type==='bounce')out.y-=Math.abs(Math.sin(t*Math.PI*2))*strength*12*envelope;
         if(!reduced&&effect.type==='shake')out.x+=Math.sin(t*Math.PI*12.5)*strength*2;
         if(!reduced&&effect.type==='tilt')out.turn+=Math.sin(t*Math.PI/0.6)*strength*2;
         if(!reduced&&effect.type==='pulse')out.scale+=((1-Math.cos(t*Math.PI/.5))/2)*strength*.025;

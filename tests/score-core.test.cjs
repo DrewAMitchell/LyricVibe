@@ -589,7 +589,7 @@ test('import validation rejects malformed IDs, times, lanes, effects, and hashes
     x => { x.phrases[0].words[0].startMs = -1; },
     x => { x.phrases[0].words[0].endMs = x.phrases[0].words[0].startMs - 1; },
     x => { x.phrases[0].laneId = 'unknown'; },
-    x => { x.phrases[0].words[0].effects = [{ type: 'glow', strength: 0.5 }]; },
+    x => { x.phrases[0].words[0].effects = [{ type: 'unknown-effect', strength: 0.5 }]; },
     x => { x.lyrics.contentHash = 'weak'; },
     x => { x.phrases[0].words.push({ ...x.phrases[0].words[0] }); },
   ]) {

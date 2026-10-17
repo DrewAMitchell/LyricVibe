@@ -152,3 +152,8 @@ test('backing has one bounded budget while shared space returns full main height
   assert.equal(vocalAreas(1000,800,true,{space:'shared',area:.3}).main.height,800);
   assert.equal(vocalAreas(1000,800,false).main.height,800);
 });
+
+test('authored Bounce and Glow follow the sung interval and remain stable on replay',()=>{
+ const cue={startMs:1000,endMs:3000,sustained:[]};
+ for(const type of ['bounce','glow']){const options={effects:[{type,strength:.7}]},first=expressionAt(cue,1250,options);expressionAt(cue,1700,options);assert.deepEqual(expressionAt(cue,1250,options),first);if(type==='bounce')assert.ok(first.y<0);else assert.ok(first.brightness>1.2);const reduced=expressionAt(cue,1250,{...options,reduced:true});assert.equal(reduced.y,0);assert.equal(reduced.scale,1);assert.equal(expressionAt(cue,3000,options).reason,'');}
+});
