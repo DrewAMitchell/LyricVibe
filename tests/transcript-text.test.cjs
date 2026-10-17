@@ -141,3 +141,57 @@ test('whole-word marker changes only display and survives add/remove, replacemen
  const replace=transcript.diff(s,'=Oh =yes now');next=s;for(const op of replace.operations)next=core.applyOperation(next,op,next.revision);assert.equal(transcript.toText(next),'=Oh =yes now');assert.equal(next.phrases[0].words[0].text,'Oh');
  next=core.applyOperation(s,{type:'replaceWords',phraseId:s.phrases[0].id,wordIds:[w.id],text:'==equals'},s.revision);assert.equal(next.phrases[0].words[0].text,'=equals');assert.equal(transcript.toText(next),'==equals now');
 });
+
+const applyText = (score, text) => transcript.diff(score, text).operations.reduce((next, op) => core.applyOperation(next, op, next.revision), score);
+const backingFixture = () => core.createScore({platform:'youtube',videoId:'TESTVIDEO01',durationMs:20000},'[00:01.00]Stay with me\n[00:08.00]Another main phrase\n[00:15.00]',{provider:'fixture',contentHash:'a'.repeat(64)});
+
+test('parentheses add estimated backing at the main phrase end without changing authored main words', () => {
+  let score=backingFixture();
+  score=core.applyOperation(score,{type:'setWordTiming',wordId:score.phrases[0].words[0].id,startMs:1000,endMs:1400},score.revision);
+  const original=structuredClone(score.phrases),text='Stay with me (with me)\nAnother main phrase',next=applyText(score,text);
+  assert.deepEqual(next.phrases.filter(p=>p.laneId==='lead'),original);
+  const back=next.phrases.find(p=>p.laneId==='backing');
+  assert.equal(back.startMs,original[0].endMs);assert.equal(back.endEstimated,true);
+  assert.deepEqual(back.words.map(w=>w.text),['with','me']);
+  assert.ok(back.words.every(w=>w.provenance==='estimated'&&!w.locked));
+  assert.deepEqual(transcript.diff(next,text).operations,[]);
+  assert.deepEqual(transcript.diff(next,transcript.toText(next)).operations,[]);
+});
+
+test('multiple and nested groups become backing in written order; punctuation and display markers survive',()=>{
+  const next=applyText(backingFixture(),'Stay(=oh) with (yeah (yeah)) me!\nAnother main phrase');
+  assert.equal(transcript.toText(next),'Stay with me!\n[backing] =oh yeah yeah\nAnother main phrase');
+  assert.equal(next.phrases[1].words[0].displayMode,'whole');
+});
+
+test('parentheses-only lines follow the preceding main phrase; a standalone first line still works',()=>{
+  const score=backingFixture(),text='Stay with me\n(with me)\nAnother main phrase',next=applyText(score,text);
+  assert.equal(next.phrases[1].startMs,score.phrases[0].endMs);
+  assert.deepEqual(transcript.diff(next,text).operations,[]);
+  const solo=applyText({...score,phrases:[]},'(oh yeah)');
+  assert.equal(solo.phrases.length,1);assert.equal(solo.phrases[0].laneId,'backing');
+});
+
+test('new main lines and their parenthetical backing retain source order and their own end anchors',()=>{
+  const score=backingFixture(),text='Stay with me\nBrand new line (echo)\nAnother main phrase',next=applyText(score,text);
+  assert.equal(transcript.toText(next),'Stay with me\nBrand new line\n[backing] echo\nAnother main phrase');
+  const added=next.phrases[1],back=next.phrases[2];assert.equal(back.startMs,added.endMs);
+  assert.deepEqual(next.phrases[0],score.phrases[0]);assert.deepEqual(next.phrases[3],score.phrases[1]);
+  assert.deepEqual(transcript.diff(next,text).operations,[]);
+});
+
+test('existing custom backing lanes and manually corrected backing timing survive shorthand reapplication',()=>{
+  const score=backingFixture();score.lanes[1]={id:'harmony',role:'backing',label:'Harmony'};
+  const text='Stay with me (echo)\nAnother main phrase';let next=applyText(score,text),back=next.phrases[1];
+  assert.equal(back.laneId,'harmony');
+  next=core.applyOperation(next,{type:'setPhraseTiming',phraseId:back.id,startMs:2000,endMs:2500},next.revision);
+  assert.deepEqual(transcript.diff(next,text).operations,[]);
+  next=applyText(next,'Stay with me\n[harmony] (echo)\nAnother main phrase');
+  assert.equal(next.phrases[1].startMs,2000);assert.equal(next.phrases.length,3);
+});
+
+test('unfinished parentheses remain literal and empty parentheses do not create empty phrases',()=>{
+  const score=backingFixture(),next=applyText(score,'Stay with me (unfinished\nAnother main phrase');
+  assert.equal(transcript.toText(next),'Stay with me (unfinished\nAnother main phrase');
+  assert.deepEqual(transcript.diff(score,'Stay with me ()\nAnother main phrase').operations,[]);
+});

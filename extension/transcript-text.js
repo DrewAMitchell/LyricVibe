@@ -34,6 +34,50 @@
     return { laneId: lead, tokens: line.trim().split(/\s+/).filter(Boolean) };
   }
 
+  // Only complete, balanced groups are shorthand; unfinished typing stays literal.
+  function parentheticalParts(text) {
+    let main = '', flattened = '', found = false;
+    const backing = [];
+    for (let i = 0; i < text.length;) {
+      if (text[i] !== '(') { main += text[i]; flattened += text[i++]; continue; }
+      let depth = 1, end = i + 1;
+      for (; end < text.length && depth; end++) {
+        if (text[end] === '(') depth++;
+        if (text[end] === ')') depth--;
+      }
+      if (depth) { main += text.slice(i); flattened += text.slice(i); break; }
+      const body = text.slice(i + 1, end - 1).replace(/[()]/g, ' ').trim();
+      if (body) backing.push(body);
+      main += ' '; flattened += ` ${body} `; found = true; i = end;
+    }
+    const tokens = value => value.replace(/\s+([,.;:!?])/g, '$1').trim().split(/\s+/).filter(Boolean);
+    return { main: tokens(main), backing: tokens(backing.join(' ')), flattened: tokens(flattened), found };
+  }
+
+  function parseText(text, score) {
+    const parsed = [], backingLane = score.lanes.find(lane => lane.role === 'backing');
+    let previousMain = null;
+    linesOf(text).forEach((line, index) => {
+      if (!line.trim()) return;
+      const entry = { ...parseLine(line, score, null), line: index + 1 };
+      const parts = parentheticalParts(entry.tokens.join(' '));
+      if (!parts.found) {
+        if (score.lanes.find(lane => lane.id === entry.laneId)?.role === 'lead') previousMain = parsed.length;
+        parsed.push(entry); return;
+      }
+      if (!backingLane && parts.backing.length) fail('MISSING_BACKING_LANE', 'This score needs a backing lane before parenthesized lyrics can be added.');
+      if (score.lanes.find(lane => lane.id === entry.laneId)?.role === 'backing') {
+        parsed.push({ ...entry, tokens: parts.flattened }); return;
+      }
+      if (parts.main.length) {
+        previousMain = parsed.length;
+        parsed.push({ ...entry, tokens: parts.main, hasBacking: parts.backing.length > 0 });
+      }
+      if (parts.backing.length) parsed.push({ laneId: backingLane.id, tokens: parts.backing, line: entry.line, autoBacking: true, anchorIndex: previousMain });
+    });
+    return parsed;
+  }
+
   // Longest common subsequence of exact word texts; returns matched index pairs.
   function lcsPairs(a, b) {
     const rows = a.length + 1, cols = b.length + 1, table = Array.from({ length: rows }, () => new Uint16Array(cols));
@@ -60,10 +104,10 @@
 
   // Align transcript lines to phrases, maximizing total similarity; pairs below
   // the threshold are treated as a deleted phrase plus an inserted line.
-  function alignLines(oldTokens, newTokens, threshold = 0.5) {
+  function alignLines(oldTokens, newTokens, canPair = () => true, threshold = 0.5) {
     const n = oldTokens.length, m = newTokens.length;
     const lower = list => list.map(t => t.toLowerCase());
-    const sim = oldTokens.map(a => newTokens.map(b => similarity(lower(a), lower(b))));
+    const sim = oldTokens.map((a, i) => newTokens.map((b, j) => canPair(i, j) ? similarity(lower(a), lower(b)) : -Infinity));
     const best = Array.from({ length: n + 1 }, () => new Float64Array(m + 1));
     for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) {
       best[i][j] = Math.max(best[i + 1][j], best[i][j + 1], sim[i][j] >= threshold ? best[i + 1][j + 1] + sim[i][j] : -Infinity);
@@ -78,7 +122,7 @@
     const pairs = [], bounds = [[-1, -1], ...anchored, [n, m]];
     for (let k = 0; k + 1 < bounds.length; k++) {
       const [i0, j0] = bounds[k], [i1, j1] = bounds[k + 1];
-      if (i1 - i0 === j1 - j0) for (let d = 1; d < i1 - i0; d++) pairs.push([i0 + d, j0 + d]);
+      if (i1 - i0 === j1 - j0) for (let d = 1; d < i1 - i0; d++) if (canPair(i0 + d, j0 + d)) pairs.push([i0 + d, j0 + d]);
       if (k + 1 < bounds.length - 1) pairs.push(bounds[k + 1]);
     }
     return pairs;
@@ -127,11 +171,15 @@
     if (typeof text !== 'string' || text.length > 200000) fail('INVALID_TEXT', 'Transcript text must be a string under 200,000 characters.');
     // Phrases whose words are all hidden are deleted from the transcript's point of view.
     const phrases = score.phrases.filter(phrase => visible(phrase).length);
-    const parsed = linesOf(text).map(line => line.trim() ? parseLine(line, score, null) : null);
+    const parsed = parseText(text, score);
     const lineIndexes = parsed.map((entry, i) => entry ? i : -1).filter(i => i >= 0);
-    const pairs = alignLines(phrases.map(phrase => visible(phrase).map(word => word.text)), lineIndexes.map(i => parsed[i].tokens.map(tokenText)));
+    const pairs = alignLines(phrases.map(phrase => visible(phrase).map(word => word.text)), lineIndexes.map(i => parsed[i].tokens.map(tokenText)), (pi, li) => {
+      const entry = parsed[lineIndexes[li]], role = score.lanes.find(lane => lane.id === phrases[pi].laneId)?.role;
+      return entry.autoBacking ? role === 'backing' : entry.hasBacking ? role === 'lead' : true;
+    });
     const operations = [], changes = [], inserts = [];
     const matchedPhrase = new Map(pairs.map(([pi, li]) => [lineIndexes[li], phrases[pi]]));
+    const timings = new Map(matchedPhrase);
     const matchedSet = new Set(pairs.map(([pi]) => pi));
     phrases.forEach((phrase, pi) => {
       if (matchedSet.has(pi)) return;
@@ -143,20 +191,28 @@
       if (!pendingNew.length) return;
       const gapStart = previous ? previous.endMs : 0;
       const gapEnd = nextPhrase ? nextPhrase.startMs : (score.source?.durationMs ?? gapStart + 1500 * pendingNew.length);
-      const each = gapEnd - gapStart >= 500 * pendingNew.length ? Math.floor((gapEnd - gapStart) / pendingNew.length) : 1500;
-      const planned = pendingNew.map((entry, k) => ({ ...entry, startMs: gapStart + k * each, endMs: gapStart + (k + 1) * each }));
+      const ordinaryCount = pendingNew.filter(entry => entry.anchorIndex == null).length;
+      const each = ordinaryCount && gapEnd - gapStart >= 500 * ordinaryCount ? Math.floor((gapEnd - gapStart) / ordinaryCount) : 1500;
+      let ordinaryIndex = 0;
+      const planned = pendingNew.map(entry => {
+        const anchor = timings.get(entry.anchorIndex);
+        const startMs = anchor ? anchor.endMs : gapStart + ordinaryIndex++ * each;
+        const duration = anchor ? Math.max(1500, Math.min(8000, entry.tokens.length * 650)) : each;
+        const result = { ...entry, startMs, endMs: startMs + duration };
+        timings.set(entry.index, result); return result;
+      });
       // Each insert lands directly after the anchor, so emit in reverse to keep line order.
       for (const entry of [...planned].reverse()) {
         inserts.push({ type: 'insertPhrase', afterPhraseId: previous ? previous.id : null, laneId: entry.laneId, text: entry.tokens.join(' '), startMs: entry.startMs, endMs: entry.endMs });
       }
-      for (const entry of planned) changes.push({ line: entry.line, phraseId: null, kind: 'add-line', from: '', to: entry.tokens.join(' ') });
+      for (const entry of planned) changes.push({ line: entry.line, phraseId: null, kind: entry.autoBacking ? 'add-backing' : 'add-line', from: '', to: entry.tokens.join(' ') });
       pendingNew = [];
     };
     parsed.forEach((entry, index) => {
       if (!entry) return;
-      const line = index + 1, phrase = matchedPhrase.get(index);
+      const line = entry.line, phrase = matchedPhrase.get(index);
       if (!phrase) {
-        if (entry.tokens.length) pendingNew.push({ line, laneId: entry.laneId, tokens: entry.tokens });
+        if (entry.tokens.length) pendingNew.push({ ...entry, index });
         return;
       }
       flush(phrase);
