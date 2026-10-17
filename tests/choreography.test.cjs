@@ -130,14 +130,15 @@ test('ordered puzzle measures actual font sizes and keeps short capped phrases o
 });
 
 
-test('minimum text size splits long phrases into stable ordered sections without changing words or timing',()=>{
+test('preferred minimum yields to fitting the whole phrase without changing words or timing',()=>{
  const words=Array.from({length:18},(_,i)=>({id:'floor-'+i,text:'READABLE',startMs:i*500,endMs:i*500+450})),before=structuredClone(words);
  for(const mode of ['classic','fall','puzzle'])for(const arrangement of ['ordered','chaotic']){
   const options={mode,arrangement,minFont:32,maxFont:120},pages=require('../extension/choreography.js').readablePages(words,420,170,measure,options);
-  assert.ok(pages.length>1);assert.deepEqual(pages.flatMap(p=>p.slots.map(s=>s.index)),words.map((_,i)=>i));
-  for(const p of pages)for(const s of p.slots){assert.ok(s.font>=32);assert.ok(s.x-s.boxWidth/2>=-.01&&s.x+s.boxWidth/2<=420.01&&s.y-s.boxHeight/2>=-.01&&s.y+s.boxHeight/2<=170.01);}
+  assert.equal(pages.length,1);assert.ok(pages[0].slots.some(s=>s.font<32));assert.deepEqual(pages.flatMap(p=>p.slots.map(s=>s.index)),words.map((_,i)=>i));
+  for(const p of pages)for(const s of p.slots){assert.ok(s.font>0);assert.ok(s.x-s.boxWidth/2>=-.01&&s.x+s.boxWidth/2<=420.01&&s.y-s.boxHeight/2>=-.01&&s.y+s.boxHeight/2<=170.01);}
   assert.deepEqual(require('../extension/choreography.js').readablePages(words,420,170,measure,options),pages);
  }
  assert.deepEqual(words,before);
- const single=require('../extension/choreography.js').readablePages([{id:'long',text:'SUPERCALIFRAGILISTIC'}],160,300,measure,{mode:'puzzle',minFont:32,maxFont:60});assert.equal(single[0].slots[0].font,32);assert.equal(single[0].slots[0].wrapped,true);
+ const single=require('../extension/choreography.js').readablePages([{id:'long',text:'SUPERCALIFRAGILISTIC'}],160,300,measure,{mode:'puzzle',minFont:32,maxFont:60});assert.ok(single[0].slots[0].font<32);assert.ok(single[0].slots[0].boxWidth<=160.01);
+ const short=require('../extension/choreography.js').readablePages([{id:'short',text:'HI'}],420,170,measure,{mode:'classic',minFont:32,maxFont:60});assert.ok(short[0].slots[0].font>=32,'preferred minimum remains when the phrase fits');
 });

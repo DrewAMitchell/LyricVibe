@@ -177,18 +177,12 @@
     return slots;
   }
 
-  // Stable contiguous pages preserve lyric order and never change recorded timing.
+  // Prefer the minimum, but keep the complete phrase visible when it cannot fit.
   function readablePages(words,width,height,measure,options={}){
-    const minFont=Math.max(0,options.minFont||0),fits=slots=>slots.every(s=>s.font>=minFont-.01&&s.x-s.boxWidth/2>=-.01&&s.x+s.boxWidth/2<=width+.01&&s.y-s.boxHeight/2>=-.01&&s.y+s.boxHeight/2<=height+.01);
-    const arrange=part=>layout(part,width,height,measure,options),full=arrange(words);
-    if(!minFont||fits(full))return [{start:0,end:words.length,slots:full}];
-    const pages=[];let start=0;
-    while(start<words.length){let end=start+1,best=null;
-      for(let next=start+1;next<=words.length;next++){const slots=arrange(words.slice(start,next));if(!fits(slots))break;best=slots;end=next;}
-      if(!best){const textWidth=Math.max(minFont*.2,measure(words[start].text,minFont))+minFont*.08,rows=Math.ceil(textWidth/Math.max(1,width)),h=minFont*1.3*rows;best=[{index:0,x:width/2,y:height/2,width:Math.min(width,textWidth),height:h,boxWidth:Math.min(width,textWidth),boxHeight:h,font:minFont,angle:0,wrapped:rows>1}];}
-      pages.push({start,end,slots:best.map(s=>({...s,index:s.index+start}))});start=end;
-    }
-    return pages;
+    const fits=slots=>slots.every(s=>s.x-s.boxWidth/2>=-.01&&s.x+s.boxWidth/2<=width+.01&&s.y-s.boxHeight/2>=-.01&&s.y+s.boxHeight/2<=height+.01);
+    let slots=layout(words,width,height,measure,options);
+    if(!fits(slots))slots=layout(words,width,height,measure,{...options,minFont:0});
+    return [{start:0,end:words.length,slots}];
   }
   // The newest word keeps a fixed readable size. Only accumulated history compresses.
   function vinylTrack(score,measure){
