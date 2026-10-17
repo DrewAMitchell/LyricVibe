@@ -241,5 +241,30 @@
     const settings=backingSettings(value),band=hasBacking?height*settings.area:0;
     return {main:{x:0,y:0,width,height:height-(settings.space==='separate'?band:0)},backing:{x:width*.1,y:height-band,width:width*.8,height:band}};
   }
-  const api={layout,readablePages,arrival,compose,expressionAt,danceAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
+  const firePalettes=Object.freeze({
+    ember:['#5a160c','#a72b0c','#e95812','#ff9c27','#ffd263','#fff0b9','#fffef4'],
+    blue:['#102e69','#1554a4','#178acb','#37bfe9','#80e5ff','#d5f7ff','#ffffff'],
+    violet:['#321458','#662798','#a13dcc','#cf72ee','#efabff','#fbe0ff','#ffffff'],
+    green:['#153c27','#247342','#48a94b','#8ad85b','#c6ef8c','#edffd5','#ffffff'],
+    crimson:['#4c1126','#8e1939','#ca2c48','#f65a65','#ff9e98','#ffded0','#fffdfa'],
+    ghost:['#293c4c','#4b6475','#758e9b','#a8bfc7','#d6e4e6','#f0f7f7','#ffffff']
+  });
+  // Stateless, advected pixel noise: seeking reconstructs the same fire and
+  // there is no short scrolling-image reset. Color never changes its geometry.
+  function fireFrame(sourceMs,{color='ember',reduced=false}={}){
+    const width=64,height=32,time=reduced?1600:Math.floor(Math.max(0,Number(sourceMs)||0)/83)*83;
+    const hash=(x,y)=>{let n=Math.imul(x,374761393)+Math.imul(y,668265263);n=Math.imul(n^(n>>>13),1274126177);return ((n^(n>>>16))>>>0)/4294967295;};
+    const noise=(x,y)=>{const a=Math.floor(x),b=Math.floor(y),u=x-a,v=y-b,s=u*u*(3-2*u),t=v*v*(3-2*v);return (hash(a,b)*(1-s)+hash(a+1,b)*s)*(1-t)+(hash(a,b+1)*(1-s)+hash(a+1,b+1)*s)*t;};
+    const pixels=new Uint8Array(width*height);
+    for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+      const drift=time*.0023,plume=noise(x/6+noise(y/8,time*.00023)*1.6,y/6+drift);
+      const heat=.10+.44*y/(height-1)+plume*.55;
+      let index=Math.max(1,Math.min(6,Math.floor(heat*6)));
+      if(noise(x*.7,y*.8+time*.008)>.79&&heat>.4)index=6;
+      pixels[y*width+x]=index;
+    }
+    const particles=(count,smoke)=>Array.from({length:count},(_,i)=>{const seed=i+(smoke?47:11),period=(smoke?3100:1700)+hash(seed,3)*1900,age=((time+hash(seed,9)*period)%period)/period;return {x:(hash(seed,4)-.5)*2.5+Math.sin(age*4+seed)*.13,y:(smoke?.15:.55)-age*(smoke?.65:.95),alpha:(smoke?.12:.8)*Math.sin(Math.PI*age),size:smoke?.06+.07*age:.025};});
+    return {width,height,time,palette:firePalettes[color]||firePalettes.ember,pixels,embers:reduced?[]:particles(4,false),smoke:reduced?[]:particles(3,true)};
+  }
+  const api={layout,readablePages,arrival,compose,expressionAt,danceAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

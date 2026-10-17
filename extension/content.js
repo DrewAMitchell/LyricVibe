@@ -365,18 +365,30 @@
   function backingLabelMode(){return backingLabels[backingLabelKey()]||'hidden';}
   function setBackingLabel(value){const key=backingLabelKey();if(!key)return;backingLabels={...backingLabels,[key]:['header','prefix'].includes(value)?value:'hidden'};state.scoreSignature='';chrome.storage.local.set({lvxBackingLabels:backingLabels}).catch(error=>setHud('Backing names changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
   function setBackingDisplay(value){backingDisplay=LvChoreography.backingSettings(value);state.scoreSignature='';chrome.storage.local.set({lvxBackingDisplay:backingDisplay}).catch(error=>setHud('Backing display changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
-  let choreography={dance:'off',mode:'classic',upsideDown:false,automatic:false,autoFire:false,fillStage:true,arrangement:'chaotic',origin:'top-left'},previewPlaying=false,previewFrame=0,previewTime=1600,previewLast=0,previewTheme=state.theme;
+  let choreography={dance:'off',mode:'classic',upsideDown:false,automatic:false,autoFire:false,fireColor:'ember',fireSmoke:true,fillStage:true,arrangement:'chaotic',origin:'top-left'},previewPlaying=false,previewFrame=0,previewTime=1600,previewLast=0,previewTheme=state.theme;
   const choreographyPlans=new WeakMap(),choreographyMeasure=document.createElement('canvas').getContext('2d');
-  function setChoreography(value){choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(value.dance)?value.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic===true,autoFire:value.autoFire===true,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
+  function setChoreography(value){choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(value.dance)?value.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic===true,autoFire:value.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,value.fireColor)?value.fireColor:'ember',fireSmoke:value.fireSmoke!==false,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
   function previewTick(now){
     if(themePicker.hidden||!previewPlaying||document.hidden){previewFrame=0;previewLast=0;return;}
     if(previewLast)previewTime+=Math.min(now-previewLast,100);previewLast=now;renderStylePreview(true);previewFrame=requestAnimationFrame(previewTick);
   }
   function wordLook(word){return word.appearance?.look||(choreography.autoFire&&/^fire$/iu.test(word.text.replace(/^[^\p{L}]+|[^\p{L}]+$/gu,''))?'fire':null);}
+  const firePaintCache=new Map(),fireCanvas=document.createElement('canvas');fireCanvas.width=64;fireCanvas.height=32;
+  const fireBrush=fireCanvas.getContext('2d');
+  function firePaint(clock){
+    const key=(bloomMotion.matches?1600:Math.floor(Math.max(0,Number(clock)||0)/83)*83)+':'+choreography.fireColor+':'+choreography.fireSmoke+':'+bloomMotion.matches;
+    if(firePaintCache.has(key))return firePaintCache.get(key);
+    const frame=LvChoreography.fireFrame(clock,{color:choreography.fireColor,reduced:bloomMotion.matches});
+    for(let y=0;y<frame.height;y++)for(let x=0;x<frame.width;x++){fireBrush.fillStyle=frame.palette[frame.pixels[y*frame.width+x]];fireBrush.fillRect(x,y,1,1);}
+    const image='url("'+fireCanvas.toDataURL()+'")';
+    const shadows=(particles,smoke)=>particles.map(p=>`${p.x.toFixed(3)}em ${p.y.toFixed(3)}em 0 ${(p.size/2).toFixed(3)}em rgba(${smoke?'193,205,213':'255,255,244'},${p.alpha.toFixed(3)})`).join(',')||'none';
+    const paint={image,embers:shadows(frame.embers,false),smoke:choreography.fireSmoke?shadows(frame.smoke,true):'none'};
+    firePaintCache.set(key,paint);if(firePaintCache.size>12)firePaintCache.delete(firePaintCache.keys().next().value);return paint;
+  }
   function paintWordTexture(node,word,clock,theme=state.theme){
     const look=wordLook(word);if(look)node.dataset.look=look;else delete node.dataset.look;
     const fire=(look||theme)==='fire';node.classList.toggle('lvx-fire-texture',fire);
-    if(fire)node.style.setProperty('--lvx-fire-position',(bloomMotion.matches?50:((clock%2400)/2400)*100).toFixed(2)+'%');
+    if(fire){const paint=firePaint(clock);node.style.setProperty('--lvx-fire-image',paint.image);node.style.setProperty('--lvx-fire-embers',paint.embers);node.style.setProperty('--lvx-fire-smoke',paint.smoke);}
   }
   function renderStylePreview(activeOnly=false){
     const sample=themePicker.querySelector('.lvx-motion-sample');if(sample){sample.dataset.theme=previewTheme;sample.querySelector('.lvx-tile-name').textContent=THEME_LABELS[previewTheme]+(previewTheme===state.theme?' · applied':' · preview');}
@@ -389,7 +401,8 @@
       }
       const clock=selected?previewTime%(words.length*450+1600):words.length*450+700;
       words.forEach((word,i)=>paintWordTexture(line.children[i],word,clock,tile.dataset.theme));
-      choreographLine(line,words,clock,tile.querySelector('.lvx-tile-stage').clientWidth-16,Math.max(80,tile.querySelector('.lvx-tile-stage').clientHeight-16),14);
+      const previewHeight=Math.max(60,tile.querySelector('.lvx-tile-stage').clientHeight-16);
+      choreographLine(line,words,clock,tile.querySelector('.lvx-tile-stage').clientWidth-16,previewHeight,Math.min(64,previewHeight*.7),{},Math.min(48,previewHeight*.54));
       if(typeof LvChoreography!=='undefined')expressLine(line,words,clock,LvChoreography.compose({source:{durationMs:words.length*450+1800},phrases:[{id:'preview',laneId:'lead',words}]}),{...choreography,theme:tile.dataset.theme});
     }
   }
@@ -495,6 +508,10 @@
     sample.querySelector('.lvx-tile-name').textContent='CURRENT LOOK · '+THEME_LABELS[state.theme];
     panels.motion.append(layoutRow,effects);
     const fireLabel=document.createElement('label');fireLabel.className='lvx-auto-fire';fireLabel.innerHTML='<input type="checkbox" aria-label="Automatic fire words"> Fire texture on the word “fire”';fireLabel.querySelector('input').checked=choreography.autoFire;fireLabel.querySelector('input').onchange=event=>{setChoreography({...choreography,autoFire:event.target.checked});renderStylePreview();};panels.look.append(fireLabel);
+    const fireOptions=document.createElement('div');fireOptions.className='lvx-fire-options';fireOptions.innerHTML='<label>Fire color <select aria-label="Fire color"></select></label><label><input type="checkbox" aria-label="Fire smoke"> Smoke</label>';
+    const fireColor=fireOptions.querySelector('select'),fireSmoke=fireOptions.querySelector('input');
+    for(const [value,label]of Object.entries({ember:'Ember · orange',blue:'Soul · blue',violet:'Arcane · violet',green:'Wild · green',crimson:'Crimson · red',ghost:'Ghost · white'})){const option=document.createElement('option');option.value=value;option.textContent=label;fireColor.append(option);}fireColor.value=choreography.fireColor;fireSmoke.checked=choreography.fireSmoke;
+    const updateFire=()=>{setChoreography({...choreography,fireColor:fireColor.value,fireSmoke:fireSmoke.checked});previewTheme='fire';renderStylePreview();};fireColor.onchange=updateFire;fireSmoke.onchange=updateFire;panels.look.append(fireOptions);
     motionControls.remove();
     settings.open=studio.areaOpen;settings.ontoggle=()=>{if(!settings.isConnected)return;studio.areaOpen=settings.open;if(settings.open){exits.open=false;studio.exitOpen=false;}};
     const exits=document.createElement('details');exits.className='lvx-studio-exits';exits.open=studio.exitOpen;exits.innerHTML='<summary>Phrase exits <span>When the singing stops</span></summary>';exits.append(lingerControls);exits.ontoggle=()=>{if(!exits.isConnected)return;studio.exitOpen=exits.open;if(exits.open){settings.open=false;studio.areaOpen=false;}};
@@ -2889,7 +2906,7 @@
       backingLabels=Object.fromEntries(Object.entries(result?.lvxBackingLabels||{}).filter(([key,value])=>['hidden','header','prefix'].includes(value)));
       syncButton('record-other-parts').checked=result?.lvxRecordOtherParts===true;
       linger=LvBeatTrack.lingerSettings(result?.lvxLinger);
-      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic===true,autoFire:c.autoFire===true,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(c.origin)?c.origin:'top-left'};}
+      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic===true,autoFire:c.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,c.fireColor)?c.fireColor:'ember',fireSmoke:c.fireSmoke!==false,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(c.origin)?c.origin:'top-left'};}
       bloomEnabled=result?.lvxBloomEnabled!==false;
       if(result?.lvxPlacement)try{applyPlacement(result.lvxPlacement);}catch(error){setHud(error.message,true,true);}
       if (result && result.lvxTheme && THEMES.includes(result.lvxTheme)) {
@@ -4243,7 +4260,9 @@
   function ensureDanceLetters(node){
     if(!node.dataset.flexLetters){const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT),texts=[];while(walker.nextNode())texts.push(walker.currentNode);
       for(const text of texts){if(text.parentElement.closest('.lvx-dance-letter'))continue;const fragment=document.createDocumentFragment();for(const char of Array.from(text.textContent)){const letter=document.createElement('span');letter.className='lvx-dance-letter';letter.textContent=char;fragment.append(letter);}text.replaceWith(fragment);}node.dataset.flexLetters='true';}
-    return [...node.querySelectorAll('.lvx-dance-letter')];
+    const letters=[...node.querySelectorAll('.lvx-dance-letter')];
+    letters.forEach((letter,i)=>{if(!letter.style.getPropertyValue('--lvx-fire-glyph-x'))letter.style.setProperty('--lvx-fire-glyph-x',(-i*.53).toFixed(2)+'em');});
+    return letters;
   }
   const beatGrooveLetters=new Set();
   function paintBeatGroove(node,groove,track=true){const letters=ensureDanceLetters(node);letters.forEach((letter,i)=>{const offset=Math.sin((i+.5)/Math.max(1,letters.length)*Math.PI*2-groove.phase)*groove.strength*.16;letter.style.translate=groove.axis==='horizontal'?offset.toFixed(4)+'em 0':'0 '+offset.toFixed(4)+'em';if(track)beatGrooveLetters.add(letter);});}

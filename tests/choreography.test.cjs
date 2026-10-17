@@ -2,6 +2,18 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {layout,arrival,compose,expressionAt}=require('../extension/choreography.js');
 const words='LET THE LIGHT FALL INTO PLACE AGAIN'.split(' ').map(text=>({text}));
 const measure=(text,font)=>text.length*font*.6;
+test('pixel fire reconstructs on seek, evolves beyond the old loop, and shares geometry across color palettes',()=>{
+  const {fireFrame,firePalettes}=require('../extension/choreography.js');
+  const first=fireFrame(1750),later=fireFrame(4150);
+  assert.deepEqual(fireFrame(1750),first,'Seek restores exact pixels and particles');
+  assert.notDeepEqual(later.pixels,first.pixels,'No 2.4-second scrolling-image reset');
+  assert.equal(first.pixels.length,64*32);
+  assert.ok(first.pixels.includes(6),'White-hot tips and trickles are present');
+  for(const color of Object.keys(firePalettes)){const f=fireFrame(1750,{color});assert.deepEqual(f.pixels,first.pixels);assert.equal(f.palette,firePalettes[color]);}
+  assert.deepEqual(fireFrame(1750,{reduced:true}),fireFrame(20000,{reduced:true}));
+  assert.equal(fireFrame(1750,{reduced:true}).embers.length,0);
+  assert.equal(fireFrame(1750,{reduced:true}).smoke.length,0);
+});
 test('upright puzzle reserves nonoverlapping word bounds and requires opt-in for upside-down words',()=>{
   for(const [width,height]of [[1000,450],[350,200],[180,110]]){
     const slots=layout(words,width,height,measure,{mode:'puzzle'});

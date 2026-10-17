@@ -2889,7 +2889,14 @@
 #lvx-root .lvx-theme-picker .lvx-motion-sample .lvx-tile-stage{height:110px}
 #lvx-root .lvx-theme-picker .lvx-motion-sample[hidden]{display:none!important}
 #lvx-root .lvx-auto-fire{display:flex;align-items:center;gap:8px;font:12px system-ui;color:#c4d5dc;margin-top:12px}
-#lvx-root .lvx-fire-texture,#lvx-root .lvx-fire-texture .lvx-score-syllable,#lvx-root .lvx-fire-texture .lvx-dance-letter{background-image:radial-gradient(ellipse at 25% 90%,#fff7b0 0%,#ffca40 15%,transparent 36%),radial-gradient(ellipse at 75% 20%,#fffbd4 0%,#ff8b18 22%,transparent 47%),linear-gradient(0deg,#a4210c,#ff6810 25%,#ffe55b 53%,#c92d08 75%,#ffaf24);background-size:80% 190%,70% 220%,100% 240%;background-position:0 var(--lvx-fire-position,50%),100% var(--lvx-fire-position,50%),50% var(--lvx-fire-position,50%);background-clip:text;-webkit-background-clip:text;color:transparent!important;-webkit-text-fill-color:transparent;text-shadow:none!important;filter:drop-shadow(0 0 3px #ff671b88)}
+#lvx-root .lvx-fire-texture,#lvx-root .lvx-fire-texture .lvx-score-syllable,#lvx-root .lvx-fire-texture .lvx-dance-letter{background-image:var(--lvx-fire-image);background-size:4em 2em;background-position:50% 55%;image-rendering:pixelated;background-clip:text;-webkit-background-clip:text;color:transparent!important;-webkit-text-fill-color:transparent;text-shadow:none!important}
+#lvx-root .lvx-fire-texture::before,#lvx-root .lvx-fire-texture::after{content:"";position:absolute;left:50%;top:0;width:.025em;height:.025em;pointer-events:none;background:transparent;image-rendering:pixelated}
+#lvx-root .lvx-fire-texture::before{box-shadow:var(--lvx-fire-embers,none)}
+#lvx-root .lvx-fire-texture::after{box-shadow:var(--lvx-fire-smoke,none)}
+#lvx-root .lvx-fire-texture .lvx-dance-letter{background-position:var(--lvx-fire-glyph-x,0em) 55%}
+#lvx-root .lvx-fire-options{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:10px;color:#c4d5dc;font:12px system-ui}
+#lvx-root .lvx-fire-options label{display:flex;align-items:center;gap:7px}
+#lvx-root .lvx-fire-options select{padding:6px 8px;border:1px solid #526c76;border-radius:6px;background:#14272f;color:#e4f1f5;font:inherit}
 /* Transformed glyphs need their own paint surface: ancestor text clipping can
    composite every glyph at the same origin in Chromium. */
 #lvx-root .lvx-fire-texture:has(.lvx-dance-letter,.lvx-score-syllable),#lvx-root .lvx-fire-texture .lvx-score-syllable:has(.lvx-dance-letter){background-image:none;filter:none}
