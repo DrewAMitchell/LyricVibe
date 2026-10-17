@@ -735,5 +735,23 @@
   }
 
   function stageRegionAt(score,phraseId,sourceMs){return (score.stageRegions||[]).find(r=>r.target.id===phraseId&&sourceMs>=r.startMs&&sourceMs<r.endMs)||null;}
-  return { VERSION, DISPLAY_CATALOG, stageRegionAt, ScoreError, mediaKey, parseLrc, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment };
+  // Authored timing only: estimates and buffered input do not establish completion.
+  function phraseTimingCoverage(phrase) {
+    const words=phrase.words.filter(w=>!w.excluded),timed=x=>x.provenance==='manual'&&x.endMs>x.startMs;
+    const units={phrase:words.map(w=>({wordId:w.id,done:timed(w)})),word:words.map(w=>({wordId:w.id,done:timed(w)&&w.locked})),syllable:words.flatMap(w=>w.syllables?.length?w.syllables.map(s=>({wordId:w.id,done:timed(s)&&s.locked})):[{wordId:w.id,done:false}])};
+    return Object.fromEntries(Object.entries(units).map(([mode,items])=>{
+      const done=items.filter(x=>x.done).length,total=items.length;
+      return [mode,{done,total,status:!total?'empty':done===total?'complete':done?'partial':'unstarted',nextWordId:items.find(x=>!x.done)?.wordId||null}];
+    }));
+  }
+  function timingCoverage(score) {
+    return score.lanes.map(lane=>{
+      const phrases=score.phrases.filter(p=>p.laneId===lane.id&&p.words.some(w=>!w.excluded)).map(p=>({id:p.id,startMs:p.startMs,...phraseTimingCoverage(p)})).sort((a,b)=>a.startMs-b.startMs);
+      return {...lane,phrases,modes:Object.fromEntries(['phrase','word','syllable'].map(mode=>{
+        const done=phrases.filter(p=>p[mode].status==='complete').length,total=phrases.length;
+        return [mode,{done,total,status:!total?'empty':done===total?'complete':phrases.some(p=>p[mode].done>0)?'partial':'unstarted'}];
+      }))};
+    });
+  }
+  return { VERSION, DISPLAY_CATALOG, stageRegionAt, ScoreError, mediaKey, parseLrc, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, phraseTimingCoverage, timingCoverage };
 });
