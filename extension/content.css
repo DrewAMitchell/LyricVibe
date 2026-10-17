@@ -2388,7 +2388,7 @@
 #lvx-root .lvx-theme-tile{display:flex;flex-direction:column;gap:6px;padding:6px;border-radius:11px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);cursor:pointer;text-align:left;color:#fff;font:inherit}
 #lvx-root .lvx-theme-tile:hover,#lvx-root .lvx-theme-tile:focus-visible{border-color:var(--lvx-color-accent);transform:translateY(-1px)}
 #lvx-root .lvx-theme-tile[aria-pressed="true"]{border-color:var(--lvx-color-accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--lvx-color-accent) 45%,transparent)}
-#lvx-root .lvx-tile-stage{display:flex;align-items:center;justify-content:center;height:86px;padding:8px;border-radius:8px;background:var(--lvx-bg-overlay);overflow:hidden}
+#lvx-root .lvx-tile-stage{position:relative;display:flex;align-items:center;justify-content:center;height:86px;padding:8px;border-radius:8px;background:var(--lvx-bg-overlay);overflow:hidden}
 #lvx-root .lvx-tile-line{font-family:var(--lvx-font-main);text-transform:var(--lvx-text-case);letter-spacing:var(--lvx-main-tracking);font-size:15px;line-height:1.25;text-align:center;color:var(--lvx-color-main)}
 #lvx-root .lvx-tile-word{display:inline-block;opacity:.4;animation-name:lvx-tile-karaoke;animation-iteration-count:infinite;animation-timing-function:ease-out}
 #lvx-root .lvx-tile-name{font-size:11px;letter-spacing:.1em;color:rgba(255,255,255,.75);padding:0 2px}
