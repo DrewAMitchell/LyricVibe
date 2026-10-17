@@ -14,10 +14,14 @@
   function displayEnds(score,map,settings){
     const ends={};
     for(const phrase of score.phrases){
-      const peers=score.phrases.filter(p=>p.laneId===phrase.laneId&&p.id!==phrase.id&&p.words.some(w=>!w.excluded));
+      const policy=phraseLinger(phrase,settings),audible=score.phrases.filter(p=>p.id!==phrase.id&&p.words.some(w=>!w.excluded));
+      let peers=audible.filter(p=>p.laneId===phrase.laneId);
+      // A finished vocal lane must not leave its last line beside the rest of the song.
+      // Keep independent lanes while they continue; only an unbounded final hold yields.
+      if(policy.mode==='next'&&!peers.some(p=>p.endMs>phrase.endMs))peers=audible;
       const next=peers.filter(p=>p.startMs>=phrase.endMs).sort((a,b)=>a.startMs-b.startMs)[0];
       const overlap=peers.some(p=>p.startMs<phrase.endMs&&p.endMs>phrase.endMs);
-      const end=overlap?phrase.endMs:lingerEnd(phrase.endMs,next?.startMs,score,map,phraseLinger(phrase,settings));
+      const end=overlap?phrase.endMs:lingerEnd(phrase.endMs,next?.startMs,score,map,policy);
       if(end>phrase.endMs)ends[phrase.id]=end;
     }
     return ends;

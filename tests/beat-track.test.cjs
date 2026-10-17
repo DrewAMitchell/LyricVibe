@@ -68,3 +68,17 @@ test('linger uses song tempo and offset, respects overlapping phrases and each v
   assert.equal(beats.displayEnds(s,null,{mode:'next'})[p.id],10000,'another lane does not truncate lead');
   peer.laneId=p.laneId;assert.equal(beats.displayEnds(s,null,{mode:'next'})[p.id],undefined,'overlapping lyric prevents stale phrase hold');
 });
+
+
+test('the final phrase in one lane yields to continuing vocals instead of sticking until media end',()=>{
+  const s=score(),last=structuredClone(s.phrases[0]);
+  s.phrases[0].endMs=3000;s.phrases[0].words.forEach((w,i)=>{w.startMs=1000+i*500;w.endMs=w.startMs+400;});last.id='last-backing';last.laneId='backing';last.startMs=3000;last.endMs=4000;last.words=last.words.map((w,i)=>({...w,id:'backing-'+i,startMs:3000+i*400,endMs:3400+i*400}));
+  s.phrases.push(last);
+  const original=structuredClone(s),ends=beats.displayEnds(s,null,{mode:'next'});
+  assert.equal(ends[last.id],10000,'last backing phrase yields at the next lead entrance');
+  assert.ok(core.activeAt(s,11000,{displayEnds:ends}).phrases.every(p=>p.id!==last.id));
+  assert.deepEqual(s,original);
+  const continuing=structuredClone(s);continuing.phrases[1].startMs=3500;
+  assert.equal(beats.displayEnds(continuing,null,{mode:'next'})[last.id],undefined,'already singing voice prevents a stale final-lane hold');
+  assert.ok(beats.displayEnds(s,map,{mode:'beats',beats:32})[last.id]>10000,'explicit beat duration retains lane independence');
+});
