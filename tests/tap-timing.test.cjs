@@ -1343,3 +1343,26 @@ test('a response in the following rest remains with its main phrase after retimi
   assert.deepEqual(tap.planOtherParts(score,'a').map(s=>s.phraseIds),[['a'],['r'],['b']]);
   assert.deepEqual(tap.planOtherParts(score,'b'),[]);
 });
+
+test('backing count-ins require two intervening Main phrases in the same lane', () => {
+  const p=(id,laneId,startMs,endMs,excluded=false)=>({id,laneId,startMs,endMs,words:[{id:id+'w',excluded}]});
+  const score={lanes:[{id:'main',role:'lead'},{id:'reply',role:'backing'},{id:'harmony',role:'backing'}],phrases:[
+    ...Array.from({length:7},(_,i)=>p('m'+i,'main',i*4000,i*4000+2000)),
+    p('r0','reply',1000,1500),p('r1','reply',5000,5500),p('r3','reply',13000,13500),p('r6','reply',26000,27000),
+    p('hidden','reply',21000,21500,true),p('h5','harmony',21000,21500)]};
+  const before=JSON.stringify(score),parts=tap.planOtherParts(score,'m0').filter(s=>s.other);
+  assert.deepEqual(parts.map(s=>[s.phraseIds[0],s.gapPhrases,s.countIn]),[['r0',0,false],['r1',0,false],['r3',1,false],['h5',5,true],['r6',2,true]]);
+  const later=tap.planOtherParts(score,'m6',{scope:'phrase'}).find(s=>s.other);
+  assert.equal(later.gapPhrases,2,'starting later still uses prior song appearances');
+  assert.equal(later.countIn,true,'an end-boundary reply belongs to its preceding Main');
+  assert.equal(JSON.stringify(score),before,'gap planning is read-only');
+});
+
+test('a first backing entrance counts only preceding visible Main phrases', () => {
+  const p=(id,laneId,startMs,excluded=false)=>({id,laneId,startMs,endMs:startMs+1000,words:[{excluded}]});
+  const score={lanes:[{id:'main',role:'lead'},{id:'reply',role:'backing'}],phrases:[p('a','main',0),p('b','main',2000),p('c','main',4000),p('reply','reply',4500)]};
+  assert.equal(tap.planOtherParts(score,'a').find(s=>s.other).countIn,true);
+  score.phrases[1].words[0].excluded=true;
+  const step=tap.planOtherParts(score,'a').find(s=>s.other);
+  assert.equal(step.gapPhrases,1);assert.equal(step.countIn,false);
+});

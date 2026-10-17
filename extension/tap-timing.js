@@ -22,17 +22,27 @@
     const primary = visible.filter(p => p.laneId === selected.laneId).sort((a,b)=>a.startMs-b.startMs);
     const anchors = scope === 'phrase' ? [selected] : primary.slice(primary.indexOf(selected));
     const groups = new Map(anchors.map(p=>[p.id,[]]));
-    for (const part of visible.filter(p=>score.lanes.find(l=>l.id===p.laneId)?.role==='backing')) {
-      const owner = primary.find(p=>part.startMs===p.endMs) ||
+    const ownerOf = part => primary.find(p=>part.startMs===p.endMs) ||
         [...primary].reverse().find(p=>part.startMs>=p.startMs) ||
         primary.find(p=>part.startMs<p.startMs && part.endMs>p.startMs);
+    const backing = visible.filter(p=>score.lanes.find(l=>l.id===p.laneId)?.role==='backing');
+    for (const part of backing) {
+      const owner = ownerOf(part);
       if (owner && groups.has(owner.id)) groups.get(owner.id).push(part);
     }
     if (![...groups.values()].some(parts=>parts.length)) return [];
     const steps = []; let run = [];
-    const step = (phrases, anchor, other) => ({laneId:phrases[0].laneId,
-      label:score.lanes.find(l=>l.id===phrases[0].laneId)?.label || phrases[0].laneId,
-      phraseIds:phrases.map(p=>p.id), anchorId:anchor.id, other});
+    const step = (phrases, anchor, other) => {
+      // Count complete Main phrases without this backing lane between entries.
+      // A first entry uses the gap from the song's first Main phrase, even when
+      // recording starts later. Other backing lanes do not reset this gap.
+      const previous = other ? backing.filter(p=>p.laneId===phrases[0].laneId && p.startMs<phrases[0].startMs).sort((a,b)=>b.startMs-a.startMs)[0] : null;
+      const previousIndex = previous ? primary.indexOf(ownerOf(previous)) : -1;
+      const gapPhrases = other ? Math.max(0,primary.indexOf(anchor)-previousIndex-1) : 0;
+      return {laneId:phrases[0].laneId,
+        label:score.lanes.find(l=>l.id===phrases[0].laneId)?.label || phrases[0].laneId,
+        phraseIds:phrases.map(p=>p.id), anchorId:anchor.id, other, gapPhrases, countIn:other&&gapPhrases>=2};
+    };
     for (const anchor of anchors) {
       run.push(anchor);
       const parts = groups.get(anchor.id);

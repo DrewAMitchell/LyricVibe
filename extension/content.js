@@ -916,7 +916,7 @@
     persistPlaybackRate(rate);media.preservesPitch=true;media.playbackRate=rate;observePlaybackRate(media);return true;
   }
   const beatClick={enabled:false,userSet:false,audio:null,nodes:new Set(),scheduled:new Set(),map:null,rate:null,lastSource:null,lastWall:null};
-  const countIn={active:false,preparing:false,spaceHeld:false,cancel:null};
+  const countIn={active:false,preparing:false,spaceHeld:false,cancel:null,previewTake:null};
   function cancelCountIn(){if(!countIn.active)return false;countIn.cancel?.();return true;}
   async function countInToPhrase(media,phrase,sourceMs){
     await enableBeatAudio();
@@ -1349,7 +1349,7 @@
   function refreshMainReference(now){
     const score=timing.draft?.score,selected=timingPhrase(),backing=score?.lanes.find(l=>l.id===selected?.laneId)?.role==='backing';
     const hosts=[syncPanel.querySelector('.lvx-perform-cue'),stage.querySelector('.lvx-capture-transcript')].filter(Boolean);
-    if(!backing||!tapping.take){for(const host of hosts)host.querySelector('.lvx-main-reference')?.remove();return;}
+    if(!backing||!(countIn.previewTake||tapping.take)){for(const host of hosts)host.querySelector('.lvx-main-reference')?.remove();return;}
     const anchor=score.phrases.find(p=>p.id===partRun?.steps[partRun.index]?.anchorId),mainLane=score.lanes.find(l=>l.id===anchor?.laneId&&l.role==='lead')||score.lanes.find(l=>l.role==='lead');
     const phrases=score.phrases.filter(p=>p.laneId===mainLane?.id&&p.words.some(w=>!w.excluded)).sort((a,b)=>a.startMs-b.startMs);
     const main=phrases.find(p=>now>=p.startMs&&now<p.endMs)||phrases.findLast(p=>p.startMs<=now)||phrases[0];
@@ -1718,7 +1718,7 @@
         word=phrase.words.find(w=>!w.excluded&&now>=w.startMs&&now<w.endMs)||phrase.words.find(w=>!w.excluded&&w.startMs>=now)||phrase.words.find(w=>!w.excluded)||word;tapping.wordId=word.id;
       }
       if(!partRun&&!tapping.take&&syncButton('record-other-parts').checked&&otherPartsSupported()){
-        let steps=otherPartsPlan();if(mode==='syllable')steps=steps.flatMap(step=>step.phraseIds.map(id=>({...step,phraseIds:[id]})));if(steps.length)partRun={steps,index:0,mode,scope:syncButton('tap-scope').value,sourceKey:tempoSourceKey()};
+        let steps=otherPartsPlan();if(mode==='syllable')steps=steps.flatMap(step=>step.phraseIds.map((id,index)=>({...step,phraseIds:[id],countIn:step.countIn&&index===0})));if(steps.length)partRun={steps,index:0,mode,scope:syncButton('tap-scope').value,sourceKey:tempoSourceKey()};
       }
       const partStep=partRun?.steps[partRun.index];
       const scopedPhrases=partStep?partStep.phraseIds.map(id=>timing.draft.score.phrases.find(p=>p.id===id)).filter(Boolean):null;
@@ -1768,8 +1768,13 @@
       tapping.armSeekMs=fromPause?capturePhraseStart(take,phrase):retiming?nextUnit.minMs-800:syllableStart||mode==='syllable'&&!continuousPass()?phrase.startMs+timingOffsetMs()-800:Math.round(media.currentTime*1000);
       if(fromPause&&partStep){const anchor=timing.draft.score.phrases.find(p=>p.id===partStep.anchorId);tapping.armSeekMs=Math.min(anchor?.startMs??phrase.startMs,phrase.startMs)+timingOffsetMs();}
       tapping.armSeekMs=Math.max(0,tapping.armSeekMs);
+      // Render the upcoming take without arming input or replacing a retained
+      // take. Cancellation during preparation must remain lossless.
+      countIn.previewTake=take;state.scoreSignature='';
       media.currentTime = tapping.armSeekMs / 1000;
-      if(fromPause)await countInToPhrase(media,phrase,tapping.armSeekMs);
+      renderScore(getMediaTimeMs());refreshCapturePlayback(getMediaTimeMs()-timingOffsetMs());
+      const needsCountIn=fromPause&&(!partRun||partRun.index===0||partStep?.countIn);
+      if(needsCountIn)await countInToPhrase(media,phrase,tapping.armSeekMs);
       await media.play();
       if (!timing.draft || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source)) throw Error('Source changed before the take started.');
       if(syllableStart)tapping.syllableStartKey=LvScore.mediaKey(state.score.source);
@@ -1783,7 +1788,7 @@
       if(eventTake(take))setSyncNotice(syllableHold(take)?'Hold Space from each syllable’s beginning to its end. Releases preserve rests. Stop to review word grouping.':'Tap each syllable you hear. Timestamps are captured without assigning words. Stop to review grouping; editor sounds are muted.');
       if(streamTake(take))setSyncNotice('Tap the syllables as they arrive. Left restarts the phrase; Right moves the next cue. Ctrl + Left / Right changes the last tap’s word without seeking.');
     } catch (error) { partRun=null;setSyncNotice(error.message,error.code==='COUNT_IN_CANCELED'?'':'error'); }
-    finally { countIn.preparing=false;timing.busy = false; refreshTimingPanel(); if (tapping.take?.status === 'armed') { renderScore(getMediaTimeMs()); syncButton('tap-mark').focus({preventScroll:true});syncPanel.querySelector('.lvx-perform-cue').scrollIntoView({block:'start'}); } }
+    finally { countIn.previewTake=null;countIn.preparing=false;timing.busy = false;state.scoreSignature='';refreshTimingPanel();renderScore(getMediaTimeMs()); if (tapping.take?.status === 'armed') { syncButton('tap-mark').focus({preventScroll:true});syncPanel.querySelector('.lvx-perform-cue').scrollIntoView({block:'start'}); } }
   }
   function listenToTake() {
     const take=tapping.take;if(!take||take.status!=='armed')return;
@@ -4021,7 +4026,7 @@
     stage.classList.remove('lvx-choreography-stage','lvx-vinyl-stage');
     stage.style.removeProperty('padding-top');
     stage.classList.add('lvx-score-stage');
-    const phrase=timingPhrase(), take=tapping.take, unit=take.units[take.index];
+    const phrase=timingPhrase(), take=countIn.previewTake||tapping.take, unit=take.units[take.index];
     if (!phrase) return;
     const signature=`capture:${timing.draft.previewRevision}:${phrase.id}:${take.index}:${tapCount(take)}:${take.pendingStartMs}:${tapping.frameWordId}:${tapping.streamWordId}:${isFlagged(phrase.id)}`;
     if (state.scoreSignature!==signature) {
@@ -4179,7 +4184,7 @@
   }
   function renderScore(mediaMs) {
     stage.classList.remove('lvx-vinyl-stage');
-    if (tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete') && timing.draft && !syncPanel.hidden) {renderCaptureScore();return;}
+    if ((countIn.previewTake||tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete')) && timing.draft && !syncPanel.hidden) {renderCaptureScore();return;}
     stage.classList.add('lvx-choreography-stage');
     const score = syllableTakeScore() || (timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score);
     const regionFrame=(score.stageRegions||[]).filter(r=>mediaMs>=r.startMs&&mediaMs<r.endMs);
