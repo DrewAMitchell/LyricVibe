@@ -2906,3 +2906,6 @@
 #lvx-root .lvx-sync-panel[data-workspace=effects] .lvx-completion{display:none}
 #lvx-root .lvx-sync-panel .lvx-effect-pads{grid-template-columns:repeat(3,minmax(0,1fr))}
 #lvx-root .lvx-sync-panel[data-workspace=effects] .lvx-effect-pads button{min-height:44px}
+
+#lvx-root .lvx-groove-direction{display:flex;align-items:center;gap:8px;font:12px system-ui;margin:8px 0 12px;color:#c6d6dd}
+#lvx-root .lvx-effect-pads [data-effect=clear]{grid-column:1 / -1;min-height:30px!important}

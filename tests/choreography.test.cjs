@@ -157,3 +157,8 @@ test('authored Bounce and Glow follow the sung interval and remain stable on rep
  const cue={startMs:1000,endMs:3000,sustained:[]};
  for(const type of ['bounce','glow']){const options={effects:[{type,strength:.7}]},first=expressionAt(cue,1250,options);expressionAt(cue,1700,options);assert.deepEqual(expressionAt(cue,1250,options),first);if(type==='bounce')assert.ok(first.y<0);else assert.ok(first.brightness>1.2);const reduced=expressionAt(cue,1250,{...options,reduced:true});assert.equal(reduced.y,0);assert.equal(reduced.scale,1);assert.equal(expressionAt(cue,3000,options).reason,'');}
 });
+
+test('Groove travels through letters along the selected axis and reduces to still text',()=>{
+ const cue={startMs:1000,endMs:4000,sustained:[]};
+ for(const axis of ['horizontal','vertical']){const options={effects:[{type:'groove',strength:.8,axis}]},a=expressionAt(cue,1400,options),b=expressionAt(cue,1700,options);assert.equal(a.waveAxis,axis);assert.ok(a.wave>0);assert.notEqual(a.wavePhase,b.wavePhase);assert.deepEqual(expressionAt(cue,1400,options),a);assert.equal(expressionAt(cue,1400,{...options,reduced:true}).wave,0);assert.equal(expressionAt(cue,4000,options).wave,0);}
+});

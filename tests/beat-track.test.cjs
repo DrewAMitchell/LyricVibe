@@ -86,3 +86,8 @@ test('the final phrase in one lane yields to continuing vocals instead of sticki
 test('Bounce and Glow beat cues preserve timing, replay deterministically and respect reduced motion',()=>{
  for(const effect of ['bounce','glow']){const s=score(),c={...cue,effect};const n=core.applyOperation(s,{type:'setBeatCue',cue:c},s.revision);assert.deepEqual(n.phrases,s.phrases);core.validateScore(JSON.parse(JSON.stringify(n)));const at=3250,first=beats.cueAt(c,map,at);beats.cueAt(c,map,3750);assert.deepEqual(beats.cueAt(c,map,at),first);if(effect==='bounce')assert.ok(first.y<0);else assert.ok(first.brightness>1.2);const reduced=beats.cueAt(c,map,at,true);assert.equal(reduced.y||0,0);assert.equal(reduced.scale,1);}
 });
+
+test('Groove axis roundtrips for beat and word effects while invalid axes are rejected',()=>{
+ for(const axis of ['horizontal','vertical']){const s=score(),c={...cue,effect:'groove',axis},n=core.applyOperation(s,{type:'setBeatCue',cue:c},s.revision);assert.equal(n.beatCues[0].axis,axis);const pose=beats.cueAt(c,map,3250);assert.equal(pose.groove.axis,axis);assert.ok(pose.groove.strength>0);assert.equal(beats.cueAt(c,map,3250,true).groove,undefined);const w=core.applyOperation(s,{type:'setWordEffect',wordId:s.phrases[0].words[0].id,effect:{type:'groove',strength:.7,axis}},s.revision);assert.equal(w.phrases[0].words[0].effects[0].axis,axis);assert.deepEqual({...w.phrases[0].words[0],effects:[]},s.phrases[0].words[0]);}
+ const s=score();assert.throws(()=>core.applyOperation(s,{type:'setWordEffect',wordId:s.phrases[0].words[0].id,effect:{type:'groove',strength:.7,axis:'diagonal'}},s.revision));assert.throws(()=>core.applyOperation(s,{type:'setBeatCue',cue:{...cue,effect:'groove',axis:'diagonal'}},s.revision));
+});

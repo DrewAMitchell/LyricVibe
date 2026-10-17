@@ -10,11 +10,11 @@
     version: 'lyricvibe.display.v1',
     looks: Object.freeze(['samay','flow','fire','neon','glass','hype','soft','clean','retro','elegant','aurora','matrix','vinyl','cosmic']),
     motions: Object.freeze(['off','mix','tip','flex','bounce','launch']),
-    wordEffects: Object.freeze(['shake','tilt','pulse']),
-    beatEffects: Object.freeze(['pulse','breath','color','bounce','glow']),
+    wordEffects: Object.freeze(['shake','tilt','pulse','bounce','glow','groove']),
+    beatEffects: Object.freeze(['pulse','breath','color','bounce','glow','groove']),
     layouts: Object.freeze(['classic','fall','puzzle','vinyl'])
   });
-  const EFFECTS = new Set(["shake", "tilt", "pulse", "bounce", "glow"]);
+  const EFFECTS = new Set(["shake", "tilt", "pulse", "bounce", "glow", "groove"]);
   const REVEAL_EASINGS = new Set(["linear", "ease-out", "ease-in-out"]);
   const ID_RE = /^[A-Za-z0-9_-]{11}$/;
   const HASH_RE = /^[a-f0-9]{64}$/i;
@@ -290,7 +290,7 @@
           if(!a||typeof a!=='object'||Array.isArray(a)||Object.keys(a).some(k=>!['look','motion'].includes(k))||!Object.keys(a).length||a.look!==undefined&&!DISPLAY_CATALOG.looks.includes(a.look)||a.motion!==undefined&&!DISPLAY_CATALOG.motions.includes(a.motion))bad('invalid word appearance');
         }
         if (word.spokenText !== undefined && (typeof word.spokenText !== "string" || !word.spokenText.trim() || word.spokenText.length > 256 || word.spokenText.includes("|"))) bad("invalid spokenText");
-        for (const effect of word.effects) if (!effect || !EFFECTS.has(effect.type) || typeof effect.strength !== "number" || !Number.isFinite(effect.strength) || effect.strength < 0 || effect.strength > 1) bad("invalid effect");
+        for (const effect of word.effects) if (!effect || !EFFECTS.has(effect.type) || typeof effect.strength !== "number" || !Number.isFinite(effect.strength) || effect.strength < 0 || effect.strength > 1 || effect.axis !== undefined && (effect.type !== "groove" || !["horizontal","vertical"].includes(effect.axis))) bad("invalid effect");
         if (word.reveal !== undefined && !validReveal(word.reveal)) bad("invalid word reveal");
         if (word.syllables !== undefined) {
           if (!Array.isArray(word.syllables) || word.syllables.some(syllable => !syllable || Object.prototype.hasOwnProperty.call(syllable, "syllables"))) bad("invalid syllables");
@@ -299,7 +299,7 @@
             if (typeof syllable.id !== "string" || !syllable.id || ids.has(syllable.id) || typeof syllable.text !== "string" || !syllable.text) bad("invalid or duplicate syllable");
             ids.add(syllable.id);
             if (typeof syllable.startMs !== "number" || !Number.isFinite(syllable.startMs) || syllable.startMs < word.startMs || typeof syllable.endMs !== "number" || !Number.isFinite(syllable.endMs) || syllable.endMs < syllable.startMs || syllable.endMs > word.endMs || !["estimated", "manual", "aligned"].includes(syllable.provenance) || typeof syllable.locked !== "boolean" || !Array.isArray(syllable.effects)) bad("invalid syllable timing or fields");
-            if (syllable.effects.some(effect => !effect || !EFFECTS.has(effect.type) || typeof effect.strength !== "number" || !Number.isFinite(effect.strength) || effect.strength < 0 || effect.strength > 1)) bad("invalid syllable effect");
+            if (syllable.effects.some(effect => !effect || !EFFECTS.has(effect.type) || typeof effect.strength !== "number" || !Number.isFinite(effect.strength) || effect.strength < 0 || effect.strength > 1 || effect.axis !== undefined && (effect.type !== "groove" || !["horizontal","vertical"].includes(effect.axis)))) bad("invalid syllable effect");
             if (syllable.reveal !== undefined && !validReveal(syllable.reveal)) bad("invalid syllable reveal");
           }
         }
@@ -324,7 +324,7 @@
       if(!Array.isArray(score.beatCues)||score.beatCues.length>5000)bad('beat cues must be a bounded list');
       const cueIds=new Set();
       for(const cue of score.beatCues){
-        if(!cue||typeof cue.id!=='string'||!cue.id||cueIds.has(cue.id)||!Number.isFinite(cue.beat)||!Number.isFinite(cue.durationBeats)||cue.durationBeats<=0||cue.durationBeats>64||!['pulse','breath','color','bounce','glow'].includes(cue.effect)||!Number.isFinite(cue.strength)||cue.strength<0||cue.strength>1||cue.provenance!=='manual')bad('invalid beat cue');
+        if(!cue||typeof cue.id!=='string'||!cue.id||cueIds.has(cue.id)||!Number.isFinite(cue.beat)||!Number.isFinite(cue.durationBeats)||cue.durationBeats<=0||cue.durationBeats>64||!['pulse','breath','color','bounce','glow','groove'].includes(cue.effect)||!Number.isFinite(cue.strength)||cue.strength<0||cue.strength>1||cue.provenance!=='manual'||cue.axis!==undefined&&(cue.effect!=='groove'||!['horizontal','vertical'].includes(cue.axis)))bad('invalid beat cue');
         cueIds.add(cue.id);const target=cue.target;
         if(!target||!['screen','active','lane','phrase','word','syllable'].includes(target.kind))bad('invalid beat target');
         if(['lane','phrase','word','syllable'].includes(target.kind)&&!ids.has(target.id))bad('unknown beat target');
@@ -496,7 +496,7 @@
       const { word } = locateWord(next, op.wordId);
       if (op.effect === null) word.effects = [];
       else {
-        if (!op.effect || !EFFECTS.has(op.effect.type) || typeof op.effect.strength !== "number" || !Number.isFinite(op.effect.strength) || op.effect.strength < 0 || op.effect.strength > 1) fail("INVALID_EFFECT", "effect type or strength is invalid");
+        if (!op.effect || !EFFECTS.has(op.effect.type) || typeof op.effect.strength !== "number" || !Number.isFinite(op.effect.strength) || op.effect.strength < 0 || op.effect.strength > 1 || op.effect.axis !== undefined && (op.effect.type !== "groove" || !["horizontal","vertical"].includes(op.effect.axis))) fail("INVALID_EFFECT", "effect type or strength is invalid");
         word.effects = [clone(op.effect)];
       }
     } else if (op.type === "setWordSyllables") {
@@ -596,7 +596,7 @@
       const { syllable } = locateSyllable(next, op.syllableId);
       if (op.effect === null) syllable.effects = [];
       else {
-        if (!op.effect || !EFFECTS.has(op.effect.type) || typeof op.effect.strength !== "number" || !Number.isFinite(op.effect.strength) || op.effect.strength < 0 || op.effect.strength > 1) fail("INVALID_EFFECT", "effect type or strength is invalid");
+        if (!op.effect || !EFFECTS.has(op.effect.type) || typeof op.effect.strength !== "number" || !Number.isFinite(op.effect.strength) || op.effect.strength < 0 || op.effect.strength > 1 || op.effect.axis !== undefined && (op.effect.type !== "groove" || !["horizontal","vertical"].includes(op.effect.axis))) fail("INVALID_EFFECT", "effect type or strength is invalid");
         syllable.effects = [clone(op.effect)];
       }
     } else if(op.type==='setWordDisplayMode'){
