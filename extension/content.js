@@ -293,10 +293,10 @@
   offsetGroup.append(syncLabel, syncEarlier, offsetControl, syncLater, autoSyncButton);
   const editGroup = document.createElement('span'); editGroup.className = 'lvx-hud-group'; editGroup.append(quickSyncButton, editButton);
   const endGroup = document.createElement('span'); endGroup.className = 'lvx-hud-group'; endGroup.append(helpButton, stopButton);
-  const sidebar = document.createElement('aside'); sidebar.className = 'lvx-sidebar'; sidebar.setAttribute('aria-label','LyricVibe controls');
+  const sidebar = document.createElement('aside'); sidebar.className = 'lvx-sidebar lvx-sidebar-pinned'; sidebar.setAttribute('aria-label','LyricVibe controls');
   const sidebarNav = document.createElement('nav'); sidebarNav.className = 'lvx-sidebar-nav'; sidebarNav.setAttribute('aria-label','LyricVibe views');
   const sidebarItems = document.createElement('div'); sidebarItems.className = 'lvx-sidebar-items';
-  const sidebarPin = document.createElement('button'); sidebarPin.type='button';sidebarPin.className='lvx-sidebar-pin';sidebarPin.textContent='LV';sidebarPin.title='Pin or unpin controls';sidebarPin.setAttribute('aria-label','Pin controls open');sidebarPin.setAttribute('aria-pressed','false');
+  const sidebarPin = document.createElement('button'); sidebarPin.type='button';sidebarPin.className='lvx-sidebar-pin';sidebarPin.textContent='LV';sidebarPin.title='Pin or unpin controls';sidebarPin.setAttribute('aria-label','Unpin controls');sidebarPin.setAttribute('aria-pressed','true');
   const sidebarView = (key,label,title,activate) => { const button=document.createElement('button');button.type='button';button.dataset.sidebarView=key;button.textContent=label;button.title=title;button.onclick=activate;sidebarItems.append(button);return button; };
   const displayLookView=sidebarView('display-look','Look','Display · choose a look',()=>{studio.view='look';toggleThemePicker(true);syncSidebarState();});
   const displayMotionView=sidebarView('display-motion','Motion','Display · tune motion',()=>{studio.view='motion';toggleThemePicker(true);syncSidebarState();});
