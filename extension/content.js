@@ -3809,7 +3809,7 @@
   function expressionCues(score){if(expressionPlan.score!==score)expressionPlan={score,cues:LvChoreography.compose(score)};return expressionPlan.cues;}
   function expressLine(line,words,clock,cues){
     if(typeof LvChoreography==='undefined')return;
-    const paint=(node,cue,effects,automatic,danceAllowed=false)=>{
+    const paint=(node,cue,effects,automatic,danceAllowed=false,heldMotion=true)=>{
       const value=LvChoreography.expressionAt(cue,clock,{mode:choreography.mode,reduced:bloomMotion.matches,effects,automatic});
       node.classList.add('lvx-expression');node.dataset.expression=value.reason;node.dataset.authoredExpression=String(Boolean(effects?.length));
       const angle=(parseFloat(node.style.rotate)||0)*Math.PI/180,x=value.x*Math.cos(angle)+value.y*Math.sin(angle),y=-value.x*Math.sin(angle)+value.y*Math.cos(angle);
@@ -3818,11 +3818,12 @@
       const dance=LvChoreography.danceAt(cue,clock,{kind:danceAllowed?choreography.dance:'off',reduced:bloomMotion.matches,authored:!danceAllowed});
       node.dataset.dance=dance.kind;node.style.transformOrigin=dance.kind==='tip'?'50% 100%':'50% 50%';
       if(dance.kind!=='off')node.style.transform+=` perspective(6em) translate(${dance.x.toFixed(4)}em,${dance.y.toFixed(4)}em) rotate(${dance.turn.toFixed(3)}deg) rotateX(${dance.tip.toFixed(3)}deg) scale(${dance.scaleX.toFixed(4)},${dance.scaleY.toFixed(4)})`;
-      if(dance.kind==='flex'&&!node.dataset.flexLetters){
+      const wave=heldMotion?value.wave:0;
+      if((dance.kind==='flex'||wave>0)&&!node.dataset.flexLetters){
         const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT),texts=[];while(walker.nextNode())texts.push(walker.currentNode);
         for(const text of texts){if(text.parentElement.closest('.lvx-dance-letter'))continue;const fragment=document.createDocumentFragment();for(const char of Array.from(text.textContent)){const letter=document.createElement('span');letter.className='lvx-dance-letter';letter.textContent=char;fragment.append(letter);}text.replaceWith(fragment);}node.dataset.flexLetters='true';
       }
-      const letters=node.matches('.lvx-score-word,.lvx-tile-word')?[...node.querySelectorAll('.lvx-dance-letter')]:[];letters.forEach((letter,i)=>{const p=(i+.5)/Math.max(1,letters.length),a=p*Math.PI*2+dance.phase;letter.style.transform=dance.kind==='flex'?`translateY(${(Math.sin(a)*dance.flex).toFixed(4)}em) skewY(${(Math.cos(a)*dance.flex*28).toFixed(3)}deg)`:'';});
+      const letters=[...node.querySelectorAll('.lvx-dance-letter')];letters.forEach((letter,i)=>{const p=(i+.5)/Math.max(1,letters.length),a=p*Math.PI*2+dance.phase;if(!heldMotion)return;letter.style.transform=dance.kind==='flex'?`translateY(${(Math.sin(a)*dance.flex).toFixed(4)}em) skewY(${(Math.cos(a)*dance.flex*28).toFixed(3)}deg)`:wave>0?`translateY(${(Math.sin(p*Math.PI*2-value.wavePhase)*wave).toFixed(4)}em)`:'';});
       node.style.setProperty('--lvx-expression-bright',value.brightness.toFixed(4));
       if(value.color){node.dataset.expressionColor='true';node.style.setProperty('--lvx-expression-color',value.color);}else{delete node.dataset.expressionColor;node.style.removeProperty('--lvx-expression-color');}
     };
@@ -3832,7 +3833,7 @@
       const automatic=choreography.automatic&&!authored;
       paint(node,parts.length?{...cue,sustained:[]}:cue,word.effects||[],automatic,!authored);
       for(const part of parts){const syllable=word.syllables?.find(s=>s.id===part.dataset.syllable);if(!syllable)continue;
-        paint(part,{...cue,startMs:syllable.startMs,endMs:syllable.endMs,impact:false,direction:null,sustained:cue.sustained.filter(s=>s.id===syllable.id)},syllable.effects||[],automatic);
+        paint(part,{...cue,startMs:syllable.startMs,endMs:syllable.endMs,impact:false,direction:null,sustained:cue.sustained.filter(s=>s.id===syllable.id)},syllable.effects||[],automatic,false,node.dataset.dance!=='flex');
       }
     });
   }

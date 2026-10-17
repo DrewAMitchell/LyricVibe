@@ -35,7 +35,7 @@
   }
   // Geometry, expression, and authored beat accents use separate transform layers.
   function expressionAt(cue,now,{mode='classic',reduced=false,effects=[],automatic=true}={}){
-    const out={x:0,y:0,turn:0,scale:1,color:null,brightness:1,reason:''};
+    const out={x:0,y:0,turn:0,scale:1,color:null,brightness:1,wave:0,wavePhase:0,reason:''};
     if(!cue||now<cue.startMs||now>=cue.endMs)return out;
     const elapsed=now-cue.startMs,t=elapsed/1000,duration=cue.endMs-cue.startMs;
     const envelope=Math.min(1,elapsed/90,(cue.endMs-now)/100),intensity=mode==='puzzle'?1:mode==='fall'?.72:.55;
@@ -55,6 +55,7 @@
       out.scale+=reduced?0:breath*.055*intensity*envelope;
       out.color=`hsl(${(42+breath*24).toFixed(2)} 92% ${(83-breath*15).toFixed(2)}%)`;
       out.brightness=1+breath*.12*envelope;out.reason='sustained';
+      if(!reduced){const ramp=clamp(Math.min(now-held.startMs,held.endMs-now)/280);out.wave=.045*(.65+.35*intensity)*ramp*ramp*(3-2*ramp);out.wavePhase=phase*Math.PI*2/2.8;}
     }
     if(cue.impact){
       const hit=clamp(1-elapsed/Math.min(360,duration));

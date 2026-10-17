@@ -109,3 +109,13 @@ test('vinyl feed-to-disc positions, sizes and tangents remain continuous at over
  const prior=vinylAt(track,2100).glyphs.filter(g=>g.wordId==='a'),next=vinylAt(track,2500).glyphs.filter(g=>g.wordId==='a');assert.deepEqual(prior.map(g=>[g.x,g.y,g.font]),next.map(g=>[g.x,g.y,g.font]),'held words retain their row and size while another voice starts');
  const pose=vinylAt(track,2785);vinylAt(track,5000);assert.deepEqual(vinylAt(track,2785),pose,'handoff reconstructs after seek');
 });
+
+test('held letter wobble is slow, bounded, source-clock repeatable and settles at the held edges',()=>{
+ const cue={wordId:'long',startMs:1000,endMs:8000,sustained:[{id:'held',startMs:2000,endMs:7000}]};
+ const pose=expressionAt(cue,3200);assert.ok(pose.wave>0&&pose.wave<=.045);assert.ok(pose.color);
+ const later=expressionAt(cue,6000);assert.ok(Math.abs(later.wavePhase-pose.wavePhase-Math.PI*2)<1e-10);assert.equal(later.wave,pose.wave);
+ assert.deepEqual(expressionAt(cue,3200),pose);
+ for(const time of [1000,1999,2000,7000,7999,8000])assert.equal(expressionAt(cue,time).wave,0);
+ assert.ok(expressionAt(cue,2001).wave<.00001);assert.ok(expressionAt(cue,6999).wave<.00001);
+ for(const options of [{reduced:true},{automatic:false},{effects:[{type:'tilt'}]}])assert.equal(expressionAt(cue,3200,options).wave,0);
+});
