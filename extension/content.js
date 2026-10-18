@@ -531,6 +531,7 @@
     const backingSpace=backing.querySelector('select'),backingArea=backing.querySelector('input'),backingValue=backing.querySelector('output');backingSpace.value=backingDisplay.space;backingArea.value=String(Math.round(backingDisplay.area*100));backingValue.textContent=backingArea.value+'%';
     const labels=document.createElement('label');labels.innerHTML='Part names · this song <select aria-label="Backing part names"><option value="hidden">Hidden</option><option value="header">Header</option><option value="prefix">Prefix</option></select>';const labelSelect=labels.querySelector('select');labelSelect.value=backingLabelMode();labelSelect.disabled=!backingLabelKey();labelSelect.onchange=()=>setBackingLabel(labelSelect.value);backing.insertBefore(labels,backing.querySelector('p'));
     backingSpace.onchange=()=>setBackingDisplay({...backingDisplay,space:backingSpace.value});backingArea.oninput=()=>{backingValue.textContent=backingArea.value+'%';setBackingDisplay({...backingDisplay,area:Number(backingArea.value)/100});};
+    if(choreography.mode==='vinyl'){for(const input of backing.querySelectorAll('input,select'))input.disabled=true;backing.querySelector('p').textContent='Vinyl drops each backing phrase as one (parenthesized block) onto the same record.';}
     panels.stage.append(performanceControls,backing,settings,exits);
     const footer=document.createElement('footer');footer.className='lvx-studio-footer';const current=document.createElement('span');current.className='lvx-studio-current';current.textContent=THEME_LABELS[state.theme]+' · applied';footer.append(current,play,bloomLabel);
     themePicker.replaceChildren(heading,tabs,sample,...Object.values(panels),footer);
@@ -4789,7 +4790,7 @@
     if(!canvas){canvas=document.createElement('canvas');canvas.className='lvx-vinyl-canvas';canvas.setAttribute('role','img');canvas.setAttribute('aria-label','Vinyl lyric history: earlier words wind toward the center');stage.prepend(canvas);}
     const ctx=canvas.getContext('2d'),dpr=Math.min(2,devicePixelRatio||1),width=Math.max(1,area.width),height=Math.max(1,area.height),clock=mediaMs-score.offsetMs;Object.assign(canvas.style,{position:'absolute',left:area.x+'px',top:area.y+'px',width:width+'px',height:height+'px',margin:'0'});
     const pixelW=Math.round(width*dpr),pixelH=Math.round(height*dpr);if(canvas.width!==pixelW||canvas.height!==pixelH){canvas.width=pixelW;canvas.height=pixelH;canvas.__frameKey=null;}
-    if(canvas.__score!==score){ctx.font='800 100px Arial Narrow, Impact, sans-serif';const main={...score,phrases:score.phrases.filter(p=>score.lanes.find(l=>l.id===p.laneId)?.role!=='backing')};canvas.__track=LvChoreography.vinylTrack(main,text=>ctx.measureText(text).width/100);canvas.__score=score;canvas.__frameKey=null;}
+    if(canvas.__score!==score){ctx.font='800 100px Arial Narrow, Impact, sans-serif';canvas.__track=LvChoreography.vinylTrack(score,text=>ctx.measureText(text).width/100);canvas.__score=score;canvas.__frameKey=null;}
     const key=[clock,width,height,bloomMotion.matches].join(':');if(canvas.__frameKey===key)return;canvas.__frameKey=key;ctx.setTransform(dpr,0,0,dpr,0,0);
     const frame=LvChoreography.paintVinyl(ctx,canvas.__track,clock,width,height,{reduced:bloomMotion.matches});canvas.dataset.wordCount=String(frame.words.length);canvas.dataset.glyphCount=String(frame.glyphs.length);canvas.dataset.firstWord=frame.words[0]||'';canvas.dataset.sourceMs=String(mediaMs);canvas.dataset.scoreMs=String(clock);
     if(canvas.__transcript!==frame.text){canvas.__transcript=frame.text;canvas.setAttribute('aria-label','Sung lyric history: '+(frame.text||'waiting for the first word'));}
@@ -4825,7 +4826,7 @@
         for (const part of word.syllables || []) { const child = operations.get(part.id); if (child) part.effects = child.effect ? [child.effect] : []; }
       }
     }
-    if(useVinyl)active.phrases=active.phrases.filter(isBacking);
+    if(useVinyl)active.phrases=[];
     const signature = `${score.revision}:${timing.draft?.previewRevision ?? 'saved'}:${timing.view}:${state.theme}:${useVinyl}:${regionFrame.map(r=>r.id).join(',')}:` + active.phrases.map(p => p.id).join('|');
     if (signature !== state.scoreSignature || !stage.classList.contains('lvx-score-stage')) {
       stage.textContent = '';
@@ -4866,7 +4867,7 @@
       state.scoreSignature = signature;
     }
     const areas=LvChoreography.vocalAreas(stage.clientWidth,stage.clientHeight,score.phrases.some(p=>isBacking(p)&&p.words.some(w=>!w.excluded)),backingDisplay);
-    if(useVinyl)renderVinylScore(score,mediaMs,areas.main);
+    if(useVinyl)renderVinylScore(score,mediaMs,{x:0,y:0,width:stage.clientWidth,height:stage.clientHeight});
     renderBeatEffects(score,mediaMs);
     const cues=typeof LvChoreography==='undefined'?{}:expressionCues(score);
     // Authoring outline only while editing, so you can see where to continue a take while scrubbing.

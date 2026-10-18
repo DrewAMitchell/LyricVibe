@@ -204,3 +204,18 @@ test('landing styles settle smoothly at the sung entrance and reconstruct exactl
   assert(landingAt(600,1000,{style:'glide'}).x<0);
   assert(Math.abs(landingAt(999,1000).y)<.000001,'No sudden terminal jump in soft landing');
 });
+
+test('vinyl backing phrases enter as complete parenthesized blocks and survive overlap, rests and seeks',()=>{
+ const score={lanes:[{id:'main',role:'lead'},{id:'echo',role:'backing'}],phrases:[
+  {id:'lead',laneId:'main',words:[word('lead','SING',1000,3000)]},
+  {id:'back',laneId:'echo',words:[word('b1','(with',1200,1800),{...word('hidden','NO',1500,2000),excluded:true},word('b2','me)',1800,2600)]}
+ ]},before=JSON.stringify(score),track=vinylTrack(score,t=>t.length*.6);
+ assert.equal(track.tokens.length,2);assert.equal(track.tokens[1].text,'(WITH ME)');
+ assert.deepEqual(vinylAt(track,1199).words,['lead']);
+ const entering=vinylAt(track,1200),block=entering.glyphs.filter(g=>g.wordId==='b1');
+ assert.equal(block.map(g=>g.text).join(''),'(WITH ME)');assert.equal(new Set(block.map(g=>g.y)).size,1);
+ assert.deepEqual(entering.words,['lead','b1','b2']);assert(!entering.words.includes('hidden'));
+ const held=vinylAt(track,2200).glyphs.filter(g=>g.wordId==='b1');assert(held.every(g=>g.current&&g.top));assert.equal(new Set(held.map(g=>g.y)).size,1);
+ const history=vinylAt(track,5000);assert(history.text.includes('(WITH ME)'));assert(history.glyphs.every(g=>!g.current));
+ assert.deepEqual(vinylAt(track,1200),entering);assert.equal(JSON.stringify(score),before);
+});

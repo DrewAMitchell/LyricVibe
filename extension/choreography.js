@@ -215,7 +215,15 @@
   // The newest word keeps a fixed readable size. Only accumulated history compresses.
   function vinylTrack(score,measure){
     const tokens=[];let order=0;
-    for(const phrase of score.phrases)for(const word of phrase.words){if(word.excluded)continue;tokens.push({id:word.id,phraseId:phrase.id,laneId:phrase.laneId,text:String(word.text).trim().toUpperCase(),startMs:word.startMs,endMs:word.endMs,order:order++});}
+    for(const phrase of score.phrases){
+      const words=phrase.words.filter(word=>!word.excluded);if(!words.length)continue;
+      if(score.lanes?.find(lane=>lane.id===phrase.laneId)?.role==='backing'){
+        // One phrase enters and leaves the shared feed as a single block. Keep
+        // the source words and their timing intact; this is presentation only.
+        const text=words.map(word=>String(word.text).trim()).join(' ').replace(/^\((.*)\)$/,'$1');
+        tokens.push({id:words[0].id,wordIds:words.map(word=>word.id),phraseId:phrase.id,laneId:phrase.laneId,backing:true,text:'('+text.toUpperCase()+')',startMs:Math.min(...words.map(w=>w.startMs)),endMs:Math.max(...words.map(w=>w.endMs)),order:order++});
+      }else for(const word of words)tokens.push({id:word.id,phraseId:phrase.id,laneId:phrase.laneId,text:String(word.text).trim().toUpperCase(),startMs:word.startMs,endMs:word.endMs,order:order++});
+    }
     tokens.sort((a,b)=>a.startMs-b.startMs||a.order-b.order);let total=0;
     for(const token of tokens){let x=0;token.chars=Array.from(token.text).map(text=>{const width=Math.max(.05,measure(text));const char={text,center:x+width/2,width};x+=width+.015;return char;});token.offset=total;token.textWidth=x;token.width=x+Math.max(.35,measure(' '));token.center=total+x/2;total+=token.width;}
     const decay=-Math.log(.78)/(2*Math.PI),capacity=Math.log(1/.18)/decay,entryFont=.21;
@@ -242,7 +250,7 @@
         glyphs.push({wordId:token.id,text:ch.text,radius,angle,font,x,y,current,feed:feed<1,top:handoff===0});
       }
     }
-    return {head,words:started.map(t=>t.id),text:started.map(t=>t.text).join(' '),glyphs,pipeWidth:track.pipeWidth};
+    return {head,words:started.flatMap(t=>t.wordIds||[t.id]),text:started.map(t=>t.text).join(' '),glyphs,pipeWidth:track.pipeWidth};
   }
   function paintVinyl(ctx,track,clock,width,height,{reduced=false,ink='#f5f0e7',accent='#d9543e'}={}){
     const frame=vinylAt(track,clock,{reduced}),R=Math.max(1,Math.min(height*.345,width*.4)),cx=width*.5,cy=height*.59,head=-Math.PI/2;
