@@ -12,16 +12,17 @@
   // their IDs, timing, syllables and effects.
   const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
   const visible = phrase => phrase.words.filter(word => word.excluded !== true);
-  const tokenText=token=>token.startsWith('==')?token.slice(1):token.startsWith('=')&&token.length>1?token.slice(1):token;
+  const tokenText=token=>core.displayToken(token).text;
   const whole=token=>token.startsWith('=')&&!token.startsWith('==')&&token.length>1;
-  const encode=word=>word.displayMode==='whole'?'='+word.text:word.text.startsWith('=')?'='+word.text:word.text;
+  const encodeSpelling=word=>word.displayMode==='whole'?'='+word.text:word.text.startsWith('=')?'='+word.text:word.text;
+  const encode=word=>encodeSpelling(word)+(word.doubled?'(d)':'');
 
   function toText(score) {
     const lead = score.lanes.find(lane => lane.role === 'lead')?.id;
     return score.phrases.filter(phrase => visible(phrase).length).map(phrase => {
       const lane=score.lanes.find(l=>l.id===phrase.laneId);
       const marker = phrase.laneId === lead && lane.id==='lead' ? '' : `[${lane.id==='backing'?'backing':lane.label}] `;
-      return (marker + visible(phrase).map(encode).join(' ')).trimEnd();
+      return (marker + (phrase.doubled?'(doubled) ':'') + visible(phrase).map(encode).join(' ')).trimEnd();
     }).join('\n');
   }
 
@@ -30,6 +31,7 @@
     let main = '', flattened = '', found = false;
     const backing = [];
     for (let i = 0; i < text.length;) {
+      if(text.slice(i,i+3).toLowerCase()==='(d)'){main+=text.slice(i,i+3);flattened+=text.slice(i,i+3);i+=3;continue;}
       if (text[i] !== '(') { main += text[i]; flattened += text[i++]; continue; }
       let depth = 1, end = i + 1;
       for (; end < text.length && depth; end++) {
@@ -37,7 +39,7 @@
         if (text[end] === ')') depth--;
       }
       if (depth) { main += text.slice(i); flattened += text.slice(i); break; }
-      const body = text.slice(i + 1, end - 1).replace(/[()]/g, ' ').trim();
+      const body = text.slice(i + 1, end - 1).replace(/\(d\)|[()]/gi,mark=>mark.toLowerCase()==='(d)'?mark:' ').trim();
       if (body) backing.push(body);
       main += ' '; flattened += ` ${body} `; found = true; i = end;
     }
@@ -49,7 +51,9 @@
     const parsed = [], backingLane = score.lanes.find(lane => lane.role === 'backing');
     let previousMain = null;
     core.parseVocalText(text,score.lanes).entries.forEach(segment => {
-      const entry = { laneId:segment.laneId,tokens:segment.text.split(/\s+/),line:segment.line };
+      const annotation=core.doubledText(segment.text);
+      const entry = { laneId:segment.laneId,tokens:annotation.text.split(/\s+/).filter(Boolean),doubled:annotation.doubled,line:segment.line };
+      if(!entry.tokens.length)return;
       const parts = parentheticalParts(entry.tokens.join(' '));
       if (!parts.found) {
         if (score.lanes.find(lane => lane.id === entry.laneId)?.role === 'lead') previousMain = parsed.length;
@@ -63,7 +67,7 @@
         previousMain = parsed.length;
         parsed.push({ ...entry, tokens: parts.main, hasBacking: parts.backing.length > 0 });
       }
-      if (parts.backing.length) parsed.push({ laneId: backingLane.id, tokens: parts.backing, line: entry.line, autoBacking: true, anchorIndex: previousMain });
+      if (parts.backing.length) parsed.push({ laneId: backingLane.id, tokens: parts.backing, doubled:entry.doubled, line: entry.line, autoBacking: true, anchorIndex: previousMain });
     });
     return parsed;
   }
@@ -114,7 +118,7 @@
 
   function wordEdits(phrase, line, tokens, operations, changes) {
     const old = visible(phrase), pairs = lcsPairs(old.map(word => word.text), tokens.map(tokenText));
-    const displayEdit=(word,token)=>{if((word.displayMode==='whole')!==whole(token)){operations.push({type:'setWordDisplayMode',wordId:word.id,mode:whole(token)?'whole':'syllables'});changes.push({line,phraseId:phrase.id,kind:'display',wordId:word.id,from:word.displayMode==='whole'?'whole word':'syllables',to:whole(token)?'whole word':'syllables'});}};
+    const displayEdit=(word,token)=>{const doubled=!!core.displayToken(token).doubled;if(!!word.doubled!==doubled){operations.push({type:'setWordDoubled',wordId:word.id,doubled});changes.push({line,phraseId:phrase.id,kind:'doubled',wordId:word.id,from:word.doubled?'doubled':'single',to:doubled?'doubled':'single'});}if((word.displayMode==='whole')!==whole(token)){operations.push({type:'setWordDisplayMode',wordId:word.id,mode:whole(token)?'whole':'syllables'});changes.push({line,phraseId:phrase.id,kind:'display',wordId:word.id,from:word.displayMode==='whole'?'whole word':'syllables',to:whole(token)?'whole word':'syllables'});}};
     for(const [oi,ti]of pairs)displayEdit(old[oi],tokens[ti]);
     if (pairs.length === old.length && pairs.length === tokens.length) return;
     // Hunks are the gaps between consecutive matched anchors.
@@ -211,7 +215,7 @@
       });
       // Each insert lands directly after the anchor, so emit in reverse to keep line order.
       for (const entry of [...planned].reverse()) {
-        inserts.push({ type: 'insertPhrase', afterPhraseId: previous ? previous.id : null, laneId: entry.laneId, text: entry.tokens.join(' '), startMs: entry.startMs, endMs: entry.endMs });
+        inserts.push({ type: 'insertPhrase', ...(entry.doubled?{doubled:true}:{}), afterPhraseId: previous ? previous.id : null, laneId: entry.laneId, text: entry.tokens.join(' '), startMs: entry.startMs, endMs: entry.endMs });
       }
       for (const entry of planned) changes.push({ line: entry.line, phraseId: null, kind: entry.autoBacking ? 'add-backing' : 'add-line', from: '', to: entry.tokens.join(' ') });
       pendingNew = [];
@@ -224,6 +228,7 @@
         return;
       }
       flush(phrase);
+      if(!!phrase.doubled!==!!entry.doubled){operations.push({type:"setPhraseDoubled",phraseId:phrase.id,doubled:!!entry.doubled});changes.push({line,phraseId:phrase.id,kind:"doubled",from:phrase.doubled?"doubled phrase":"single phrase",to:entry.doubled?"doubled phrase":"single phrase"});}
       if (entry.laneId !== phrase.laneId) {
         operations.push({ type: 'setPhraseLane', phraseId: phrase.id, laneId: entry.laneId });
         changes.push({ line, phraseId: phrase.id, kind: 'lane', from: phrase.laneId, to: entry.laneId });

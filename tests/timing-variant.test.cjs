@@ -379,3 +379,9 @@ test('word and syllable landing overrides preserve locked timing and other effec
   assert.throws(()=>variant.operate(draft,[{type:'setWordLanding',wordId:w.id,style:'unknown'}]));
   assert.equal(JSON.stringify(draft),before);
 });
+
+test('doubled annotations are presentation edits on protected timings',()=>{
+ const base=make('[00:01.00]bright light');for(const w of base.phrases[0].words){w.locked=true;w.provenance='manual';}
+ const draft=variant.merge(base,base),p=base.phrases[0];const changed=variant.operate(draft,[{type:'setPhraseDoubled',phraseId:p.id,doubled:true},{type:'setWordDoubled',wordId:p.words[0].id,doubled:true}]);
+ assert.equal(changed.score.phrases[0].doubled,true);assert.equal(changed.score.phrases[0].words[0].doubled,true);assert.deepEqual(changed.score.phrases[0].words.map(w=>[w.id,w.startMs,w.endMs,w.locked]),p.words.map(w=>[w.id,w.startMs,w.endMs,w.locked]));assert.equal(base.phrases[0].doubled,undefined);
+});

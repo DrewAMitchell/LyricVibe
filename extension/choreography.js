@@ -65,7 +65,7 @@
         const impact=fast&&gap>=550&&i===p.words.length-1;
         const rule=matches.get(i);
         const reasons=[...(sustained.length?['sustained']:[]),...(impact?['fast-then-stop']:[]),...(direction?['direction-'+text]:[]),...(rule?['word-rule:'+rule.word]:[])];
-        cues[word.id]={wordId:word.id,phraseId:p.phrase.id,startMs:word.startMs,endMs:word.endMs,
+        cues[word.id]={doubled:!!(word.doubled||p.phrase.doubled),wordId:word.id,phraseId:p.phrase.id,startMs:word.startMs,endMs:word.endMs,
           weight:(lightWords.has(text)?.78:1)+Math.min(.25,text.length*.018)+Math.min(.16,(count-1)*.06)+(impact?.4:0)+(sustained.length?.18:0),
           sustained:sustained.map(u=>({id:u.id,startMs:u.startMs,endMs:u.endMs})),impact,direction,reasons,...(rule?{rule}:{}),
           evidence:{phraseSyllablesPerSecond:p.rate,pauseAfterMs:gap,syllableBasis:word.syllables?.length?'authored':'estimated-from-spelling'}};
@@ -268,11 +268,12 @@
         // One phrase enters and leaves the shared feed as a single block. Keep
         // the source words and their timing intact; this is presentation only.
         const text=words.map(word=>String(word.text).trim()).join(' ').replace(/^\((.*)\)$/,'$1');
-        tokens.push({id:words[0].id,wordIds:words.map(word=>word.id),phraseId:phrase.id,laneId:phrase.laneId,backing:true,text:'('+text.toUpperCase()+')',startMs:Math.min(...words.map(w=>w.startMs)),endMs:Math.max(...words.map(w=>w.endMs)),order:order++});
-      }else for(const word of words)tokens.push({id:word.id,phraseId:phrase.id,laneId:phrase.laneId,text:String(word.text).trim().toUpperCase(),startMs:word.startMs,endMs:word.endMs,order:order++});
+        let at=1;const doubledRanges=words.map(word=>{const start=at;at+=Array.from(String(word.text).trim().toUpperCase()).length+1;return word.doubled?[start,at-1]:null;}).filter(Boolean);
+        tokens.push({doubled:!!phrase.doubled,doubledRanges,id:words[0].id,wordIds:words.map(word=>word.id),phraseId:phrase.id,laneId:phrase.laneId,backing:true,text:'('+text.toUpperCase()+')',startMs:Math.min(...words.map(w=>w.startMs)),endMs:Math.max(...words.map(w=>w.endMs)),order:order++});
+      }else for(const word of words)tokens.push({doubled:!!(phrase.doubled||word.doubled),id:word.id,phraseId:phrase.id,laneId:phrase.laneId,text:String(word.text).trim().toUpperCase(),startMs:word.startMs,endMs:word.endMs,order:order++});
     }
     tokens.sort((a,b)=>a.startMs-b.startMs||a.order-b.order);let total=0;
-    for(const token of tokens){let x=0;token.chars=Array.from(token.text).map(text=>{const width=Math.max(.05,measure(text));const char={text,center:x+width/2,width};x+=width+.015;return char;});token.offset=total;token.textWidth=x;token.width=x+Math.max(.35,measure(' '));token.center=total+x/2;total+=token.width;}
+    for(const token of tokens){let x=0;token.chars=Array.from(token.text).map((text,index)=>{const width=Math.max(.05,measure(text));const char={text,center:x+width/2,width,doubled:token.doubled||token.doubledRanges?.some(([start,end])=>index>=start&&index<end)||false};x+=width+.015;return char;});token.offset=total;token.textWidth=x;token.width=x+Math.max(.35,measure(' '));token.center=total+x/2;total+=token.width;}
     const decay=-Math.log(.78)/(2*Math.PI),capacity=Math.log(1/.18)/decay,entryFont=.21;
     // Integral of entryFont/(1+d/compression) gives the angle traveled. Capacity
     // affects distant history, never the font size of the word at the feed mouth.
@@ -294,7 +295,7 @@
       for(const ch of token.chars){
         const d=Math.max(0,age+token.textWidth/2-ch.center),winding=track.entryFont*track.compression*Math.log1p(d/track.compression),curveR=Math.exp(-track.decay*winding),curveA=-Math.PI/2-winding,curveFont=track.entryFont*curveR/(1+d/track.compression)*fit;
         const radius=centerR+(curveR-centerR)*flatten,font=centerFont+(curveFont-centerFont)*flatten,flatX=centerR*Math.cos(centerA)+(ch.center-token.textWidth/2)*centerFont,flatY=centerR*Math.sin(centerA),x=flatX+(curveR*Math.cos(curveA)-flatX)*flatten,y=flatY+(curveR*Math.sin(curveA)-flatY)*flatten-(token.feedRow*.25+(1-feed)*.48)*(1-handoff),angle=-Math.PI/2+(curveA+Math.PI/2)*flatten;
-        glyphs.push({wordId:token.id,text:ch.text,radius,angle,font,x,y,current,feed:feed<1,top:handoff===0});
+        glyphs.push({wordId:token.id,doubled:ch.doubled,text:ch.text,radius,angle,font,x,y,current,feed:feed<1,top:handoff===0});
       }
     }
     return {head,words:started.flatMap(t=>t.wordIds||[t.id]),text:started.map(t=>t.text).join(' '),glyphs,pipeWidth:track.pipeWidth};
@@ -310,7 +311,7 @@
     const atlas=ctx.__lvVinylGlyphs||(ctx.__lvVinylGlyphs=new Map());
     for(const glyph of frame.glyphs){const color=glyph.current?ink:'#d0cbc3',key=color+'|'+glyph.text;let sprite=atlas.get(key);
       if(!sprite){const tile=typeof OffscreenCanvas!=='undefined'?new OffscreenCanvas(1,1):ctx.canvas.ownerDocument.createElement('canvas'),brush=tile.getContext('2d');brush.font='800 100px Arial Narrow, Impact, sans-serif';tile.width=Math.ceil(brush.measureText(glyph.text).width)+12;tile.height=150;brush.font='800 100px Arial Narrow, Impact, sans-serif';brush.textAlign='center';brush.textBaseline='middle';brush.fillStyle=color;brush.fillText(glyph.text,tile.width/2,75);sprite=tile;if(atlas.size<512)atlas.set(key,sprite);}
-      const scale=R*glyph.font/100;ctx.save();ctx.translate(cx+R*glyph.x,cy+R*glyph.y);ctx.rotate(glyph.angle+Math.PI/2);ctx.globalAlpha=glyph.top?1:.52+.48*glyph.radius;ctx.drawImage(sprite,-sprite.width*scale/2,-75*scale,sprite.width*scale,150*scale);ctx.restore();}
+      const scale=R*glyph.font/100;ctx.save();ctx.translate(cx+R*glyph.x,cy+R*glyph.y);ctx.rotate(glyph.angle+Math.PI/2);ctx.globalAlpha=glyph.top?1:.52+.48*glyph.radius;if(glyph.doubled&&glyph.current){const alpha=ctx.globalAlpha;ctx.globalAlpha*=.45;ctx.drawImage(sprite,-sprite.width*scale/2+6.5*scale,-72.5*scale,sprite.width*scale,150*scale);ctx.globalAlpha=alpha;}ctx.drawImage(sprite,-sprite.width*scale/2,-75*scale,sprite.width*scale,150*scale);ctx.restore();}
     ctx.restore();return frame;
   }
   function backingSettings(value={}){

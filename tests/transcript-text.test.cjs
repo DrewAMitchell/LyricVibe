@@ -204,3 +204,31 @@ test('near-end backing starts at the last main word; existing backing timing is 
  assert.deepEqual(transcript.diff(next,text,{backingStart:'beginning'}).operations,[]);
  assert.throws(()=>transcript.diff(score,text,{backingStart:'guess'}),/beginning or near-end/);
 });
+
+
+test('doubled annotations round-trip independently without touching timing, syllables or effects', () => {
+  const original=doubledFixture();let score=original;
+  const apply=text=>{const result=transcript.diff(score,text);for(const op of result.operations)score=core.applyOperation(score,op,score.revision);return result;};
+  const text="(doubled) It's an(d) ice- breaker\n[backing] out(d)";
+  const result=apply(text);
+  assert.deepEqual(result.operations.map(o=>o.type),['setPhraseDoubled','setWordDoubled','setWordDoubled']);
+  assert.equal(transcript.toText(score),text);assert.deepEqual(transcript.diff(score,text).operations,[]);
+  const strip=value=>{value=structuredClone(value);delete value.revision;for(const p of value.phrases){delete p.doubled;for(const w of p.words)delete w.doubled;}return value;};
+  assert.deepEqual(strip(score),strip(original));
+  apply(transcript.toText(original));assert.deepEqual(strip(score),strip(original));
+  assert.ok(score.phrases.every(p=>!p.doubled&&p.words.every(w=>!w.doubled)));
+});
+test('doubled import, backing shorthand, whole words, inserted phrases and separated word marker',()=>{
+  const source={videoId:'proof123456',durationMs:20000},meta={contentHash:'f'.repeat(64)};
+  const score=core.createPlainScore(source,'(doubled) =burning(d) bright (oh(d) yeah)\ncool (d) money',meta);
+  assert.equal(score.phrases[0].doubled,true);assert.equal(score.phrases[0].words[0].text,'burning');assert.equal(score.phrases[0].words[0].displayMode,'whole');assert.equal(score.phrases[0].words[0].doubled,true);
+  assert.deepEqual(score.phrases.find(p=>p.laneId==='backing').words.map(w=>w.text),['oh','yeah']);
+  assert.equal(score.phrases.find(p=>p.words[0].text==='cool').words[0].doubled,true);
+  let next=doubledFixture();const target=transcript.toText(next)+'\n(doubled) new(d) words';for(const op of transcript.diff(next,target).operations)next=core.applyOperation(next,op,next.revision);
+  assert.equal(next.phrases.at(-1).doubled,true);assert.equal(next.phrases.at(-1).words[0].doubled,true);assert.deepEqual(transcript.diff(next,transcript.toText(next)).operations,[]);
+  for(const op of transcript.diff(next,transcript.toText(next).replace('new(d) words','new(d) added words')).operations)next=core.applyOperation(next,op,next.revision);
+  assert.ok(next.phrases.at(-1).words.some(w=>w.text==='new'&&w.doubled));
+  assert.throws(()=>core.applyOperation(next,{type:'setPhraseDoubled',phraseId:next.phrases[0].id,doubled:'yes'},next.revision),/Doubled/);
+});
+
+function doubledFixture(){const shell=core.createPlainScore({videoId:'proof123456',durationMs:20000},'placeholder',{contentHash:'f'.repeat(64)});const value={...shell,...fixture()};for(const p of value.phrases){p.endEstimated=false;p.fadeOutMs=120;}value.phrases[0].words[0].effects=[{type:'glow',strength:.4}];value.phrases[0].words[1].syllables=[{id:'syl-a',text:'an',startMs:300,endMs:500,provenance:'manual',locked:true,effects:[]}];return core.validateScore(value);}

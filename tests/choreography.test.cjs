@@ -239,3 +239,10 @@ test('vinyl backing phrases enter as complete parenthesized blocks and survive o
  const history=vinylAt(track,5000);assert(history.text.includes('(WITH ME)'));assert(history.glyphs.every(g=>!g.current));
  assert.deepEqual(vinylAt(track,1200),entering);assert.equal(JSON.stringify(score),before);
 });
+
+test('doubled vocal annotations project to exact word and vinyl backing glyph scopes',()=>{
+ const core=require('../extension/score-core.js');const c=require('../extension/choreography.js');
+ const score=core.createPlainScore({videoId:'TESTVIDEO01',durationMs:20000},'cool(d) bright\n(doubled) sunshine light\n(backing(d) vocals)',{contentHash:'f'.repeat(64)});
+ const cues=c.compose(score,[]);assert.equal(cues[score.phrases[0].words[0].id].doubled,true);assert.equal(cues[score.phrases[0].words[1].id].doubled,false);assert.ok(score.phrases[1].words.every(w=>cues[w.id].doubled));
+ const track=c.vinylTrack(score,()=>.5),backing=track.tokens.find(t=>t.backing);assert.equal(backing.chars.filter(c=>c.doubled).map(c=>c.text).join(''),'BACKING');assert.ok(track.tokens.filter(t=>t.phraseId===score.phrases[1].id).every(t=>t.chars.every(c=>c.doubled)));
+});

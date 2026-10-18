@@ -39,7 +39,9 @@
     if (!Number.isSafeInteger(value) || value < 0) fail("INVALID_TIME", `${label} must be a nonnegative integer`);
   }
   function clone(value) { return JSON.parse(JSON.stringify(value)); }
-  function displayToken(token){return token.startsWith('==')?{text:token.slice(1)}:token.startsWith('=')&&token.length>1?{text:token.slice(1),displayMode:'whole'}:{text:token};}
+  function doubledText(text){return {doubled:/^\s*\(doubled\)(?:\s|$)/i.test(text),text:String(text).replace(/^\s*\(doubled\)(?:\s+|$)/i,'').replace(/(\S)\s+\(d\)(?=\s|$|[.,!?;:])/gi,'$1(d)')};}
+  function displayToken(token){const doubled=/\(d\)(?=[.,!?;:]*$)/i.test(token);token=token.replace(/\(d\)(?=[.,!?;:]*$)/i,'');const value=displaySpelling(token);return doubled?{...value,doubled:true}:value;}
+  function displaySpelling(token){return token.startsWith('==')?{text:token.slice(1)}:token.startsWith('=')&&token.length>1?{text:token.slice(1),displayMode:'whole'}:{text:token};}
   function parseVideoId(value) { return typeof value === "string" && ID_RE.test(value) ? value : ""; }
 
   function mediaKey(hintsOrSource) {
@@ -112,7 +114,7 @@
 
   function wordsForText(text) {
     const result = [];
-    const re = /\([^)]*\)|[^\s]+/gu;
+    const re = /\((?:[^()]|\(d\))*\)|[^\s]+/giu;
     for (const match of text.matchAll(re)) {
       const token = match[0];
       const backing = token.startsWith("(") && token.endsWith(")") && token.length > 2;
@@ -187,7 +189,7 @@
       }
       const next = cues.slice(i + 1).find(c => c.timeMs > cue.timeMs);
       const vocal=parseVocalText(cue.text,lanes);lanes=vocal.lanes;
-      const tokens = vocal.entries.flatMap(entry=>wordsForText(entry.text).map(token=>({...token,laneId:token.role==='backing'?'backing':entry.laneId})));
+      const tokens = vocal.entries.flatMap(entry=>{const annotation=doubledText(entry.text);return wordsForText(annotation.text).map(token=>({...token,...displayToken(token.text),phraseDoubled:annotation.doubled,laneId:token.role==='backing'?'backing':entry.laneId}));});
       if (!tokens.length) continue;
       const inferredEndMs = cue.timeMs + estimatedPhraseDurationMs(tokens.length);
       const proposedEndMs = next ? next.timeMs : source.durationMs;
@@ -199,7 +201,7 @@
       if (endMs < cue.timeMs) continue;
       const phraseId = stableId("phrase", ++phraseIndex);
       const words = tokens.map((token, n) => ({
-        id: `${phraseId}-word-${n + 1}`, text: token.text,
+        id: `${phraseId}-word-${n + 1}`, text: token.text, ...(token.doubled?{doubled:true}:{}), ...(token.displayMode?{displayMode:token.displayMode}:{}),
         startMs: cue.timeMs, endMs: cue.timeMs,
         provenance: "estimated", locked: false, effects: [], laneId: token.laneId
       }));
@@ -210,6 +212,7 @@
         if (!subset.length) continue;
         const phraseWords = subset.map(({ laneId, ...word }) => word);
         const p = { id: part==='backing'||parts.indexOf(part)>0 ? `${phraseId}-${part}` : phraseId, laneId: part, startMs: cue.timeMs, endMs, endEstimated, fadeOutMs: 120, words: phraseWords };
+        if(tokens.filter(t=>t.laneId===part).every(t=>t.phraseDoubled))p.doubled=true;
         estimateWordTimes(p, cue.text);
         phrases.push(p);
       }
@@ -315,11 +318,13 @@
     for (const phrase of score.phrases) {
       if (!phrase || typeof phrase.id !== "string" || !phrase.id || ids.has(phrase.id) || !laneMap.has(phrase.laneId)) bad("invalid phrase id or unknown lane");
       ids.add(phrase.id);
+      if(phrase.doubled!==undefined&&typeof phrase.doubled!=="boolean")bad("phrase doubled must be boolean");
       if (typeof phrase.startMs !== "number" || !Number.isFinite(phrase.startMs) || phrase.startMs < 0 || typeof phrase.endMs !== "number" || !Number.isFinite(phrase.endMs) || phrase.endMs < 0 || phrase.endMs < phrase.startMs || typeof phrase.endEstimated !== "boolean" || typeof phrase.fadeOutMs !== "number" || !Number.isFinite(phrase.fadeOutMs) || phrase.fadeOutMs < 0 || !Array.isArray(phrase.words)) bad("invalid phrase timing or fields");
       if(phrase.persistBeats!==undefined&&(!Number.isFinite(phrase.persistBeats)||phrase.persistBeats<0||phrase.persistBeats>64))bad('phrase persistence must be 0–64 beats');
       for (const word of phrase.words) {
         if (!word || typeof word.id !== "string" || !word.id || ids.has(word.id) || typeof word.text !== "string" || !word.text.trim()) bad("invalid or duplicate word");
         ids.add(word.id);
+        if(word.doubled!==undefined&&typeof word.doubled!=="boolean")bad("word doubled must be boolean");
         if (typeof word.startMs !== "number" || !Number.isFinite(word.startMs) || word.startMs < 0 || typeof word.endMs !== "number" || !Number.isFinite(word.endMs) || word.endMs < 0 || word.endMs < word.startMs || word.startMs < phrase.startMs || word.endMs > phrase.endMs || !["estimated", "manual", "aligned"].includes(word.provenance) || typeof word.locked !== "boolean" || !Array.isArray(word.effects)) bad("invalid word timing or fields");
         if (word.excluded !== undefined && typeof word.excluded !== "boolean") bad("word excluded must be boolean when present");
         if(word.landing!==undefined&&!DISPLAY_CATALOG.landings.includes(word.landing))bad('invalid word landing');
@@ -460,7 +465,7 @@
       if (!phrase) fail("UNKNOWN_ID", `unknown phrase id: ${op.phraseId}`);
       if (!Array.isArray(op.wordIds) || !op.wordIds.length || op.wordIds.length > 5000 || op.wordIds.some(id => typeof id !== "string") || new Set(op.wordIds).size !== op.wordIds.length) fail("INVALID_OPERATION", "wordIds must be a bounded nonempty list of distinct word IDs");
       if (typeof op.text !== "string" || !op.text.trim() || op.text.length > 10000) fail("INVALID_OPERATION", "replacement text must be nonempty and at most 10000 characters");
-      const tokens = op.text.trim().split(/\s+/);
+      const tokens = doubledText(op.text).text.trim().split(/\s+/);
       const firstIndex = phrase.words.findIndex(word => word.id === op.wordIds[0]);
       if (firstIndex < 0) fail("UNKNOWN_ID", "selected words must belong to the specified phrase");
       const selected = phrase.words.slice(firstIndex, firstIndex + op.wordIds.length);
@@ -498,8 +503,10 @@
       let n = 1;
       while (usedIds.has(`phrase-added-${n}`)) n++;
       const id = `phrase-added-${n}`;
+      if(op.doubled!==undefined&&typeof op.doubled!=="boolean")fail("INVALID_OPERATION","Doubled must be boolean.");
       const phrase = { id, laneId: op.laneId, startMs: op.startMs, endMs: op.endMs, endEstimated: true, fadeOutMs: 120,
-        words: op.text.trim().split(/\s+/).map((text, i) => ({ id: `${id}-word-${i + 1}`, ...displayToken(text), startMs: op.startMs, endMs: op.startMs, provenance: "estimated", locked: false, effects: [] })) };
+        ...(op.doubled||doubledText(op.text).doubled?{doubled:true}:{}),
+        words: doubledText(op.text).text.trim().split(/\s+/).map((text, i) => ({ id: `${id}-word-${i + 1}`, ...displayToken(text), startMs: op.startMs, endMs: op.startMs, provenance: "estimated", locked: false, effects: [] })) };
       estimateWordTimes(phrase);
       next.phrases.splice(after + 1, 0, phrase);
     } else if (op.type === "setWordLock") {
@@ -511,6 +518,10 @@
       const { word } = locateWord(next, op.wordId);
       if (typeof op.excluded !== "boolean") fail("INVALID_OPERATION", "excluded must be boolean");
       word.excluded = op.excluded;
+    } else if(op.type==='setWordDoubled'||op.type==='setPhraseDoubled'){
+      if(typeof op.doubled!=='boolean')fail('INVALID_OPERATION','Doubled must be true or false.');
+      const item=op.type==='setWordDoubled'?next.phrases.flatMap(p=>p.words).find(w=>w.id===op.wordId):next.phrases.find(p=>p.id===op.phraseId);
+      if(!item)fail('UNKNOWN_ID','Unknown doubled target.');if(op.doubled)item.doubled=true;else delete item.doubled;
     } else if (op.type === "setPhraseLane") {
       const phrase = next.phrases.find(p => p.id === op.phraseId);
       if (!phrase) fail("UNKNOWN_ID", `unknown phrase id: ${op.phraseId}`);
@@ -813,5 +824,5 @@
       }))};
     });
   }
-  return { VERSION, DISPLAY_CATALOG, stageRegionAt, ScoreError, mediaKey, parseLrc, parseVocalText, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, phraseTimingCoverage, timingCoverage };
+  return { VERSION, DISPLAY_CATALOG, stageRegionAt, ScoreError, mediaKey, parseLrc, parseVocalText, doubledText, displayToken, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, phraseTimingCoverage, timingCoverage };
 });
