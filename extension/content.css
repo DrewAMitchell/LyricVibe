@@ -2933,6 +2933,26 @@
 #lvx-root .lvx-effect-preview-line{display:flex;align-items:center;justify-content:center;gap:.3em;min-height:86px;overflow:hidden;font:700 29px/1.5 system-ui;color:var(--lvx-color-main);padding:12px 4px;box-sizing:border-box}
 #lvx-root .lvx-effect-preview-line .lvx-score-word{opacity:1;white-space:nowrap;flex:0 1 auto;min-width:0;font:inherit;letter-spacing:0}
 #lvx-root .lvx-effect-pads [aria-pressed=true]{border-color:#d9edc1;background:#314936}
+#lvx-root .lvx-effect-pads [data-effect]{border-bottom:3px solid var(--effect-color,#7f919a)}
+#lvx-root .lvx-effect-track{margin:10px 0;border:1px solid #38505b;border-radius:8px;background:#0b171de8;overflow:hidden;min-width:0}
+#lvx-root .lvx-effect-track[hidden]{display:none}
+#lvx-root .lvx-effect-track>header{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:8px 10px;font:600 12px/1.3 system-ui;border:0}
+#lvx-root .lvx-effect-track>header span{font:10px/1.3 system-ui;color:#a8bcc4;text-align:right}
+#lvx-root .lvx-effect-track-scroll{overflow:auto;max-height:238px;overscroll-behavior:contain;scrollbar-width:thin}
+#lvx-root .lvx-effect-track-canvas{position:relative;padding:0 0 5px;min-width:100%;box-sizing:border-box}
+#lvx-root .lvx-effect-track-row{display:flex;position:relative;height:27px;margin:3px 0}
+#lvx-root .lvx-effect-track-label{flex:0 0 66px;position:sticky;left:0;z-index:3;box-sizing:border-box;padding:6px 8px;color:#a7bdc7;background:#0b171d;font:10px/15px system-ui}
+#lvx-root .lvx-effect-track-rail{flex:1;position:relative;min-width:0}
+#lvx-root .lvx-effect-track-block{position:absolute;top:1px;height:24px;box-sizing:border-box;padding:4px 5px;border:1px solid var(--effect-color);border-radius:4px;background:color-mix(in srgb,var(--effect-color) 27%,#0c1921);color:#f1f5f8;font:600 10px/14px system-ui;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:inset -2px 0 #0b171d;cursor:default}
+#lvx-root .lvx-effect-track-block[data-kind=lyric]{background:#1b2a33;border-color:#405967;color:#c7d8df;font-weight:500}
+#lvx-root .lvx-effect-track-block[data-kind=blank]:not([data-pending=true]){background:#101e25;border:1px dashed #3a515b;color:#8197a2;font-weight:400}
+#lvx-root .lvx-effect-track-block[data-pending=true]{background-image:repeating-linear-gradient(135deg,transparent 0 6px,#ffffff18 6px 9px);border-left:3px solid var(--effect-before)}
+#lvx-root .lvx-effect-track-block[data-writing=true]{outline:2px solid #fff;outline-offset:-2px;color:#fff;z-index:2}
+#lvx-root .lvx-effect-track-block.lvx-at-playhead{filter:brightness(1.25)}
+#lvx-root .lvx-effect-track-block:focus-visible{outline:2px solid #fff;outline-offset:-2px;z-index:4}
+#lvx-root .lvx-effect-track-head{position:absolute;top:0;bottom:0;width:1px;background:#fff9;pointer-events:none;z-index:2}
+#lvx-root .lvx-effect-track-head[hidden]{display:none}
+#lvx-root .lvx-effect-track>p{margin:0;padding:6px 9px;color:#96adb8;font:10px/1.4 system-ui}
 /* The control palette belongs to the viewport, independently of lyric regions. */
 #lvx-root .lvx-sidebar{display:grid;grid-template-columns:112px minmax(0,1fr);gap:8px;width:168px;max-height:calc(100% - 16px);overflow:auto;overscroll-behavior:contain;z-index:50;transition:none;transform:none}
 #lvx-root .lvx-sidebar:is(:hover,:focus-within,.lvx-sidebar-pinned){width:min(370px,calc(100% - 16px))}

@@ -102,6 +102,8 @@
   const tapping = { take: null, wordId: null, binding: null, clockMs: null, rate: 1, audio: null, splitDirty: false, heldInput: null, cancelledSpace: false, reviewId: null, correctionUndo: [], listening: false, backAnchorMs: null, backIndex: null, syllableStartKey: null };
   const performanceTake = { armed: false, binding: null, laneId: null, rate: 1, marks: [] };
   const effectGesture = { input:null, type:'clear', samples:new Map(), base:[], groupId:null };
+  const effectTracks=[];
+  const effectColors={pulse:'#63cbd5',tilt:'#b59aeb',shake:'#ed8d8d',bounce:'#8ed39c',glow:'#e9c66f',groove:'#7eacf0',breath:'#c7a2dc',color:'#e5a3cb',blank:'#7f919a'};
 
   /* ══════════════════════════════════════
      DOM CONSTRUCTION
@@ -2392,6 +2394,8 @@
     if(!effectSourceReady())return;
     effectGesture.input=input;effectGesture.type='clear';effectGesture.base=[...performanceTake.marks];effectGesture.samples=new Map();effectGesture.groupId=crypto.randomUUID();
     sampleEffectGesture();
+    const track=syncPanel.querySelector('[data-effect-track=effects]'),box=track?.getBoundingClientRect(),panel=syncPanel.getBoundingClientRect();
+    if(box&&(box.bottom>panel.bottom-80||box.top<panel.top+8))track.scrollIntoView({block:'center',inline:'nearest'});
   }
   function finishEffectGesture(cancel=false) {
     if(!effectGesture.input)return;
@@ -2429,6 +2433,74 @@
     for(const cue of score?.beatCues||[])operations.push({type:'deleteBeatCue',cueId:cue.id});
     return operations;
   }
+  function createEffectTrack(view) {
+    const node=document.createElement('section');node.className='lvx-effect-track';node.hidden=true;node.dataset.effectTrack=view;node.setAttribute('aria-label','Phrase, words and effects timeline');
+    node.innerHTML='<header><strong>Effects track</strong><span></span></header><div class="lvx-effect-track-scroll" tabindex="0" aria-label="Scroll effect timeline"><div class="lvx-effect-track-canvas"></div></div><p>Striped = this pass · outline = overwriting · hover for exact times</p>';
+    effectTracks.push(node);return node;
+  }
+  function effectTrackProjection(score,phrase) {
+    const marks=timing.view==='proposed'&&performanceTake.binding===tapBinding()?performanceTake.marks:[];
+    const latest=new Map(marks.map(m=>[m.targetId,m.operation]));
+    const prior=new Map((effectGesture.input?effectGesture.base:[]).map(m=>[m.targetId,m.operation]));
+    const name=effects=>effects?.length?effects.map(e=>e.type[0].toUpperCase()+e.type.slice(1)+(e.type==='groove'&&e.axis?' '+(e.axis==='horizontal'?'↔':'↕'):'')).join(' + '):'Blank';
+    const rows=[{label:'Phrase',items:[{id:phrase.id,text:phrase.words.filter(w=>!w.excluded).map(w=>w.text).join(' '),startMs:phrase.startMs,endMs:phrase.endMs,kind:'lyric'}]},{label:'Words',items:phrase.words.filter(w=>!w.excluded).map(w=>({id:w.id,text:w.text,startMs:w.startMs,endMs:w.endMs,kind:'lyric'}))}];
+    const item=(unit,lyric)=>{const op=latest.get(unit.id),beforeOp=prior.get(unit.id),before=beforeOp?beforeOp.effect?[beforeOp.effect]:[]:unit.effects||[],after=op?op.effect?[op.effect]:[]:unit.effects||[];return {id:unit.id,startMs:unit.startMs,endMs:unit.endMs,text:(lyric?unit.text+' · ':'')+(op?name(before)+' → '+name(after):name(after)),kind:after[0]?.type||'blank',beforeKind:before[0]?.type||'blank',pending:Boolean(op),effect:true};};
+    rows.push({label:'Effects',items:phrase.words.filter(w=>!w.excluded).map(w=>item(w,false))});
+    const parts=phrase.words.filter(w=>!w.excluded).flatMap(w=>w.syllables||[]);
+    if(parts.length)rows.push({label:'Syllables',items:parts.map(s=>item(s,true))});
+    const wordIds=new Set(phrase.words.map(w=>w.id)),partIds=new Set(parts.map(s=>s.id));
+    const relevant=c=>['active','screen'].includes(c.target.kind)||c.target.kind==='lane'&&c.target.id===phrase.laneId||c.target.kind==='phrase'&&c.target.id===phrase.id||c.target.kind==='word'&&wordIds.has(c.target.id)||c.target.kind==='syllable'&&partIds.has(c.target.id);
+    const cues=new Map((score.beatCues||[]).map(c=>[c.id,c]));
+    for(const mark of marks)if(mark.operation.type==='setBeatCue')cues.set(mark.operation.cue.id,mark.operation.cue);
+    const beatItems=[];
+    if(tempo.map)for(const cue of cues.values()){
+      if(!relevant(cue))continue;
+      const startMs=LvTapTiming.tempoTimeAtBeat(tempo.map,cue.beat)-score.offsetMs,endMs=LvTapTiming.tempoTimeAtBeat(tempo.map,cue.beat+cue.durationBeats)-score.offsetMs;
+      if(!Number.isFinite(startMs)||!Number.isFinite(endMs)||endMs<=phrase.startMs||startMs>=phrase.endMs)continue;
+      const op=latest.get(cue.id),deleted=op?.type==='deleteBeatCue',label=name([{type:cue.effect,axis:cue.axis}]);
+      beatItems.push({id:cue.id,startMs,endMs,text:label+(deleted?' → Blank':'')+' · '+cue.target.kind,kind:deleted?'blank':cue.effect,beforeKind:cue.effect,pending:Boolean(op),effect:true});
+    }
+    const beatRows=[];
+    for(const entry of beatItems.sort((a,b)=>a.startMs-b.startMs||a.endMs-b.endMs)){let row=beatRows.find(r=>r.end<=entry.startMs);if(!row){row={end:-Infinity,items:[]};beatRows.push(row);}row.items.push(entry);row.end=entry.endMs;}
+    for(const [i,row]of beatRows.entries())rows.push({label:i?'Beat '+(i+1):'Beats',items:row.items});
+    return {rows,missingTempo:!tempo.map&&[...cues.values()].some(relevant)};
+  }
+  function refreshEffectTracks() {
+    if(!effectTracks.length)return;
+    const score=timing.view==='saved'?state.score:timing.draft?.score;if(!score){for(const node of effectTracks)node.hidden=true;return;}
+    const now=getMediaTimeMs()-score.offsetMs;
+    const active=performanceTake.armed?activeEffectTarget():null;
+    const writeIds=new Set();
+    if(effectGesture.input&&active){
+      if(performanceTake.clock==='beat'){for(const m of performanceTake.marks)if(m.groupId===effectGesture.groupId)writeIds.add(m.targetId);}
+      else{const words=active.words||score.phrases.flatMap(p=>p.words).filter(w=>w.id===active.wordId);for(const w of words){writeIds.add(w.id);if(effectGesture.type==='clear')for(const part of w.syllables||[])writeIds.add(part.id);}if(active.syllableId)writeIds.add(active.syllableId);}
+    }
+    for(const node of effectTracks){
+      const view=node.dataset.effectTrack,visible=view==='stage'?stageEdit.active:!syncPanel.hidden&&timingWorkspace.view===view;
+      node.hidden=!visible;if(!visible)continue;
+      let phrase=view==='stage'?stagePhrase():timingPhrase();
+      phrase=score.phrases.find(p=>p.id===phrase?.id)||score.phrases[0];
+      if(performanceTake.armed&&performanceTake.clock!=='beat'){const lane=score.phrases.filter(p=>p.laneId===performanceTake.laneId);phrase=lane.find(p=>now>=p.startMs&&now<p.endMs)||lane.filter(p=>p.endMs<=now).at(-1)||phrase;}
+      if(!phrase){node.hidden=true;continue;}
+      const cache=node._lvxTrackCache,last=performanceTake.marks.at(-1);
+      if(!cache||cache.score!==score||cache.phrase!==phrase||cache.marks!==performanceTake.marks||cache.count!==performanceTake.marks.length||cache.last!==last||cache.input!==effectGesture.input||cache.map!==tempo.map){
+        const projection=effectTrackProjection(score,phrase),canvas=node.querySelector('.lvx-effect-track-canvas');canvas.replaceChildren();
+        canvas.style.width=Math.max(430,Math.min(2200,phrase.words.length*64))+'px';
+        node.querySelector('header span').textContent=(timing.view==='saved'?'Saved · ':'')+(score.lanes.find(l=>l.id===phrase.laneId)?.label||'Vocal track')+' · '+(phrase.startMs/1000+score.offsetMs/1000).toFixed(2)+'–'+(phrase.endMs/1000+score.offsetMs/1000).toFixed(2)+'s';
+        for(const row of projection.rows){const line=document.createElement('div');line.className='lvx-effect-track-row';const label=document.createElement('span');label.className='lvx-effect-track-label';label.textContent=row.label;line.append(label);const rail=document.createElement('div');rail.className='lvx-effect-track-rail';
+          for(const entry of row.items){const block=document.createElement('span');block.className='lvx-effect-track-block';block.dataset.unit=entry.id;block.dataset.trackEffect=String(Boolean(entry.effect));block.dataset.kind=entry.kind;block.dataset.pending=String(Boolean(entry.pending));block.dataset.start=entry.startMs;block.dataset.end=entry.endMs;block.textContent=entry.text;block.title=entry.text+' · '+((entry.startMs+score.offsetMs)/1000).toFixed(3)+'–'+((entry.endMs+score.offsetMs)/1000).toFixed(3)+'s';block.setAttribute('aria-label',block.title);block.tabIndex=0;
+            block.addEventListener('focus',()=>{node.querySelector('p').textContent=block.title;});
+            const start=Math.max(phrase.startMs,entry.startMs),end=Math.min(phrase.endMs,entry.endMs),span=phrase.endMs-phrase.startMs||1;block.style.left=(100*(start-phrase.startMs)/span)+'%';block.style.width=(100*(end-start)/span)+'%';block.style.setProperty('--effect-color',effectColors[entry.kind]||effectColors.blank);block.style.setProperty('--effect-before',effectColors[entry.beforeKind]||effectColors.blank);rail.append(block);}
+          line.append(rail);canvas.append(line);}
+        const head=document.createElement('i');head.className='lvx-effect-track-head';head.setAttribute('aria-hidden','true');canvas.append(head);
+        node.querySelector('p').textContent=projection.missingTempo?'Set BPM to position beat effects. Word effects remain shown.':'Striped = this pass · outline = overwriting · hover for exact times';
+        node._lvxTrackCache={score,phrase,marks:performanceTake.marks,count:performanceTake.marks.length,last,input:effectGesture.input,map:tempo.map};
+      }
+      const position=(now-phrase.startMs)/(phrase.endMs-phrase.startMs||1),head=node.querySelector('.lvx-effect-track-head');head.hidden=position<0||position>1;head.style.left=`calc(66px + (100% - 66px) * ${clamp(position,0,1)})`;
+      for(const block of node.querySelectorAll('.lvx-effect-track-block')){block.dataset.writing=String(block.dataset.trackEffect==='true'&&writeIds.has(block.dataset.unit));block.classList.toggle('lvx-at-playhead',now>=Number(block.dataset.start)&&now<Number(block.dataset.end));}
+      if(performanceTake.armed&&position>=0&&position<=1){const scroller=node.querySelector('.lvx-effect-track-scroll'),x=66+(node.querySelector('.lvx-effect-track-canvas').clientWidth-66)*position;if(x<scroller.scrollLeft+72||x>scroller.scrollLeft+scroller.clientWidth-32)scroller.scrollLeft=Math.max(0,x-scroller.clientWidth*.45);}
+    }
+  }
   function refreshEffectLive() {
     const box=syncPanel.querySelector('.lvx-effect-live');if(!box)return;
     const target=performanceTake.armed?activeEffectTarget():null;
@@ -2438,6 +2510,7 @@
     box.querySelector('span').textContent=target?`${syncButton(performanceTake.clock==='beat'?'beat-target':'effect-scope').selectedOptions[0].text} · “${target.text}”`:performanceTake.armed?'Rest or overlap · nothing to overwrite':'Start playback, then hold Space over the lyrics you want to change.';
     syncPanel.querySelector('.lvx-effect-status').textContent=`${performanceTake.marks.length} edits in this pass · ${performanceTake.armed?'Release Space to listen · Enter stops':'Stop adds edits to preview; Save timings keeps them'}`;
     syncButton('effect-hold').setAttribute('aria-pressed',String(writing));
+    refreshEffectTracks();
   }
   async function clearEffectsTrack() {
     if(syncButton('effect-clear-track').disabled)return;
@@ -2469,7 +2542,7 @@
     syncButton('effect-hold').disabled=!active||timing.busy;
     syncButton('effect-clear-track').disabled=timing.busy||active||Boolean(effectGesture.input)||Boolean(tapping.take)||timing.dirty||tapping.splitDirty||transcript.dirty||performanceTake.marks.length>0||!effectClearOperations(timing.draft?.score).length;
     refreshEffectLive();
-    effectPreviewBox.hidden=active;
+    effectPreviewBox.hidden=active||!effectPreview.type;
     if(active)stopEffectPreview();
   }
   async function startEffects() {
@@ -2545,6 +2618,8 @@
   syncButton('effect-start').textContent='▶ Start effects pass · Enter';syncButton('effect-stop').textContent='■ Stop · Enter';
   const effectHold=document.createElement('button');effectHold.dataset.sync='effect-hold';effectHold.textContent='Hold to overwrite · Space';effectHold.type='button';effectHold.setAttribute('aria-pressed','false');syncButton('effect-stop').after(effectHold);
   const effectLive=document.createElement('div');effectLive.className='lvx-effect-live';effectLive.innerHTML='<strong></strong><span></span><small>Space = blank · Space + 1–6 = effect</small>';syncPanel.querySelector('.lvx-effect-pads').before(effectLive);
+  effectLive.after(createEffectTrack('effects'));
+  for(const pad of syncPanel.querySelectorAll('.lvx-effect-pads [data-effect]'))pad.style.setProperty('--effect-color',effectColors[pad.dataset.effect]);
   const effectClear=document.createElement('button');effectClear.dataset.sync='effect-clear-track';effectClear.type='button';effectClear.textContent='Clear effects track…';syncButton('effect-discard').after(effectClear);
   effectClear.onclick=clearEffectsTrack;
   effectHold.addEventListener('pointerdown',event=>{if(event.button!==0||effectHold.disabled)return;event.preventDefault();effectHold.setPointerCapture(event.pointerId);beginEffectGesture('pointer');});
@@ -2838,6 +2913,7 @@
     timingWorkspace.view=view;syncPanel.dataset.workspace=view;
     for(const tab of timingWorkspace.tabs?.children||[]){const active=tab.dataset.workspace===view;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;}
     for(const panel of syncPanel.querySelectorAll('[data-workspace-page]'))panel.hidden=panel.dataset.workspacePage!==view;
+    refreshEffectTracks();
   }
   function buildTimingWorkspace(){
     const tabs=document.createElement('div');tabs.className='lvx-workspace-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Timing workspace');timingWorkspace.tabs=tabs;
@@ -2846,6 +2922,7 @@
       const button=document.createElement('button');button.type='button';button.textContent=label;button.dataset.workspace=id;button.id='lvx-workspace-tab-'+id;button.setAttribute('role','tab');button.setAttribute('aria-controls','lvx-workspace-'+id);button.onclick=()=>setTimingWorkspace(id);tabs.append(button);
       const pane=document.createElement('section');pane.dataset.workspacePage=id;pane.id='lvx-workspace-'+id;pane.setAttribute('role','tabpanel');pane.setAttribute('aria-labelledby',button.id);panes[id]=pane;
     }
+    panes.review.append(createEffectTrack('review'));
     tabs.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;const buttons=[...tabs.children].filter(b=>!b.disabled),at=buttons.indexOf(document.activeElement);if(at<0)return;event.preventDefault();const n=event.key==='Home'?0:event.key==='End'?buttons.length-1:(at+(event.key==='ArrowRight'?1:-1)+buttons.length)%buttons.length;buttons[n].click();buttons[n].focus();};
     syncPanel.querySelector('header').after(tabs);syncPanel.querySelector('footer').before(...Object.values(panes));
     const capture=syncPanel.querySelector('.lvx-tap-panel'),effects=syncPanel.querySelector('.lvx-effect-panel'),beat=syncPanel.querySelector('.lvx-tempo-panel');
@@ -2877,6 +2954,7 @@
   const stagePanel=document.createElement('section');stagePanel.className='lvx-stage-edit-panel';stagePanel.hidden=true;stagePanel.setAttribute('aria-label','Stage Edit');
   stagePanel.innerHTML='<header><strong>Stage Edit</strong><span>Draw where a phrase belongs.</span><button type="button" data-stage="done">Done</button></header><div class="lvx-stage-edit-row"><label>Phrase<select data-stage="phrase" aria-label="Stage phrase"></select></label><button type="button" data-stage="seek">Rewind phrase</button><button type="button" data-stage="play">Play / pause</button><button type="button" data-stage="draw">Draw region</button><button type="button" data-stage="remove">Clear region</button></div><div class="lvx-stage-edit-row"><label>From · s<input data-stage="start" aria-label="Region start seconds" type="number" min="0" step="0.001"></label><label>To · s<input data-stage="end" aria-label="Region end seconds" type="number" min="0" step="0.001"></label><button type="button" data-stage="interval">Use interval</button><button type="button" data-stage="revert" hidden>Revert interval</button><button type="button" data-stage="undo">Undo edit</button><button type="button" data-stage="save">Save score</button></div><details><summary>Word appearance <span>Look · gesture</span></summary><div class="lvx-stage-edit-row"><label>Word<select data-stage="word" aria-label="Stage word"></select></label><label>Look<select data-stage="look" aria-label="Word look"></select></label><label>Gesture<select data-stage="motion" aria-label="Word gesture"></select></label></div></details><p data-stage="status" role="status">Changes stay in your score preview until Save.</p>';
   const stageControl=name=>stagePanel.querySelector(`[data-stage="${name}"]`);
+  stagePanel.querySelector('details').before(createEffectTrack('stage'));
   function stagePhrase(){return timing.draft?.score.phrases.find(p=>p.id===stageEdit.phraseId);}
   function selectedRegion(){return timing.draft?.score.stageRegions?.find(r=>r.id===stageEdit.regionId)||null;}
   function stageMessage(text,error=false){const node=stageControl('status');node.textContent=text;node.dataset.error=String(error);}
@@ -2905,7 +2983,7 @@
     const word=p.words.find(w=>w.id===stageEdit.wordId);stageControl('look').value=word?.appearance?.look||'';stageControl('motion').value=word?.appearance?.motion??'';
     for(const button of stagePanel.querySelectorAll('button,select,input'))button.disabled=stageEditBusy();stageControl('remove').disabled=stageEditBusy()||stageEdit.fieldsDirty||!region;stageControl('undo').disabled=stageEditBusy()||stageEdit.fieldsDirty||!timing.draft.undoScores?.length;
     for(const name of ['phrase','word','look','motion'])stageControl(name).disabled=stageEditBusy()||stageEdit.fieldsDirty;stageControl('revert').hidden=!stageEdit.fieldsDirty;
-    paintStageBox();state.scoreSignature='';renderScore(getMediaTimeMs());
+    paintStageBox();state.scoreSignature='';renderScore(getMediaTimeMs());refreshEffectTracks();
   }
   function paintStageBox(){const r=stageEdit.drag?.rect||selectedRegion()?.rect||{x:.1,y:.2,width:.8,height:.55};Object.assign(stageBox.style,{left:r.x*100+'%',top:r.y*100+'%',width:r.width*100+'%',height:r.height*100+'%'});stageSurface.classList.toggle('lvx-drawing-region',stageEdit.drawing);stageControl('draw').setAttribute('aria-pressed',String(stageEdit.drawing));}
   async function stageOperation(operation){
@@ -4180,6 +4258,7 @@
             sampleEffectGesture();refreshEffectLive();
           }
         }
+        if(stageEdit.active||!syncPanel.hidden&&timingWorkspace.view==='review')refreshEffectTracks();
         if (!syncPanel.hidden) syncPanel.querySelector('.lvx-sync-clock').textContent = `${(mediaMs / 1000).toFixed(3)}s · ${media?.paused ? 'paused' : 'playing'}`;
         if (performance.now() - state.lastClockSent > 100) {
           state.lastClockSent = performance.now();
