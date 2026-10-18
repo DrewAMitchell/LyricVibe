@@ -33,12 +33,15 @@
 #lvx-root .lvx-sync-panel header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 #lvx-root .lvx-sync-eyebrow { color: #b8c59f; font-size: 10px; letter-spacing: .13em; font-weight: 700; }
 #lvx-root .lvx-sync-panel h2 { font-size: 23px; font-weight: 600; margin: 3px 0 0; line-height: 1.2; }
+#lvx-root dialog.lvx-transcript-editor button,
 #lvx-root .lvx-sync-panel button {
   appearance: none; background: #282d25; color: #f3f3e9; border: 1px solid #4c5345;
   border-radius: 6px; min-height: 36px; padding: 7px 10px; cursor: pointer;
   font: 600 12px/1.3 'Segoe UI', Arial, sans-serif; white-space: nowrap;
 }
+#lvx-root dialog.lvx-transcript-editor button:hover:not(:disabled),
 #lvx-root .lvx-sync-panel button:hover:not(:disabled) { background: #384030; border-color: #b7c29e; }
+#lvx-root dialog.lvx-transcript-editor button:disabled,
 #lvx-root .lvx-sync-panel button:disabled { opacity: .42; cursor: default; }
 #lvx-root .lvx-sync-panel :focus-visible { outline: 2px solid #d9ecac; outline-offset: 3px; }
 #lvx-root details > summary { list-style:none; display:flex; align-items:center; gap:8px; min-height:44px; cursor:pointer; }
@@ -2328,7 +2331,7 @@
 #lvx-root .lvx-event-counts label[data-review="true"]{color:#f2c879}
 #lvx-root .lvx-event-review .lvx-sync-hint{overflow-wrap:anywhere}
 /* Lyrics text popout. */
-#lvx-root dialog.lvx-transcript-editor{width:min(720px,92vw);max-height:86vh;padding:14px 16px;border:1px solid #58606a;border-radius:8px;background:#1d2126;color:#e8ecef;overflow:auto}
+#lvx-root dialog.lvx-transcript-editor{pointer-events:auto;width:min(720px,92vw);max-height:86vh;padding:14px 16px;border:1px solid #58606a;border-radius:8px;background:#1d2126;color:#e8ecef;overflow:auto}
 #lvx-root dialog.lvx-transcript-editor::backdrop{background:rgba(0,0,0,.55)}
 #lvx-root dialog.lvx-transcript-editor h3{margin:0 0 6px;font-size:15px}
 #lvx-root dialog.lvx-transcript-editor textarea{width:100%;min-height:320px;font:13px/1.5 ui-monospace,Consolas,monospace;box-sizing:border-box;white-space:pre;overflow-wrap:normal;overflow-x:auto;background:#111417;color:#e8ecef;border:1px solid #58606a;border-radius:6px;padding:8px}

@@ -663,7 +663,9 @@
     <footer><button data-sync="undo">↶ Undo saved change</button><span class="lvx-save-wrap" tabindex="-1"><span class="lvx-save-tooltip" role="tooltip" id="lvx-save-reason"></span><button data-sync="apply" class="lvx-sync-primary" aria-describedby="lvx-save-reason"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/></svg> Save timings</button></span></footer>`;
   const syncNotice = syncPanel.querySelector('.lvx-sync-notice');
   const syncText = syncPanel.querySelector('textarea[aria-label="Exact word timings in milliseconds"]');
-  const syncButton = name => syncPanel.querySelector(`[data-sync="${name}"]`);
+  const transcriptDialog = syncPanel.querySelector(".lvx-transcript-editor");
+  const transcriptOpen = syncPanel.querySelector('[data-sync="transcript-open"]');
+  const syncButton = name => name === "transcript-open" ? transcriptOpen : syncPanel.querySelector(`[data-sync="${name}"]`) || transcriptDialog.querySelector(`[data-sync="${name}"]`);
   const toggleButtons=new Map();
   for(const input of syncPanel.querySelectorAll('input[type=checkbox]')){
     const label=input.closest('label'),host=document.createElement('div'),button=document.createElement('button');
@@ -901,7 +903,7 @@
     refreshTimingPanel();
   }, true);
   function transcriptReview(){
-    const list=syncPanel.querySelector('.lvx-transcript-changes'),area=syncButton('transcript-text');list.replaceChildren();
+    const list=transcriptDialog.querySelector('.lvx-transcript-changes'),area=syncButton('transcript-text');list.replaceChildren();
     if(!timing.draft)return null;
     try{
       const result=LvTranscriptText.diff(timing.draft.score,area.value);
@@ -917,7 +919,7 @@
     const missing=typeof LvTranscriptText==='undefined';syncButton('transcript-open').hidden=missing;if(missing)return;
     const draft=timing.draft,binding=draft?`${draft.token}:${draft.previewRevision}`:null;
     if(!transcript.dirty&&draft&&transcript.shownFor!==binding){area.value=LvTranscriptText.toText(draft.score);transcript.shownFor=binding;}
-    syncButton('transcript-apply').disabled=timing.busy||!draft||!transcript.dirty||tapPending()||countIn.active||countIn.preparing;syncButton('transcript-apply').textContent=tapPending()?'Stop or keep the take before applying':'Apply to preview';syncButton('transcript-open').disabled=!draft;area.disabled=timing.busy||!draft;
+    syncButton('transcript-apply').disabled=timing.busy||!draft||!transcript.dirty||tapPending()||countIn.active||countIn.preparing;syncButton('transcript-apply').textContent=tapPending()?'Stop or keep the take before applying':'Apply to preview';syncButton('transcript-open').disabled=timing.busy||(!state.score&&!state.plainLyrics?.text);area.disabled=timing.busy||!draft;
   }
   // Keep a re-spelled word's syllable timings: split the new text into the same count.
   async function respellSyllables(operations){
@@ -956,7 +958,7 @@
       const {extra,notes}=await respellSyllables(result.operations);
       const response=await timingRequest('LV_TIMING_TUNE',{operations:[...result.operations,...extra],allowProtected:true});
       timing.draft=response.preview;timing.auditioned=false;state.scoreSignature='';
-      transcript.dirty=false;transcript.shownFor=null;syncPanel.querySelector('.lvx-transcript-editor').close();
+      transcript.dirty=false;transcript.shownFor=null;transcriptDialog.close();
       setSyncNotice(`${result.changes.length} lyric changes are in the preview${extra.length?` · ${extra.length} words kept their syllable timings`:''}${notes.length?' · '+notes.join('; '):''}. Undo preview reverts; Save timings keeps them.`);
     }catch(error){setSyncNotice(error.message,'error');}finally{timing.busy=false;refreshTimingPanel();}
   }
@@ -2388,12 +2390,23 @@
   let transcriptTimer=null;
   syncButton('transcript-text').addEventListener('input',()=>{transcript.dirty=true;refreshTranscriptEditor();clearTimeout(transcriptTimer);transcriptTimer=setTimeout(()=>void transcriptReview(),300);});
   syncButton('transcript-apply').addEventListener('click',()=>void applyTranscript());
-  syncButton('transcript-open').addEventListener('click',()=>{
-    const dialog=syncPanel.querySelector('.lvx-transcript-editor'),area=syncButton('transcript-text');
-    transcript.shownFor=transcript.dirty?transcript.shownFor:null;refreshTranscriptEditor();dialog.showModal();
-    if(!transcript.dirty){area.select();syncPanel.querySelector('.lvx-transcript-changes').replaceChildren();}
-  });
-  syncButton('transcript-close').addEventListener('click',()=>syncPanel.querySelector('.lvx-transcript-editor').close());
+  async function openTranscriptEditor(){
+    if(timing.busy||(!state.score&&!state.plainLyrics?.text))return;
+    try{
+      if(!timing.draft){
+        timing.busy=true;refreshTranscriptEditor();
+        const current=await timingRequest('LV_TIMING_CURRENT');
+        timing.draft=(current.preview?current:await timingRequest('LV_TIMING_PREPARE',{fromSaved:true})).preview;
+        timing.view='proposed';
+      }
+      timing.busy=false;
+      const area=syncButton('transcript-text');
+      transcript.shownFor=transcript.dirty?transcript.shownFor:null;refreshTranscriptEditor();transcriptDialog.showModal();
+      if(!transcript.dirty){area.select();transcriptDialog.querySelector('.lvx-transcript-changes').replaceChildren();}
+    }catch(error){setHud(error.message,true,true);}finally{timing.busy=false;refreshTranscriptEditor();}
+  }
+  syncButton('transcript-open').addEventListener('click',openTranscriptEditor);
+  syncButton('transcript-close').addEventListener('click',()=>transcriptDialog.close());
   bindTempoPress(syncButton('tempo-tap'),()=>void tapTempo());
   syncButton('tap-undo').addEventListener('click', () => { if (tapping.take) { const live=streamTake(tapping.take)&&tapping.take.status==='armed';tapping.take = eventTake(tapping.take)?LvTapTiming.undoEvent(tapping.take):wordTake(tapping.take)?LvTapTiming.undoWordHold(tapping.take):live?LvTapTiming.undo(tapping.take):LvTapTiming.stop(LvTapTiming.undo(tapping.take)); tapping.followSeek=false;tapping.seekPhraseId=null;tapping.correctionUndo = []; if(!rawTake(tapping.take))followTapUnit();state.scoreSignature=''; } refreshTimingPanel(); });
   syncButton('tap-use').addEventListener('click', useTapTake);
@@ -2976,8 +2989,8 @@
     gap.append(syncButton('gap-beats').closest('label'),syncButton('gap-use'),syncButton('gap-default'),gapHint);effects.append(gap);
     const exact=syncText.closest('details');exact.querySelector('summary').firstChild.nodeValue='Exact word timings ';panes.review.append(exact);
     for(const selector of ['.lvx-event-review','.lvx-mark-correction','.lvx-tap-timeline','.lvx-syllable-review'])panes.review.append(syncPanel.querySelector(selector));
-    const reviewActions=document.createElement('div');reviewActions.className='lvx-review-actions';reviewActions.append(syncButton('events-restore'),syncButton('transcript-open'),syncButton('light-editor'));panes.review.prepend(reviewActions);reviewActions.append(syncButton('retime-flag'));syncButton('retime-flag').textContent='Flag for later';
-    syncPanel.querySelector('footer').before(syncPanel.querySelector('.lvx-transcript-editor'));
+    const reviewActions=document.createElement('div');reviewActions.className='lvx-review-actions';reviewActions.append(syncButton('events-restore'),syncButton('light-editor'));panes.review.prepend(reviewActions);reviewActions.append(syncButton('retime-flag'));syncButton('retime-flag').textContent='Flag for later';
+    editGroup.insertBefore(transcriptOpen,quickSyncButton);
     const takeActions=syncButton('tap-use').parentElement;panes.review.append(takeActions);
     const reviewHint=document.createElement('p');reviewHint.className='lvx-studio-note';reviewHint.textContent='Review the last recording, correct a mark or open the full editor. Your take and preview stay intact when you switch views.';panes.review.prepend(reviewHint);
     const housekeeping=syncButton('export').parentElement;const advanced=document.createElement('details');advanced.className='lvx-review-files';advanced.innerHTML='<summary>Files & reset <span>Export or discard</span></summary>';advanced.append(housekeeping);panes.review.append(advanced);
@@ -3065,7 +3078,7 @@
     stageSurface.addEventListener('pointermove',move);stageSurface.addEventListener('pointerup',finish);stageSurface.addEventListener('pointercancel',finish);
   });
   stage.addEventListener('click',event=>{if(!stageEdit.active||stageEditBusy()||stageEdit.fieldsDirty)return;const word=event.target.closest('[data-word]'),phrase=event.target.closest('[data-phrase]');if(!word||!phrase)return;stageEdit.phraseId=phrase.dataset.phrase;refreshStageEdit(true);stageEdit.wordId=word.dataset.word;refreshStageEdit();stagePanel.querySelector('details').open=true;});
-  root.append(viewport, preview, progress, sidebar, themePicker, shortcutsPanel, syncPanel, errorPanel,controlsNotice,stagePanel);
+  root.append(viewport, preview, progress, sidebar, themePicker, shortcutsPanel, syncPanel, errorPanel,controlsNotice,stagePanel,transcriptDialog);
   function mountRoot() {
     const surface = document.fullscreenElement;
     if (surface && !['VIDEO', 'AUDIO'].includes(surface.tagName)) surface.appendChild(root);
