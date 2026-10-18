@@ -29,6 +29,7 @@
     }
   }
   function fail(code, message) { throw new ScoreError(code, message); }
+  function validEmoji(value){return typeof value==='string'&&(value===''||value.length<=32&&/\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(value)&&!/[^\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Modifier}\u200d\ufe0f\u20e3\p{M}]/u.test(value)&&[...new Intl.Segmenter('en',{granularity:'grapheme'}).segment(value)].length===1);}
   function validReveal(reveal) {
     return reveal === null || (reveal && typeof reveal === "object" && reveal.type === "sweep" && REVEAL_EASINGS.has(reveal.easing));
   }
@@ -331,7 +332,7 @@
         if(word.displayMode!==undefined&&word.displayMode!=='whole')bad('invalid word displayMode');
         if(word.appearance!==undefined){
           const a=word.appearance;
-          if(!a||typeof a!=='object'||Array.isArray(a)||Object.keys(a).some(k=>!['look','motion','art'].includes(k))||!Object.keys(a).length||a.look!==undefined&&!DISPLAY_CATALOG.looks.includes(a.look)||a.motion!==undefined&&!DISPLAY_CATALOG.motions.includes(a.motion)||a.art!==undefined&&!DISPLAY_CATALOG.wordArt.includes(a.art))bad('invalid word appearance');
+          if(!a||typeof a!=='object'||Array.isArray(a)||Object.keys(a).some(k=>!['look','motion','art','emoji'].includes(k))||!Object.keys(a).length||a.look!==undefined&&!DISPLAY_CATALOG.looks.includes(a.look)||a.motion!==undefined&&!DISPLAY_CATALOG.motions.includes(a.motion)||a.art!==undefined&&!DISPLAY_CATALOG.wordArt.includes(a.art)||a.emoji!==undefined&&!validEmoji(a.emoji))bad('invalid word appearance');
         }
         if (word.spokenText !== undefined && (typeof word.spokenText !== "string" || !word.spokenText.trim() || word.spokenText.length > 256 || word.spokenText.includes("|"))) bad("invalid spokenText");
         for (const effect of word.effects) if (!effect || !EFFECTS.has(effect.type) || typeof effect.strength !== "number" || !Number.isFinite(effect.strength) || effect.strength < 0 || effect.strength > 1 || effect.axis !== undefined && (effect.type !== "groove" || !["horizontal","vertical"].includes(effect.axis))) bad("invalid effect");
@@ -824,5 +825,5 @@
       }))};
     });
   }
-  return { VERSION, DISPLAY_CATALOG, stageRegionAt, ScoreError, mediaKey, parseLrc, parseVocalText, doubledText, displayToken, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, phraseTimingCoverage, timingCoverage };
+  return { VERSION, DISPLAY_CATALOG, validEmoji, stageRegionAt, ScoreError, mediaKey, parseLrc, parseVocalText, doubledText, displayToken, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, phraseTimingCoverage, timingCoverage };
 });

@@ -1,5 +1,7 @@
 /* Deterministic presentation only: no score edits or wall-clock ownership. */
 (function(root){
+  const emojiApi=typeof module==='object'&&module.exports?require('./emoji-tags.js'):root.LvEmojiTags;
+  const scoreApi=typeof module==='object'&&module.exports?require('./score-core.js'):root.LvScore;
   const clamp=x=>Math.max(0,Math.min(1,x));
   const median=values=>{const sorted=values.filter(n=>n>0&&Number.isFinite(n)).sort((a,b)=>a-b);return sorted.length?sorted[Math.floor(sorted.length/2)]:0;};
   const token=text=>String(text).toLowerCase().replace(/[^a-z']/g,'');
@@ -8,7 +10,7 @@
   const wordRuleEffects=Object.freeze({rays:'Sun rays',sunglasses:'Lifting sunglasses',fire:'Fire texture',bills:'Flying dollar bills',champagne:'Champagne pop',glow:'Glow',echo:'Echo',glitch:'Glitch',groove:'Groove',shake:'Shake',pulse:'Pulse'});
   const starter=(words,motion,...effects)=>words.split('|').map(word=>({word,motion,effects}));
   const defaultWordRules=Object.freeze([
-    ...starter('baby','rock'),...starter('air|flow','float'),...starter('bright|shine|sunshine','off','rays'),...starter('cool','off','sunglasses'),
+    ...starter('baby','rock'),...starter('air|flow|levitate','float'),...starter('bright|shine|sunshine','off','rays'),...starter('cool','off','sunglasses'),
     ...starter('fire|burn|burning|flame|flames|reignite','off','fire'),...starter('lay down|fall|falling|fell','tip'),
     ...starter('money|cash','off','bills'),...starter('champagne','off','champagne'),
     ...starter('glow|glowing','off','glow'),...starter('echo|echoes','off','echo'),...starter('dance|dancing','flex'),...starter('jump|bounce','bounce')
@@ -21,12 +23,13 @@
       if(!word||word.length>64||word.split(' ').length>4)throw Error('Enter one word or a phrase of up to four words (64 characters).');
       if(seen.has(word))throw Error('A rule for “'+word+'” already exists.');seen.add(word);
       if(!Object.hasOwn(wordRuleMotions,rule.motion)||!Array.isArray(rule.effects)||rule.effects.some(effect=>!Object.hasOwn(wordRuleEffects,effect)))throw Error('Choose a supported motion and effects.');
-      return {word,motion:rule.motion,effects:[...new Set(rule.effects)]};
+      if(rule.emoji!==undefined&&!scoreApi.validEmoji(rule.emoji))throw Error('Choose one emoji, Automatic, or No emoji.');
+      return {word,motion:rule.motion,effects:[...new Set(rule.effects)],...(rule.emoji!==undefined?{emoji:rule.emoji}:{})};
     });
   }
   function validateWordRuleSets(value){
     if(!value||value.version!==1||!Array.isArray(value.sets)||!value.sets.length||value.sets.length>20)throw Error('Keep between 1 and 20 word-effect sets.');
-    const ids=new Set(),names=new Set();const sets=value.sets.map(set=>{const name=String(set.name||'').trim();if(!name||name.length>48||names.has(name.toLowerCase()))throw Error('Use a unique set name, up to 48 characters.');if(typeof set.id!=='string'||!/^[a-zA-Z0-9_-]{1,64}$/.test(set.id)||ids.has(set.id))throw Error('Invalid word-effect set identity.');ids.add(set.id);names.add(name.toLowerCase());return {id:set.id,name,rules:validateWordRules(set.rules)};});
+    const ids=new Set(),names=new Set();const sets=value.sets.map(set=>{const name=String(set.name||'').trim();if(!name||name.length>48||names.has(name.toLowerCase()))throw Error('Use a unique set name, up to 48 characters.');if(typeof set.id!=='string'||!/^[a-zA-Z0-9_-]{1,64}$/.test(set.id)||ids.has(set.id))throw Error('Invalid word-effect set identity.');ids.add(set.id);names.add(name.toLowerCase());if(set.emojiTags!==undefined&&typeof set.emojiTags!=='boolean')throw Error('Emoji tags must be on or off.');return {id:set.id,name,rules:validateWordRules(set.rules),...(set.emojiTags!==undefined?{emojiTags:set.emojiTags}:{})};});
     if(!ids.has(value.activeId))throw Error('Choose an existing word-effect set.');return {version:1,activeId:value.activeId,sets};
   }
   function wordRuleAt(cue,now,{reduced=false}={}){
@@ -54,8 +57,8 @@
       const gap=next?next.start-p.end:Math.max(0,(score.source?.durationMs??p.end)-(score.offsetMs||0)-p.end);
       const fast=p.rate>=4.5||p.rate>=3&&p.rate>=typical*1.3;
       const perSyllable=median(p.words.map(w=>(w.endMs-w.startMs)/syllableCount(w)));
-      const matches=new Map();
-      for(let i=0;i<p.words.length;i++){if(matches.has(i))continue;for(let count=Math.min(4,p.words.length-i);count>=1;count--){const key=p.words.slice(i,i+count).map(w=>ruleWord(w.text)).join(' '),rule=ruleMap.get(key);if(rule){for(let j=0;j<count;j++)matches.set(i+j,rule);break;}}}
+      const matches=new Map(),matchEnds=new Map();
+      for(let i=0;i<p.words.length;i++){if(matches.has(i))continue;for(let count=Math.min(4,p.words.length-i);count>=1;count--){const key=p.words.slice(i,i+count).map(w=>ruleWord(w.text)).join(' '),rule=ruleMap.get(key);if(rule){for(let j=0;j<count;j++){matches.set(i+j,rule);matchEnds.set(i+j,i+count-1);}break;}}}
       p.words.forEach((word,i)=>{
         const count=syllableCount(word),duration=word.endMs-word.startMs;
         const units=word.syllables?.length?word.syllables:[word];
@@ -64,8 +67,9 @@
         const direction=text==='up'?[0,-1]:text==='down'?[0,1]:['left','right'].includes(text)&&previous.includes('the')&&previous.includes('to')?[text==='left'?-1:1,0]:null;
         const impact=fast&&gap>=550&&i===p.words.length-1;
         const rule=matches.get(i);
+        const emoji=word.appearance?.emoji!==undefined?word.appearance.emoji:rule?.emoji!==undefined?(i===matchEnds.get(i)?rule.emoji:''):(emojiApi?.match(word.text)?.emoji||'');
         const reasons=[...(sustained.length?['sustained']:[]),...(impact?['fast-then-stop']:[]),...(direction?['direction-'+text]:[]),...(rule?['word-rule:'+rule.word]:[])];
-        cues[word.id]={doubled:!!(word.doubled||p.phrase.doubled),wordId:word.id,phraseId:p.phrase.id,startMs:word.startMs,endMs:word.endMs,
+        cues[word.id]={emoji,doubled:!!(word.doubled||p.phrase.doubled),wordId:word.id,phraseId:p.phrase.id,startMs:word.startMs,endMs:word.endMs,
           weight:(lightWords.has(text)?.78:1)+Math.min(.25,text.length*.018)+Math.min(.16,(count-1)*.06)+(impact?.4:0)+(sustained.length?.18:0),
           sustained:sustained.map(u=>({id:u.id,startMs:u.startMs,endMs:u.endMs})),impact,direction,reasons,...(rule?{rule}:{}),
           evidence:{phraseSyllablesPerSecond:p.rate,pauseAfterMs:gap,syllableBasis:word.syllables?.length?'authored':'estimated-from-spelling'}};
@@ -263,20 +267,22 @@
     return [{start:0,end:words.length,slots}];
   }
   // The newest word keeps a fixed readable size. Only accumulated history compresses.
-  function vinylTrack(score,measure){
+  const emojiSegments=new Intl.Segmenter('en',{granularity:'grapheme'}),glyphParts=text=>[...emojiSegments.segment(text)].map(s=>s.segment);
+  function vinylTrack(score,measure,{emojiTags=false,cues={}}={}){
     const tokens=[];let order=0;
     for(const phrase of score.phrases){
       const words=phrase.words.filter(word=>!word.excluded);if(!words.length)continue;
+      const parts=words.map(word=>({word,text:String(word.text).trim().toUpperCase(),tag:emojiTags?cues[word.id]?.emoji||'':''}));
       if(score.lanes?.find(lane=>lane.id===phrase.laneId)?.role==='backing'){
         // One phrase enters and leaves the shared feed as a single block. Keep
         // the source words and their timing intact; this is presentation only.
-        const text=words.map(word=>String(word.text).trim()).join(' ').replace(/^\((.*)\)$/,'$1');
-        let at=1;const doubledRanges=words.map(word=>{const start=at;at+=Array.from(String(word.text).trim().toUpperCase()).length+1;return word.doubled?[start,at-1]:null;}).filter(Boolean);
+        const text=parts.map(p=>p.text+(p.tag?' '+p.tag:'')).join(' ').replace(/^\((.*)\)$/,'$1');
+        let at=1;const doubledRanges=parts.map(p=>{const start=at,end=at+glyphParts(p.text).length;at+=glyphParts(p.text+(p.tag?' '+p.tag:'')).length+1;return p.word.doubled?[start,end]:null;}).filter(Boolean);
         tokens.push({doubled:!!phrase.doubled,doubledRanges,id:words[0].id,wordIds:words.map(word=>word.id),phraseId:phrase.id,laneId:phrase.laneId,backing:true,text:'('+text.toUpperCase()+')',startMs:Math.min(...words.map(w=>w.startMs)),endMs:Math.max(...words.map(w=>w.endMs)),order:order++});
-      }else for(const word of words)tokens.push({doubled:!!(phrase.doubled||word.doubled),id:word.id,phraseId:phrase.id,laneId:phrase.laneId,text:String(word.text).trim().toUpperCase(),startMs:word.startMs,endMs:word.endMs,order:order++});
+      }else for(const word of words)tokens.push({doubled:!!(phrase.doubled||word.doubled),id:word.id,phraseId:phrase.id,laneId:phrase.laneId,text:String(word.text).trim().toUpperCase()+(emojiTags&&cues[word.id]?.emoji?' '+cues[word.id].emoji:''),startMs:word.startMs,endMs:word.endMs,order:order++});
     }
     tokens.sort((a,b)=>a.startMs-b.startMs||a.order-b.order);let total=0;
-    for(const token of tokens){let x=0;token.chars=Array.from(token.text).map((text,index)=>{const width=Math.max(.05,measure(text));const char={text,center:x+width/2,width,doubled:token.doubled||token.doubledRanges?.some(([start,end])=>index>=start&&index<end)||false};x+=width+.015;return char;});token.offset=total;token.textWidth=x;token.width=x+Math.max(.35,measure(' '));token.center=total+x/2;total+=token.width;}
+    for(const token of tokens){let x=0;token.chars=glyphParts(token.text).map((text,index)=>{const emoji=emojiTags&&/\p{Extended_Pictographic}/u.test(text),width=Math.max(.05,measure(text))*(emoji?.55:1);const char={text,emoji,center:x+width/2,width,doubled:token.doubled||token.doubledRanges?.some(([start,end])=>index>=start&&index<end)||false};x+=width+.015;return char;});token.offset=total;token.textWidth=x;token.width=x+Math.max(.35,measure(' '));token.center=total+x/2;total+=token.width;}
     const decay=-Math.log(.78)/(2*Math.PI),capacity=Math.log(1/.18)/decay,entryFont=.21;
     // Integral of entryFont/(1+d/compression) gives the angle traveled. Capacity
     // affects distant history, never the font size of the word at the feed mouth.
@@ -298,7 +304,7 @@
       for(const ch of token.chars){
         const d=Math.max(0,age+token.textWidth/2-ch.center),winding=track.entryFont*track.compression*Math.log1p(d/track.compression),curveR=Math.exp(-track.decay*winding),curveA=-Math.PI/2-winding,curveFont=track.entryFont*curveR/(1+d/track.compression)*fit;
         const radius=centerR+(curveR-centerR)*flatten,font=centerFont+(curveFont-centerFont)*flatten,flatX=centerR*Math.cos(centerA)+(ch.center-token.textWidth/2)*centerFont,flatY=centerR*Math.sin(centerA),x=flatX+(curveR*Math.cos(curveA)-flatX)*flatten,y=flatY+(curveR*Math.sin(curveA)-flatY)*flatten-(token.feedRow*.25+(1-feed)*.48)*(1-handoff),angle=-Math.PI/2+(curveA+Math.PI/2)*flatten;
-        glyphs.push({wordId:token.id,doubled:ch.doubled,text:ch.text,radius,angle,font,x,y,current,feed:feed<1,top:handoff===0});
+        glyphs.push({wordId:token.id,emoji:ch.emoji,doubled:ch.doubled,text:ch.text,radius,angle,font:font*(ch.emoji?.55:1),x,y,current,feed:feed<1,top:handoff===0});
       }
     }
     return {head,words:started.flatMap(t=>t.wordIds||[t.id]),text:started.map(t=>t.text).join(' '),glyphs,pipeWidth:track.pipeWidth};
@@ -312,8 +318,8 @@
     const mouth=cy-R,pipeTop=Math.max(height*.025,mouth-R*.64),pipeHalf=R*frame.pipeWidth/2;
     const shade=ctx.createLinearGradient(0,pipeTop,0,mouth);shade.addColorStop(0,'rgba(245,240,231,.015)');shade.addColorStop(1,'rgba(245,240,231,.09)');ctx.fillStyle=shade;ctx.fillRect(cx-pipeHalf,pipeTop,pipeHalf*2,mouth-pipeTop);ctx.strokeStyle='#77736d';ctx.lineWidth=Math.max(1,R*.004);ctx.beginPath();for(const side of [-1,1]){ctx.moveTo(cx+side*pipeHalf,pipeTop);ctx.lineTo(cx+side*pipeHalf,mouth-R*.02);ctx.lineTo(cx+side*(pipeHalf+R*.045),mouth+R*.035);}ctx.stroke();ctx.strokeStyle=accent;ctx.lineWidth=Math.max(2,R*.009);ctx.beginPath();ctx.moveTo(cx-pipeHalf-R*.04,mouth+R*.045);ctx.lineTo(cx-pipeHalf+R*.04,mouth+R*.045);ctx.moveTo(cx+pipeHalf-R*.04,mouth+R*.045);ctx.lineTo(cx+pipeHalf+R*.04,mouth+R*.045);ctx.stroke();
     const atlas=ctx.__lvVinylGlyphs||(ctx.__lvVinylGlyphs=new Map());
-    for(const glyph of frame.glyphs){const color=glyph.current?ink:'#d0cbc3',key=color+'|'+glyph.text;let sprite=atlas.get(key);
-      if(!sprite){const tile=typeof OffscreenCanvas!=='undefined'?new OffscreenCanvas(1,1):ctx.canvas.ownerDocument.createElement('canvas'),brush=tile.getContext('2d');brush.font='800 100px Arial Narrow, Impact, sans-serif';tile.width=Math.ceil(brush.measureText(glyph.text).width)+12;tile.height=150;brush.font='800 100px Arial Narrow, Impact, sans-serif';brush.textAlign='center';brush.textBaseline='middle';brush.fillStyle=color;brush.fillText(glyph.text,tile.width/2,75);sprite=tile;if(atlas.size<512)atlas.set(key,sprite);}
+    for(const glyph of frame.glyphs){const color=glyph.current?ink:'#d0cbc3',key=color+'|'+Boolean(glyph.emoji)+'|'+glyph.text;let sprite=atlas.get(key);
+      if(!sprite){const tile=typeof OffscreenCanvas!=='undefined'?new OffscreenCanvas(1,1):ctx.canvas.ownerDocument.createElement('canvas'),brush=tile.getContext('2d');brush.font=glyph.emoji?'100px Segoe UI Emoji, sans-serif':'800 100px Arial Narrow, Impact, sans-serif';tile.width=Math.ceil(brush.measureText(glyph.text).width)+12;tile.height=150;brush.font=glyph.emoji?'100px Segoe UI Emoji, sans-serif':'800 100px Arial Narrow, Impact, sans-serif';brush.textAlign='center';brush.textBaseline='middle';brush.fillStyle=color;brush.fillText(glyph.text,tile.width/2,75);sprite=tile;if(atlas.size<512)atlas.set(key,sprite);}
       const scale=R*glyph.font/100;ctx.save();ctx.translate(cx+R*glyph.x,cy+R*glyph.y);ctx.rotate(glyph.angle+Math.PI/2);ctx.globalAlpha=glyph.top?1:.52+.48*glyph.radius;if(glyph.doubled&&glyph.current){const alpha=ctx.globalAlpha;ctx.globalAlpha*=.45;ctx.drawImage(sprite,-sprite.width*scale/2+6.5*scale,-72.5*scale,sprite.width*scale,150*scale);ctx.globalAlpha=alpha;}ctx.drawImage(sprite,-sprite.width*scale/2,-75*scale,sprite.width*scale,150*scale);ctx.restore();}
     ctx.restore();return frame;
   }

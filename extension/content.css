@@ -3053,3 +3053,15 @@
 #lvx-root .lvx-rule-preview-line { text-align:center; color:#fff6cf; font:800 58px/1.3 Arial,sans-serif; }
 #lvx-root .lvx-rule-preview-line > span { display:inline-block; }
 #lvx-root .lvx-rule-form > .lvx-rule-toolbar,#lvx-root .lvx-rule-status { grid-column:1/-1; margin:0; }
+
+/* Optional emoji tags reserve width and never join the sung text nodes. */
+#lvx-root .lvx-emoji-enable { display:flex;align-items:center;gap:8px;font:12px/1.5 system-ui;color:#dce8ec;padding:10px 0; }
+#lvx-root .lvx-emoji-enable input { accent-color:#c7dfa1; }
+#lvx-root .lvx-rule-emoji { display:grid;grid-template-columns:1fr 1fr;gap:8px; }
+#lvx-root .lvx-rule-emoji small { grid-column:1/-1;color:#abc2cd;line-height:1.5; }
+#lvx-root .lvx-rule-emoji select,#lvx-root .lvx-rule-emoji input { width:100%;min-width:0; }
+#lvx-root .lvx-word-has-emoji { position:relative;box-sizing:border-box;padding-inline-end:.55em; }
+#lvx-root .lvx-word-emoji { position:absolute;right:0;top:.15em;font:400 .46em/1 'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif;color:initial!important;-webkit-text-fill-color:initial;background:none;filter:none;text-shadow:none;letter-spacing:0;pointer-events:none; }
+#lvx-root .lvx-word-emoji::after { content:attr(data-emoji);color:initial!important;-webkit-text-fill-color:initial;background:none;filter:none;text-shadow:none; }
+#lvx-root .lvx-word-emoji[hidden] { display:none; }
+@media(max-width:600px){#lvx-root .lvx-rule-emoji {grid-template-columns:1fr;} }
