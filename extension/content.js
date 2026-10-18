@@ -98,7 +98,8 @@
   let overlayEnabled = true, resumeSyncPanel = false;
   var trackWatch = null;
   let navigationEditorOpen=false;
-  const observationFocused = () => overlayEnabled && !document.hidden && document.hasFocus();
+  const backgroundStage={enabled:false,revision:-1};
+  let observationFocused = () => overlayEnabled && (backgroundStage.enabled||!document.hidden&&document.hasFocus());
   const timing = { draft: null, view: 'proposed', phraseIndex: 0, dirty: false, busy: false, auditioned: false, priorLoop: null };
   const tapping = { take: null, wordId: null, binding: null, clockMs: null, rate: 1, audio: null, splitDirty: false, heldInput: null, cancelledSpace: false, reviewId: null, correctionUndo: [], listening: false, backAnchorMs: null, backIndex: null, syllableStartKey: null };
   const captureTracks={slots:new Map(),switching:false};
@@ -313,6 +314,21 @@
   const timingEffectsView=sidebarView('timing-effects','Effects','Timing · record phrase effects',()=>void openTimingView('effects'));
   const timingBeatView=sidebarView('timing-beat','Beat','Timing · set tempo and sections',()=>void openTimingView('beat'));
   const stageEditView=sidebarView('stage-edit','Stage Edit','Open Stage Edit for this video',()=>void openStageEdit().then(syncSidebarState));
+  function applyBackgroundStage(value){
+    if(!value||typeof value.enabled!=='boolean'||!Number.isInteger(value.revision)||value.revision<backgroundStage.revision)return;
+    backgroundStage.enabled=value.enabled;backgroundStage.revision=value.revision;
+    const button=root.querySelector('[data-sidebar-view=background-stage]');if(button){button.setAttribute('aria-pressed',String(value.enabled));button.textContent=value.enabled?'● Stage stays live':'Keep stage live';}
+    root.dataset.backgroundStage=String(value.enabled);trackWatch?.sync();if(state.active&&value.enabled)startLoop();
+  }
+  async function setBackgroundStage(enabled){
+    try{const result=await chrome.runtime.sendMessage({type:'LV_BACKGROUND_STAGE_SET',enabled});if(!result?.ok)throw Error(result?.error?.message||'Background stage could not change.');applyBackgroundStage(result);return result;}
+    catch(error){setHud(error.message,true,true);return {ok:false,error:{message:error.message}};}
+  }
+  function installBackgroundStage(){
+    if(!root.querySelector('[data-sidebar-view=background-stage]'))sidebarView('background-stage','Keep stage live','Keep this tab animating when unfocused; only one tab can hold this role',()=>void setBackgroundStage(!backgroundStage.enabled));
+    chrome.runtime.onMessage.addListener((message,sender,respond)=>{if(message?.type==='LV_BACKGROUND_STAGE_STATE'){applyBackgroundStage(message);respond({ok:true});}});
+    chrome.runtime.sendMessage({type:'LV_BACKGROUND_STAGE_GET'}).then(result=>{if(result?.ok)applyBackgroundStage(result);}).catch(()=>{});
+  }
   sidebarNav.append(sidebarPin,sidebarItems);
   const tempoControls=document.createElement('div');tempoControls.className='lvx-sidebar-tempo';tempoControls.setAttribute('role','group');tempoControls.setAttribute('aria-label','Beat timing');
   const tempoButton=document.createElement('button');tempoButton.className='lvx-theme-btn lvx-tempo-button';
@@ -3394,6 +3410,7 @@
      on ANY supported platform (YouTube Music, SoundCloud, Spotify, etc.) */
   trackWatch = setupTrackChangeObserver();
   trackWatch.sync();
+  installBackgroundStage();
 
   /* ══════════════════════════════════════
      MESSAGE LISTENER
@@ -4566,6 +4583,10 @@
   /* ══════════════════════════════════════
      MAIN PLAYBACK LOOP (improved sync)
      ══════════════════════════════════════ */
+  function schedulePlaybackFrame(tick){
+    if(backgroundStage.enabled&&document.hidden){state.backgroundTimer=setTimeout(tick,100);return 0;}
+    return requestAnimationFrame(tick);
+  }
   function startLoop() {
     cancelLoop();
     if(!observationFocused()||trackWatch?.loading())return;
@@ -4584,7 +4605,7 @@
           stage.textContent = '';
           state.auditionLoop = null;
           if (!syncPanel.hidden && !syncNotice.textContent.startsWith('The video changed')) { setSyncNotice('The video changed. Sync switches to this video as soon as its lyrics load; the other video’s unsaved preview is kept for when you go back.','warn'); refreshTimingPanel(); }
-          state.rafId = requestAnimationFrame(tick);
+          state.rafId = schedulePlaybackFrame(tick);
           return;
         }
         const media = getMedia();
@@ -4597,11 +4618,11 @@
         if (ad) {
           stage.textContent = '';
           state.scoreSignature = '';
-          state.rafId = requestAnimationFrame(tick);
+          state.rafId = schedulePlaybackFrame(tick);
           return;
         }
         if (state.auditionLoop && media && !media.paused && mediaMs >= state.auditionLoop.endMs) media.currentTime = state.auditionLoop.startMs / 1000;
-        if(repeatCapture()){state.rafId=requestAnimationFrame(tick);return;}
+        if(repeatCapture()){state.rafId=schedulePlaybackFrame(tick);return;}
         if (performanceTake.armed && !effectSourceReady()) stopEffects('Effects stopped because playback changed. Gestures retained.');
         renderScore(mediaMs);
         refreshBeatPulse(mediaMs);tickBeatClicks(mediaMs,media);
@@ -4621,7 +4642,7 @@
           chrome.runtime.sendMessage({ type: 'LV_SCORE_PLAYBACK', mediaKey: key, mediaMs, playbackRate:media?.playbackRate||1, paused: media?.paused ?? true, durationMs: Math.round((media?.duration || 0) * 1000) }).catch(() => {});
         }
         if (state.trackDurationMs > 0) progressFill.style.width = `${clamp(mediaMs / state.trackDurationMs * 100, 0, 100)}%`;
-        state.rafId = requestAnimationFrame(tick);
+        state.rafId = schedulePlaybackFrame(tick);
         return;
       }
       updateDriftTracking(mediaMs);
@@ -4640,7 +4661,7 @@
           state.currentIndex = nextIndex;
         }
         flowRender(nextIndex, lyricClockMs);
-        state.rafId = requestAnimationFrame(tick);
+        state.rafId = schedulePlaybackFrame(tick);
         return;
       }
 
@@ -4675,15 +4696,15 @@
         }
       }
 
-      state.rafId = requestAnimationFrame(tick);
+      state.rafId = schedulePlaybackFrame(tick);
     }
 
-    state.rafId = requestAnimationFrame(tick);
+    state.rafId = schedulePlaybackFrame(tick);
   }
 
   function cancelLoop() {
     if (state.rafId) cancelAnimationFrame(state.rafId);
-    state.rafId = 0;
+    state.rafId = 0;clearTimeout(state.backgroundTimer);state.backgroundTimer=0;
   }
 
   function renderCaptureScore() {

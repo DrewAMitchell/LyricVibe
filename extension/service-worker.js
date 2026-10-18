@@ -1,4 +1,4 @@
-importScripts('lookup-policy.js', 'score-core.js', 'timing-variant.js', 'pronunciation.js', 'analysis/controller.js', 'score-host.js');
+importScripts('lookup-policy.js', 'score-core.js', 'timing-variant.js', 'pronunciation.js', 'analysis/controller.js', 'score-host.js', 'background-stage.js');
 const LRCLIB_BASE = 'https://lrclib.net/api';
 const sessions = new Map();
 const pausedTabs = new Set(), deferredDetections = new Set();
