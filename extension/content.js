@@ -715,10 +715,31 @@
     return conflicts;
   }
   function recordingContext(draft=timing.draft){return draft?{mediaKey:LvScore.mediaKey(draft.score.source),lyricsHash:draft.baseHash,baseRevision:draft.baseRevision,previewToken:draft.token,previewRevision:draft.previewRevision,offsetMs:draft.score.offsetMs}:null;}
+  function timedTakeTargets(take,score){
+    const wordShape=w=>w&&[w.id,w.text,w.spokenText||null,!!w.excluded,w.startMs,w.endMs,w.hyphenParts||null,
+      w.syllables?.map(s=>[s.id,s.text,s.startMs,s.endMs])||null];
+    return take.units.map(u=>{
+      const phrase=score.phrases.find(p=>p.id===u.phraseId||p.words.some(w=>w.id===u.wordId));
+      if(!phrase)return null;
+      return take.mode==='word'?[phrase.id,phrase.laneId,wordShape(phrase.words.find(w=>w.id===u.wordId))]:
+        [phrase.id,phrase.laneId,phrase.startMs,phrase.endMs,phrase.words.map(wordShape)];
+    });
+  }
   function rebindRecording(preview){
-    if(!rawTake(tapping.take)||tapping.take.status==='armed'||!preview||timing.draft&&tapping.binding!==tapBinding())return;
+    const take=tapping.take;if(!take||take.status==='armed'||!preview)return;
     const context=tapping.recordingContext||recordingContext();
     if(!context||LvScore.mediaKey(preview.score.source)!==context.mediaKey||preview.baseHash!==context.lyricsHash)return;
+    // Listening can leave an empty cursor. It is not captured evidence and must
+    // not lock the next pass to a superseded transcript or vocal-lane plan.
+    if(!rawTake(take)&&!take.marks?.length&&!take.actionHistory?.length&&take.pendingStartMs==null){
+      tapping.take=null;tapping.binding=null;tapping.recordingContext=null;return;
+    }
+    if(timing.draft&&tapping.binding!==tapBinding())return;
+    if(!rawTake(take)){
+      if(!timing.draft||preview.score.offsetMs!==timing.draft.score.offsetMs||preview.score.source.durationMs!==timing.draft.score.source.durationMs)return;
+      const before=timedTakeTargets(take,timing.draft.score),after=timedTakeTargets(take,preview.score);
+      if(before.some(x=>!x)||after.some(x=>!x)||JSON.stringify(before)!==JSON.stringify(after))return;
+    }
     tapping.recordingContext||=recordingContext();
     tapping.binding=`${LvScore.mediaKey(preview.score.source)}:${preview.token}:${preview.previewRevision}`;
   }
@@ -1758,6 +1779,7 @@
   }
   async function armTapTake() {
     if(trackWatch?.loading()&&trackWatch?.status().generation>0)return;
+    if(tapping.binding!==tapBinding())rebindRecording(timing.draft);
     const mode=syncButton('tap-mode').value;
     if (timing.busy || !timing.draft || timing.dirty || (mode!=='syllable'&&tapping.splitDirty) || effectPending() || tapping.take?.status === 'armed'&&!getMedia()?.paused || tapping.take?.status === 'complete'&&!rawTake(tapping.take)) return;
     if(typeof setTimingWorkspace==='function')setTimingWorkspace('record');
@@ -1804,7 +1826,7 @@
       if(syncButton('record-repeat').checked&&continuousPass())units.splice(0,units.length,...units.filter(u=>u.phraseId===phrase.id));
       // A raw take of the other kind (syllable taps vs word holds) is archived and becomes the source, not a continuation.
       let current=tapping.take&&(eventPass()?eventTake(tapping.take):wordPass()?wordTake(tapping.take):!rawTake(tapping.take))?tapping.take:null;
-      if (current && tapping.binding !== tapBinding()) throw Error('This take belongs to an older preview. Discard it before continuing.');
+      if (current && tapping.binding !== tapBinding()) throw Error('This take’s timing targets changed. Its marks are retained; export or use the matching preview before starting a fresh pass.');
       if(rawTake(current)&&current.status==='complete')current={...current,status:'stopped'};
       current=completePhraseScope(current);
       const syllableSource=wordPass()&&!current?(eventTake(tapping.take)&&tapping.take.events.length?tapping.take.events:await latestArchivedSyllableEvents()):null;
