@@ -782,7 +782,7 @@
     refreshTimingPanel(); setSyncNotice('Take discarded. Back at the beginning of the transcript; your preview and saved track are unchanged.');
   }
   function discardEffects() { finishEffectGesture(true);performanceTake.armed = false; performanceTake.binding = null; performanceTake.marks = []; state.scoreSignature = ''; }
-  function stopEffects(reason) { if (!performanceTake.armed) return;finishEffectGesture(Boolean(reason)); performanceTake.armed = false; refreshTimingPanel(); if (reason) setSyncNotice(reason); if (performanceTake.marks.length) setTimeout(() => void useEffects(), 0); }
+  function stopEffects(reason) { if (!performanceTake.armed) return;finishEffectGesture(Boolean(reason)); performanceTake.armed = false; refreshTimingPanel(); if (reason) setSyncNotice(reason); if (performanceTake.marks.length) return new Promise(resolve=>setTimeout(()=>Promise.resolve(useEffects()).then(resolve),0)); }
   // A Words · Hold take over a video with recorded syllable taps is a word pass:
   // its holds claim those taps instead of replacing their timing.
   async function adoptWordHolds(){
@@ -909,7 +909,7 @@
   }, true);
   function transcriptReview(){
     const list=transcriptDialog.querySelector('.lvx-transcript-changes'),area=syncButton('transcript-text');list.replaceChildren();
-    if(!timing.draft)return null;
+    if(!timing.draft){if(area.value.trim()){const li=document.createElement('li');li.textContent='Pasted lyrics will use estimated timing until you record them.';list.append(li);}return null;}
     try{
       const result=LvTranscriptText.diff(timing.draft.score,area.value);
       const labels={display:'display',respell:'fix',replace:'replace (re-estimated)',insert:'insert (re-estimated)',hide:'hide words','delete-line':'hide line','add-line':'new line (estimated)','add-backing':'new backing (choose placement on Apply)',lane:'lane'};
@@ -924,7 +924,8 @@
     const missing=typeof LvTranscriptText==='undefined';syncButton('transcript-open').hidden=missing;if(missing)return;
     const draft=timing.draft,binding=draft?`${draft.token}:${draft.previewRevision}`:null;
     if(!transcript.dirty&&draft&&transcript.shownFor!==binding){area.value=LvTranscriptText.toText(draft.score);transcript.shownFor=binding;}
-    syncButton('transcript-apply').disabled=timing.busy||!draft||!transcript.dirty||tapPending()||countIn.active||countIn.preparing;syncButton('transcript-apply').textContent=tapPending()?'Stop or keep the take before applying':'Apply to preview';syncButton('transcript-open').disabled=timing.busy||(!state.score&&!state.plainLyrics?.text);area.disabled=timing.busy||!draft;
+    const sourceReady=Boolean(LvScore.mediaKey({url:location.href}));
+    syncButton('transcript-apply').disabled=timing.busy||!sourceReady||!transcript.dirty||!area.value.trim()||tapPending()||countIn.active||countIn.preparing;syncButton('transcript-apply').textContent=tapPending()?'Stop or keep the take before applying':draft?'Apply to preview':'Use pasted lyrics';syncButton('transcript-open').disabled=timing.busy||!sourceReady;area.disabled=timing.busy||!sourceReady;area.placeholder='Paste lyrics here, one phrase per line. No cloud lookup required.';
   }
   // Keep a re-spelled word's syllable timings: split the new text into the same count.
   async function respellSyllables(operations){
@@ -946,8 +947,27 @@
     root.append(dialog);
     return new Promise(resolve=>{dialog.addEventListener('close',()=>{const choice=dialog.returnValue==='apply'?dialog.querySelector('input:checked').value:null;dialog.remove();resolve(choice);},{once:true});dialog.showModal();dialog.querySelector('input').focus();});
   }
+  async function createPastedLyrics(){
+    const text=syncButton('transcript-text').value,key=LvScore.mediaKey({url:location.href});
+    if(!key||!text.trim())return;
+    if(state.plainLyrics?.mediaKey&&state.plainLyrics.mediaKey!==key){setHud('Return to the video where you started this text edit. Your paste is retained.',true,true);return;}
+    timing.busy=true;refreshTranscriptEditor();
+    let existing=false;
+    try{
+      const result=await chrome.runtime.sendMessage({type:'LV_SCORE_AUTHOR',mediaKey:key,text,title:state.trackTitle||document.title.replace(/ - YouTube$/,''),provider:'Manual paste'});
+      if(!result?.ok)throw Error(result?.error?.message||'Could not create the local lyrics.');
+      if(key!==LvScore.mediaKey({url:location.href}))throw Error('The video changed. Return to the original video; your paste is retained.');
+      state.score=result.score;state.plainLyrics={text,mediaKey:key,title:result.score.source.title,artist:result.score.source.artist,provider:'Manual paste'};
+      const current=await timingRequest('LV_TIMING_CURRENT');timing.draft=(current.preview?current:await timingRequest('LV_TIMING_PREPARE',{fromSaved:true})).preview;timing.view='proposed';timing.phraseIndex=0;tapping.wordId=timing.draft.score.phrases[0]?.words[0]?.id;
+      existing=!result.created;
+      if(!existing){transcript.dirty=false;transcript.shownFor=null;transcriptDialog.close();errorPanel.hidden=true;state.scoreSignature='';setHud('Pasted lyrics are ready. Open Edit timing to record them; current timing is estimated.',false,true);}
+    }catch(error){const list=transcriptDialog.querySelector('.lvx-transcript-changes'),li=document.createElement('li');li.dataset.review='true';li.textContent=error.message;list.replaceChildren(li);setHud(error.message,true,true);}
+    finally{timing.busy=false;refreshTimingPanel();}
+    if(existing)await applyTranscript();
+  }
   async function applyTranscript(){
-    if(!timing.draft||timing.busy||!transcript.dirty)return;
+    if(timing.busy||!transcript.dirty)return;
+    if(!timing.draft){await createPastedLyrics();return;}
     if(tapPending()||countIn.active||countIn.preparing){setSyncNotice('Stop or keep the current take before applying lyric changes. Your text is retained.','warn');return;}
     let result=transcriptReview();if(!result)return;
     if(!result.operations.length){transcript.dirty=false;transcript.shownFor=null;refreshTimingPanel();return;}
@@ -2415,10 +2435,11 @@
   syncButton('transcript-text').addEventListener('input',()=>{transcript.dirty=true;refreshTranscriptEditor();clearTimeout(transcriptTimer);transcriptTimer=setTimeout(()=>void transcriptReview(),300);});
   syncButton('transcript-apply').addEventListener('click',()=>void applyTranscript());
   async function openTranscriptEditor(){
-    if(timing.busy||(!state.score&&!state.plainLyrics?.text))return;
+    if(timing.busy||!LvScore.mediaKey({url:location.href}))return;
     try{
       if(tapping.take?.status==='armed')await stopTapTake('Take stopped for Lyrics text. Completed marks are retained.');
-      if(!timing.draft){
+      if(performanceTake.armed)await stopEffects('Effects stopped for Lyrics text. Recorded effects are retained.');
+      if(!timing.draft&&(state.score||state.plainLyrics?.text)){
         timing.busy=true;refreshTranscriptEditor();
         const current=await timingRequest('LV_TIMING_CURRENT');
         timing.draft=(current.preview?current:await timingRequest('LV_TIMING_PREPARE',{fromSaved:true})).preview;
@@ -2426,6 +2447,7 @@
       }
       timing.busy=false;
       const area=syncButton('transcript-text');
+      if(!timing.draft&&!transcript.dirty){area.value='';state.plainLyrics={text:'',mediaKey:LvScore.mediaKey({url:location.href}),provider:'Manual paste'};}
       transcript.shownFor=transcript.dirty?transcript.shownFor:null;refreshTranscriptEditor();transcriptDialog.showModal();
       if(!transcript.dirty){area.select();transcriptDialog.querySelector('.lvx-transcript-changes').replaceChildren();}
     }catch(error){setHud(error.message,true,true);}finally{timing.busy=false;refreshTranscriptEditor();}
@@ -2843,6 +2865,7 @@
   }
   async function openTimingReview() {
     if (timing.busy) return;
+    if(!state.score&&!state.plainLyrics?.text){await openTranscriptEditor();return;}
     if(stageEdit.active){closeStageEdit();if(stageEdit.active)return;}
     await loadTempo();
     if(!hasBaselineTempo()){await openTempoSetup(true);return;}
@@ -3215,6 +3238,8 @@
       const key=message.mediaKey||LvScore.mediaKey(message.payload?.hints||{});
       if(key&&key!==LvScore.mediaKey({url:location.href}))return;
     }
+    // Cloud retries cannot replace the user's local pasted lyric source.
+    if(state.score?.lyrics.provider==='Manual paste'&&LvScore.mediaKey(state.score.source)===LvScore.mediaKey({url:location.href})&&['LV_STATUS','LV_STATUS_WARNING','LV_ERROR','LV_API_ERROR','LV_TRACK'].includes(message.type))return;
     // Late automatic lookup replies must not reopen an explicitly closed overlay.
     if(!overlayEnabled&&['LV_STATUS','LV_STATUS_WARNING','LV_ERROR','LV_API_ERROR','LV_TRACK','LV_SCORE_UPDATED'].includes(message.type))return;
     if(message.type==='LV_TIMING_EDIT_CHECK'){
@@ -3351,6 +3376,7 @@
     }
 
     if (message.type === 'LV_ERROR') {
+      if(state.score?.lyrics.provider==='Manual paste'){renderScore(getMediaTimeMs());return;}
       // Soft teardown: stop playback loop but KEEP overlay open and
       // KEEP the observer active so it can auto-recover on the next track.
       clearRevealTimers();
@@ -3366,14 +3392,16 @@
       const errorDiv = document.createElement('div');
       errorDiv.className = 'lvx-not-available';
       errorDiv.textContent = errorMsg;
+      const pasteButton=document.createElement('button');pasteButton.className='lvx-retry-btn';pasteButton.textContent='Paste lyrics';pasteButton.addEventListener('click',openTranscriptEditor);errorDiv.appendChild(pasteButton);refreshTranscriptEditor();
       stage.appendChild(errorDiv);
       progressFill.style.width = '0%';
       preview.textContent = '';
       root.classList.add('lvx-active');
-      setHud(`${errorMsg}  ·  Will retry on next track`, true, true);
+      setHud(`${errorMsg} · Paste lyrics to continue`, true, true);
     }
 
     if (message.type === 'LV_API_ERROR') {
+      if(state.score?.lyrics.provider==='Manual paste'){renderScore(getMediaTimeMs());return;}
       // API is down/degraded — show clear message with retry button
       clearRevealTimers();
       cancelLoop();
@@ -3402,6 +3430,7 @@
         errorDiv.appendChild(retryBtn);
       }
 
+      const pasteButton=document.createElement('button');pasteButton.className='lvx-retry-btn';pasteButton.textContent='Paste lyrics';pasteButton.addEventListener('click',openTranscriptEditor);errorDiv.appendChild(pasteButton);refreshTranscriptEditor();
       stage.appendChild(errorDiv);
       progressFill.style.width = '0%';
       preview.textContent = '';
