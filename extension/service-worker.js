@@ -1245,7 +1245,7 @@ async function injectOverlay(tabId) {
   } catch {}
 
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['score-core.js', 'youtube-media.js', 'tap-timing.js', 'beat-track.js', 'transcript-text.js', 'emoji-keywords-data.js', 'emoji-tags.js', 'choreography.js', 'content.js'] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['score-core.js', 'youtube-media.js', 'tap-timing.js', 'beat-track.js', 'transcript-text.js', 'emoji-keywords-data.js', 'emoji-tags.js', 'choreography.js', 'bass-response.js', 'content.js'] });
     return true;
   } catch {
     return false;

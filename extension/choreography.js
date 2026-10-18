@@ -235,11 +235,11 @@
     }
     return best?.slots;
   }
-  function stagePerformanceAt(items,sourceMs,{beat=sourceMs/500,reduced=false}={}){
+  function stagePerformanceAt(items,sourceMs,{beat=sourceMs/500,reduced=false,bass=0}={}){
     const smooth=x=>{x=clamp(x);return x*x*(3-2*x);};
     return (items||[]).filter(item=>sourceMs>=item.startMs&&sourceMs<item.endMs).map(item=>{
       const envelope=smooth((sourceMs-item.startMs)/Math.min(250,(item.endMs-item.startMs)*.2))*smooth((item.endMs-sourceMs)/Math.min(250,(item.endMs-item.startMs)*.2));
-      const pulse=reduced?.35:Math.pow((1+Math.cos(2*Math.PI*beat/item.beatsPerPulse))/2,3),energy=pulse*item.strength;
+      const pulse=reduced?.35:item.response==='bass'?clamp(Number.isFinite(bass)?bass:0):Math.pow((1+Math.cos(2*Math.PI*beat/item.beatsPerPulse))/2,3),energy=pulse*item.strength;
       return {id:item.id,type:item.type,rect:item.rect,opacity:envelope,energy,scale:1+.13*energy,cone:1+.16*energy,glow:.16+.42*energy};
     });
   }

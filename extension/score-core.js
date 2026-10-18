@@ -356,6 +356,7 @@
       const ids=new Set();for(const item of score.stageItems){const r=item?.rect;
         if(!item||typeof item.id!=='string'||!item.id||item.id.length>128||ids.has(item.id)||!['pulse','speakers'].includes(item.type)||item.provenance!=='manual')bad('invalid performance item');ids.add(item.id);
         if(!Number.isSafeInteger(item.startMs)||item.startMs<0||!Number.isSafeInteger(item.endMs)||item.endMs<=item.startMs)bad('performance interval must use increasing source milliseconds');
+        if(item.response!==undefined&&!['beat','bass'].includes(item.response))bad('invalid performance response mode');
         if(typeof item.strength!=='number'||!Number.isFinite(item.strength)||item.strength<0||item.strength>1||![1,2,4].includes(item.beatsPerPulse))bad('invalid performance intensity or beat spacing');
         if(!r||['x','y','width','height'].some(k=>typeof r[k]!=='number'||!Number.isFinite(r[k]))||r.x<0||r.y<0||r.width<.02||r.height<.02||r.x+r.width>1.000001||r.y+r.height>1.000001)bad('performance area must fit inside the normalized video surface');
       }
