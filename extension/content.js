@@ -2074,7 +2074,13 @@
       const resuming=Boolean(current&&['stopped','armed'].includes(current.status)&&!retiming);
       const retakePhraseId=resuming&&(streamTake(current)||rawTake(current))?phrase.id:null;
       if(resuming&&!streamTake(current)&&!rawTake(current)&&['word','phrase'].includes(current.mode)){
-        if(current.mode==='word'){const known=new Set(current.units.map(u=>u.id));current={...current,units:[...wordTimingUnits(laneWords).filter(u=>!known.has(u.id)),...current.units].sort((a,b)=>(a.estimatedStartMs??a.minMs)-(b.estimatedStartMs??b.minMs))};}
+        if(current.mode==='word'){
+          const known=new Set(current.units.map(u=>u.id));
+          // Timing estimates can overlap after a phrase is retimed. They must
+          // never change the transcript sequence when a word take resumes.
+          const order=new Map(wordTimingUnits(timing.draft.score.phrases.filter(p=>p.laneId===phrase.laneId).flatMap(p=>p.words)).map((u,i)=>[u.id,i]));
+          current={...current,units:[...wordTimingUnits(laneWords).filter(u=>!known.has(u.id)),...current.units].sort((a,b)=>(order.get(a.id)??Infinity)-(order.get(b.id)??Infinity))};
+        }
         const at=current.mode==='phrase'?current.units.findIndex(u=>u.id===phrase.id||u.phraseId===phrase.id):current.units.findIndex(u=>u.wordId===word.id);
         if(at>=0)current={...current,index:at};
       }
