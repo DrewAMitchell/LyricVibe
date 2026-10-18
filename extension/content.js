@@ -710,7 +710,7 @@
   const plainTimingNotice=document.createElement('p');plainTimingNotice.className='lvx-sync-hint';plainTimingNotice.hidden=true;syncCopy.after(plainTimingNotice);
   syncPanel.querySelector('header').after(syncPanel.querySelector('.lvx-tempo-panel'));
   const countInPanel=document.createElement('div');countInPanel.className='lvx-count-in';countInPanel.hidden=true;
-  countInPanel.innerHTML='<span>Get ready · four beats</span><output aria-live="polite">4</output><button data-sync="count-cancel">Cancel count-in</button>';
+  countInPanel.innerHTML='<span>Get ready · one bar</span><output aria-live="polite">4</output><button data-sync="count-cancel">Cancel count-in</button>';
   syncNotice.after(countInPanel);syncButton('count-cancel').onclick=()=>cancelCountIn();
   const countInStage=document.createElement('div');countInStage.className='lvx-count-in-stage';countInStage.hidden=true;
   countInStage.innerHTML='<span>Get ready</span><output aria-live="polite">4</output><strong></strong><small></small>';
@@ -1091,24 +1091,24 @@
     if(beatClick.audio.state!=='running')throw Error('Click audio is unavailable. Try Start again to enable the count-in.');
     const bpm=LvTapTiming.tempoAt(tempo.map,sourceMs)?.bpm,rate=media.playbackRate;
     if(!bpm)throw Error('Set baseline BPM before recording.');
-    const interval=60000/bpm/rate,key=tempoSourceKey(),binding=tapBinding(),at=beatClick.audio.currentTime;
+    const beats=tempo.map.beatsPerBar||4,interval=60000/bpm/rate,key=tempoSourceKey(),binding=tapBinding(),at=beatClick.audio.currentTime;
     countIn.active=true;countInPanel.hidden=false;countInStage.hidden=false;root.classList.add('lvx-counting-in');
-    countInPanel.querySelector('span').textContent=`Phrase ${timing.phraseIndex+1} · ${Math.round(bpm)} BPM · ${rate}×`;
-    countInPanel.querySelector('output').textContent='4';countInPanel.scrollIntoView({block:'nearest'});
-    countInStage.querySelector('output').textContent='4';
+    countInPanel.querySelector('span').textContent=`Phrase ${timing.phraseIndex+1} · ${beats} beats · ${Math.round(bpm)} BPM · ${rate}×`;
+    countInPanel.querySelector('output').textContent=String(beats);countInPanel.scrollIntoView({block:'nearest'});
+    countInStage.querySelector('output').textContent=String(beats);
     countInStage.querySelector('strong').textContent=phrase.words.filter(w=>!w.excluded).map(w=>w.text).join(' ');
     countInStage.querySelector('small').textContent=countInPanel.querySelector('span').textContent;
     refreshTimingPanel();setSyncNotice('Count in, then record from the selected playback position.');
-    cancelBeatClicks();for(let beat=0;beat<4;beat++)playBeatClick(beat===0,beat*interval,true,true);
+    cancelBeatClicks();for(let beat=0;beat<beats;beat++)playBeatClick(beat===0,beat*interval,true,true);
     try{return await new Promise((resolve,reject)=>{
       let timer;const finish=(error)=>{clearTimeout(timer);countIn.cancel=null;error?reject(error):resolve(true);};
       countIn.cancel=()=>{cancelBeatClicks();finish(Object.assign(Error('Count-in canceled. Your existing take is retained.'),{code:'COUNT_IN_CANCELED'}));};
       const tick=()=>{
         if(tempoSourceKey()!==key||tapBinding()!==binding||media!==getMedia()||!media.paused||media.playbackRate!==rate||Math.abs(media.currentTime*1000-sourceMs)>50||beatClick.audio?.state!=='running'||isAdvertisement()||youtubeMediaState()?.clockUsable===false){cancelBeatClicks();finish(Object.assign(Error('Count-in canceled because playback or the source changed. Your take is retained.'),{code:'COUNT_IN_CANCELED'}));return;}
         const elapsed=(beatClick.audio.currentTime-at)*1000;
-        const remaining=String(Math.max(1,4-Math.floor(elapsed/interval)));
+        const remaining=String(Math.max(1,beats-Math.floor(elapsed/interval)));
         countInPanel.querySelector('output').textContent=remaining;countInStage.querySelector('output').textContent=remaining;
-        if(elapsed>=4*interval){finish();return;}timer=setTimeout(tick,25);
+        if(elapsed>=beats*interval){finish();return;}timer=setTimeout(tick,25);
       };tick();
     });}finally{countIn.active=false;countInPanel.hidden=true;countInStage.hidden=true;root.classList.remove('lvx-counting-in');}
   }
@@ -1138,7 +1138,7 @@
     tempo.mediaKey=mediaKey;applyTempoToGrid();refreshTempoEditor();refreshTempoGate();refreshTimingPanel();refreshBeatPulse(getMediaTimeMs());return tempo;
   }
   function applyTempoToGrid(){const value=LvTapTiming.tempoAt(tempo.map,getMediaTimeMs());if(!value)return;const bpm=syncButton('tap-bpm');bpm.step='1';bpm.value=String(Math.round(value.bpm));}
-  function tempoEditable(){if(tapping.take?.status==='armed'||performanceTake.armed||countIn.active){setSyncNotice('Stop the take before editing or tapping tempo.','warn');return false;}return Boolean(tempo.mediaKey&&tempo.mediaKey===tempoSourceKey());}
+  function tempoEditable(){if(tapping.take?.status==='armed'||performanceTake.armed||countIn.active||countIn.preparing){setSyncNotice('Stop the take before editing or tapping tempo.','warn');return false;}return Boolean(tempo.mediaKey&&tempo.mediaKey===tempoSourceKey());}
   function persistTempo(){
     const mediaKey=tempo.mediaKey,packet=JSON.parse(JSON.stringify({taps:tempo.taps,estimate:tempo.estimate,map:tempo.map,revision:tempo.revision,clickEnabled:beatClick.enabled,updatedAt:new Date().toISOString()}));
     tempo.write=tempo.write.catch(()=>{}).then(()=>chrome.storage.local.set({['lvTempo:'+mediaKey]:packet}));tempo.write.catch(error=>{syncPanel.querySelector('.lvx-tempo-status').textContent='Tempo kept in this tab; local save failed: '+error.message;});return tempo.write;
@@ -1147,6 +1147,7 @@
   function refreshTempoEditor(){
     syncButton('tempo-undo').disabled=!tempo.history.length;
     if(document.activeElement!==syncButton('tempo-bpm'))syncButton('tempo-bpm').value=String(Math.round(LvTapTiming.tempoAt(tempo.map,getMediaTimeMs())?.bpm||120));
+    refreshTempoMeter();
     syncPanel.querySelector('.lvx-tempo-status').textContent=tempo.map?'Tap to set the downbeat · click follows playback':'Tap four beats, or type BPM.';
   }
   function bindTempoPress(button,action){
@@ -1169,7 +1170,7 @@
       tempo.estimate=estimate;
       const bpm=Math.round(estimate.bpm);
       if(tempo.map&&tempo.map.segments.length>1){const at=LvTapTiming.tempoAt(tempo.map,tempo.sessionStartMs).index,point=tempo.map.segments[at];tempo.map=LvTapTiming.setTempoPoint(tempo.map,{...point,bpm,provenance:'tapped',taps:[...tempo.taps]});}
-      else tempo.map=LvTapTiming.tempoMapFromEstimate({...estimate,bpm,anchorMs:tempo.sessionStartMs},tempo.taps);
+      else tempo.map={...LvTapTiming.tempoMapFromEstimate({...estimate,bpm,anchorMs:tempo.sessionStartMs},tempo.taps),beatsPerBar:tempo.map?.beatsPerBar||4};
     }
     tempo.revision++;cancelBeatClicks();
     if(!beatClick.userSet){beatClick.enabled=true;syncButton('tempo-click').checked=true;refreshToggles();}
@@ -1202,6 +1203,26 @@
   }
   syncButton('tempo-save').onclick=async()=>{const bpm=Number(syncButton('tempo-bpm').value);await loadTempo();try{if(!Number.isSafeInteger(bpm)||bpm<20||bpm>400)throw Error('Enter an integer BPM from 20 to 400.');const map=tempo.map||{version:1,anchorMs:0,segments:[{startMs:0,bpm,transition:'step',provenance:'manual'}]},index=LvTapTiming.tempoAt(map,getMediaTimeMs()).index;if(updateTempoMap(LvTapTiming.setTempoPoint(map,{...map.segments[index],bpm,transition:'step',provenance:'manual'})))await finishTempoSetup();}catch(error){syncPanel.querySelector('.lvx-tempo-status').textContent=error.message;}};
   syncButton('tempo-bpm').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();syncButton('tempo-save').click();}});
+  function refreshTempoMeter(){
+    const input=syncButton('tempo-meter');if(!input)return;
+    if(document.activeElement!==input)input.value=String(tempo.map?.beatsPerBar||4);
+    input.disabled=!hasBaselineTempo()||timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active||countIn.preparing;
+  }
+  function setTempoMeter(value){
+    if(!hasBaselineTempo()||!tempoEditable()){refreshTempoMeter();return false;}
+    if(!Number.isSafeInteger(value)||value<1||value>12){setSyncNotice('Enter 1–12 beats per bar.');syncButton('tempo-meter').value=String(tempo.map.beatsPerBar||4);return false;}
+    if((tempo.map.beatsPerBar||4)===value)return true;
+    return updateTempoMap({...tempo.map,beatsPerBar:value});
+  }
+  function addTempoMeterControl(){
+    if(syncButton('tempo-meter'))return;
+    const label=document.createElement('label');label.title='Beats between accented downbeats. Use 3 for 3/4; the recording count-in lasts one bar.';
+    label.innerHTML='Beats per bar<input data-sync="tempo-meter" aria-label="Beats per bar" type="number" min="1" max="12" step="1" value="4">';
+    syncButton('tempo-bpm').closest('label').after(label);
+    label.querySelector('input').onchange=event=>setTempoMeter(event.target.valueAsNumber);
+    label.querySelector('input').onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();setTempoMeter(event.target.valueAsNumber);}};
+  }
+  addTempoMeterControl();
   syncButton('tempo-click').onchange=async()=>{beatClick.userSet=true;beatClick.enabled=syncButton('tempo-click').checked;cancelBeatClicks();if(beatClick.enabled)try{await enableBeatAudio();}catch(error){setSyncNotice(error.message,'warn');}void persistTempo();};
   syncButton('tempo-downbeat').onclick=async()=>{await loadTempo();if(!tempoEditable())return;const now=Math.round(getMediaTimeMs());if(!tempo.map){tempo.taps=[];void tapTempo();return;}if(updateTempoMap({...tempo.map,anchorMs:now})){try{await enableBeatAudio();beatClick.rate=getMedia()?.playbackRate;playBeatClick(true,0,true);beatClick.scheduled.add(0);}catch(error){setSyncNotice(error.message,'warn');}}};
   syncButton('tempo-undo').onclick=()=>{if(!tempoEditable()||!tempo.history.length)return;tempo.map=tempo.history.pop();tempo.taps=[];tempo.revision++;cancelBeatClicks();void persistTempo();refreshTempoEditor();refreshBeatPulse(getMediaTimeMs());};
@@ -2940,6 +2961,7 @@
     const draft = timing.draft, phrase = timingPhrase();
     const unplaced=unplacedWords();plainTimingNotice.hidden=!unplaced.length;plainTimingNotice.textContent=`${unplaced.length} words still need timing. Initial positions are placeholders. Hold Space for each word, then refine syllables. Your input controls the next word.`;
     syncPanel.setAttribute('aria-busy', String(timing.busy));
+    refreshTempoMeter();
     syncButton('close').disabled = timing.busy;
     root.classList.toggle('lvx-sync-open', !syncPanel.hidden);
     if(typeof timingWorkspace!=='undefined'&&timingWorkspace.tabs){const live=tapping.take?.status==='armed'||performanceTake.armed||countIn.active;for(const tab of timingWorkspace.tabs.children)tab.disabled=Boolean(live&&tab.dataset.workspace!==timingWorkspace.view);}

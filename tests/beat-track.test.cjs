@@ -31,6 +31,7 @@ test('click schedule accents tap-aligned beat 1, respects half-speed and recompu
   const first=beats.clickSchedule(map,1000,1)[0];assert.equal(first.beat,0);assert.equal(first.downbeat,true);assert.ok(Math.abs(first.sourceMs-1000)<1e-6);assert.ok(first.delayMs<1e-6);
   const next=beats.clickSchedule(map,1450,.5)[0];assert.equal(next.beat,1);assert.ok(Math.abs(next.delayMs-100)<.001);assert.equal(next.downbeat,false);
   assert.equal(beats.clickSchedule(map,3000,1)[0].downbeat,true);assert.equal(beats.clickSchedule(map,1000,1)[0].beat,0);
+  const triple={...map,beatsPerBar:3};assert.equal(beats.clickSchedule(triple,2500,1)[0].downbeat,true);assert.equal(beats.clickSchedule(triple,3000,1)[0].downbeat,false);
   const ramp=tempo.validateTempoMap({...map,segments:[{startMs:0,bpm:60,transition:'linear',provenance:'manual'},{startMs:10000,bpm:180,transition:'step',provenance:'manual'}]});
   for(const event of beats.clickSchedule(ramp,5000,1,1000))assert.ok(Math.abs(tempo.tempoAt(ramp,event.sourceMs).beat-event.beat)<1e-6);
 });
