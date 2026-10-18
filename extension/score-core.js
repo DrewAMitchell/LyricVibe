@@ -70,10 +70,12 @@
     if (typeof raw !== "string") fail("INVALID_LRC", "LRC input must be text");
     const cues = [];
     const timestamp = /\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
+    let singerHeader='';
     for (const line of raw.replace(/^\uFEFF/, "").split(/\r?\n/)) {
       const matches = [...line.matchAll(timestamp)];
-      if (!matches.length) continue;
-      const text = line.slice(matches[matches.length - 1].index + matches[matches.length - 1][0].length).trim();
+      if (!matches.length) {if(/^\s*\[[^\[\]:]+\]\s*$/.test(line)&&!parseVocalText(line,[{id:'lead',role:'lead',label:'Lead'},{id:'backing',role:'backing',label:'Backing'}]).entries.length)singerHeader=line.trim();continue;}
+      const body = line.slice(matches[matches.length - 1].index + matches[matches.length - 1][0].length).trim();
+      const text=body?singerHeader+body:body;
       for (const match of matches) {
         const min = Number(match[1]);
         const sec = Number(match[2]);
@@ -127,6 +129,37 @@
   }
   function stableId(prefix, n) { return `${prefix}-${n}`; }
 
+  // Standalone singer headers persist; inline markers affect the remainder of
+  // their line. Known section labels remain literal, as in existing transcripts.
+  function parseVocalText(text, existingLanes) {
+    const lanes=clone(existingLanes), entries=[];
+    const defaultLane=lanes.find(l=>l.role==='lead')?.id||lanes[0]?.id;
+    let header=defaultLane;
+    const resolve=name=>{
+      name=name.trim();const key=name.toLowerCase();
+      const identity=value=>value.split(/\s*&\s*/).map(part=>part.trim().toLowerCase()).sort().join(' & ');
+      const known=lanes.find(l=>l.id.toLowerCase()===key||identity(l.label)===identity(name));
+      if(known)return known.id;
+      if(/^(chorus|verse(?:\s+\d+)?|intro|outro|bridge|pre-chorus|instrumental)$/i.test(name))return null;
+      if(!name||name.length>80||name.includes(':'))return null;
+      let n=1;while(lanes.some(l=>l.id===`vocal-${n}`))n++;
+      const lane={id:`vocal-${n}`,role:'lead',label:name};lanes.push(lane);return lane.id;
+    };
+    String(text).replace(/\r\n?/g,'\n').split('\n').forEach((line,index)=>{
+      const only=/^\s*\[([^\[\]]+)\]\s*$/.exec(line);
+      if(only){const id=resolve(only[1]);if(id){header=id;return;}}
+      let laneId=header,cursor=0,buffer='';
+      const flush=()=>{if(buffer.trim())entries.push({laneId,text:buffer.trim(),line:index+1});buffer='';};
+      for(const match of line.matchAll(/\[([^\[\]]+)\]/g)){
+        buffer+=line.slice(cursor,match.index);const id=resolve(match[1]);
+        if(id){flush();laneId=id;}else buffer+=match[0];
+        cursor=match.index+match[0].length;
+      }
+      buffer+=line.slice(cursor);flush();
+    });
+    return {lanes,entries};
+  }
+
   function createScore(source, rawLrc, lyricsMetadata) {
     if (!source || typeof source !== "object") fail("INVALID_SOURCE", "source is required");
     const id = parseVideoId(source.videoId);
@@ -138,6 +171,7 @@
     const cues = parseLrc(rawLrc);
     const laneLead = { id: "lead", role: "lead", label: "Lead" };
     const laneBacking = { id: "backing", role: "backing", label: "Suggested backing (inferred)" };
+    let lanes=[laneLead,laneBacking];
     const phrases = [];
     let phraseIndex = 0;
     for (let i = 0; i < cues.length; i++) {
@@ -151,7 +185,8 @@
         continue;
       }
       const next = cues.slice(i + 1).find(c => c.timeMs > cue.timeMs);
-      const tokens = wordsForText(cue.text);
+      const vocal=parseVocalText(cue.text,lanes);lanes=vocal.lanes;
+      const tokens = vocal.entries.flatMap(entry=>wordsForText(entry.text).map(token=>({...token,laneId:token.role==='backing'?'backing':entry.laneId})));
       if (!tokens.length) continue;
       const inferredEndMs = cue.timeMs + estimatedPhraseDurationMs(tokens.length);
       const proposedEndMs = next ? next.timeMs : source.durationMs;
@@ -165,15 +200,15 @@
       const words = tokens.map((token, n) => ({
         id: `${phraseId}-word-${n + 1}`, text: token.text,
         startMs: cue.timeMs, endMs: cue.timeMs,
-        provenance: "estimated", locked: false, effects: [], laneRole: token.role
+        provenance: "estimated", locked: false, effects: [], laneId: token.laneId
       }));
-      const leadWords = words.filter(w => w.laneRole === "lead");
-      const backWords = words.filter(w => w.laneRole === "backing");
-      // Parenthetical suggestions are separately addressable while preserving their cue timing.
-      for (const [part, subset] of [["lead", leadWords], ["backing", backWords]]) {
+      const parts=[...new Set(words.map(w=>w.laneId))];
+      // Independent singers can share a cue and overlap without conflating identity.
+      for (const part of parts) {
+        const subset=words.filter(w=>w.laneId===part);
         if (!subset.length) continue;
-        const phraseWords = subset.map(({ laneRole, ...word }) => word);
-        const p = { id: backWords.length && part === "backing" ? `${phraseId}-backing` : phraseId, laneId: part, startMs: cue.timeMs, endMs, endEstimated, fadeOutMs: 120, words: phraseWords };
+        const phraseWords = subset.map(({ laneId, ...word }) => word);
+        const p = { id: part==='backing'||parts.indexOf(part)>0 ? `${phraseId}-${part}` : phraseId, laneId: part, startMs: cue.timeMs, endMs, endEstimated, fadeOutMs: 120, words: phraseWords };
         estimateWordTimes(p, cue.text);
         phrases.push(p);
       }
@@ -183,14 +218,15 @@
       version: VERSION, revision: 0, offsetMs: 0,
       source: { platform: "youtube", videoId: id, title: String(source.title || ""), artist: String(source.artist || ""), durationMs: source.durationMs },
       lyrics: { provider: String(metadata.provider || ""), entryId: metadata.entryId == null ? null : String(metadata.entryId), contentHash: hash.toLowerCase() },
-      lanes: [laneLead, laneBacking], phrases
+      lanes, phrases
     });
   }
 
   function createPlainScore(source, rawText, lyricsMetadata) {
     if(typeof rawText!=="string"||!rawText.trim()||rawText.length>200000)fail("INVALID_LYRICS","Provide nonempty plain lyrics, at most 200000 characters.");
     if(!Number.isFinite(source?.durationMs)||source.durationMs<=0)fail("SOURCE_UNREADY","Wait for the main video duration before recording lyrics.");
-    const lines=rawText.split(/\r?\n/).map(line=>line.trim()).filter(Boolean);
+    const rawLines=rawText.split(/\r?\n/).map(line=>line.trim()).filter(Boolean),lines=[];let header='';
+    for(const line of rawLines){const parsed=parseVocalText(line,[{id:'lead',role:'lead',label:'Lead'},{id:'backing',role:'backing',label:'Backing'}]);if(!parsed.entries.length){header=line;continue;}lines.push(header+line);}
     // This is an editor layout only. No catalog or acoustic timing is implied.
     const lrc=lines.map((line,index)=>{const ms=Math.floor(source.durationMs*index/lines.length);return `[${Math.floor(ms/60000)}:${((ms%60000)/1000).toFixed(3).padStart(6,'0')}]${line.replace(/\[\d+:\d+(?:\.\d+)?\]/g,'')}`;}).join('\n');
     const score=createScore(source,lrc,lyricsMetadata);
@@ -374,7 +410,23 @@
     if (!operation || typeof operation !== "object" || typeof operation.type !== "string") fail("INVALID_OPERATION", "operation must have a type");
     const next = clone(score);
     const op = operation;
-    if(op.type==='setStageRegion'){
+    if(op.type==='setLane'){
+      if(typeof op.laneId!=='string'||!/^[A-Za-z0-9_-]+$/.test(op.laneId)||typeof op.label!=='string'||!op.label.trim()||op.label.length>80||/[\[\]\r\n]/.test(op.label)||!['lead','backing'].includes(op.role))fail('INVALID_OPERATION','A vocal track needs an ID, name and Main or Backing role.');
+      if(next.lanes.some(l=>l.id!==op.laneId&&(l.label.toLowerCase()===op.label.trim().toLowerCase()||l.id.toLowerCase()===op.label.trim().toLowerCase())))fail('INVALID_OPERATION','Use a distinct name for each vocal track.');
+      const lane=next.lanes.find(l=>l.id===op.laneId),value={id:op.laneId,label:op.label.trim(),role:op.role};
+      if(lane)Object.assign(lane,value);else next.lanes.push(value);
+    }else if(op.type==='splitPhraseLanes'){
+      const index=next.phrases.findIndex(p=>p.id===op.phraseId),phrase=next.phrases[index];
+      if(!phrase)fail('UNKNOWN_ID','Unknown phrase');
+      if(!Array.isArray(op.parts)||op.parts.length<2||op.parts.some(p=>!next.lanes.some(l=>l.id===p.laneId)||!Array.isArray(p.wordIds)||!p.wordIds.length)||JSON.stringify(op.parts.flatMap(p=>p.wordIds))!==JSON.stringify(phrase.words.map(w=>w.id)))fail('INVALID_OPERATION','Vocal parts must partition every word once, in its original order.');
+      const used=new Set(next.phrases.map(p=>p.id));let serial=1;
+      const parts=op.parts.map((part,i)=>{
+        let id=phrase.id;if(i){while(used.has(`${phrase.id}-vocal-${serial}`))serial++;id=`${phrase.id}-vocal-${serial++}`;used.add(id);}
+        const words=phrase.words.filter(w=>part.wordIds.includes(w.id));
+        return {...phrase,id,laneId:part.laneId,words,startMs:Math.min(...words.map(w=>w.startMs)),endMs:Math.max(...words.map(w=>w.endMs))};
+      });
+      next.phrases.splice(index,1,...parts);
+    }else if(op.type==='setStageRegion'){
       if(!op.region||typeof op.region.id!=='string')fail('INVALID_OPERATION','Provide a timed stage region');
       next.stageRegions=[...(next.stageRegions||[]).filter(r=>r.id!==op.region.id),clone(op.region)];
     }else if(op.type==='deleteStageRegion'){
@@ -760,5 +812,5 @@
       }))};
     });
   }
-  return { VERSION, DISPLAY_CATALOG, stageRegionAt, ScoreError, mediaKey, parseLrc, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, phraseTimingCoverage, timingCoverage };
+  return { VERSION, DISPLAY_CATALOG, stageRegionAt, ScoreError, mediaKey, parseLrc, parseVocalText, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, phraseTimingCoverage, timingCoverage };
 });

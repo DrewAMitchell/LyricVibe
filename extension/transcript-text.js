@@ -1,13 +1,13 @@
 (function (root, factory) {
   'use strict';
-  const api = factory();
+  const api = factory(typeof module === 'object' && module.exports ? require('./score-core.js') : root.LvScore);
   if (typeof module === 'object' && module.exports) module.exports = api;
   root.LvTranscriptText = api;
-})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (core) {
   'use strict';
 
-  // Whole-transcript text editing. One line per phrase; non-lead lanes carry a
-  // "[laneId] " prefix. Visible (non-excluded) words are space separated.
+  // Whole-transcript editing. One line per phrase; singer markers carry lane
+  // identity while visible (non-excluded) words stay space separated.
   // Diffing maps edits onto existing score operations so unchanged words keep
   // their IDs, timing, syllables and effects.
   const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
@@ -19,19 +19,10 @@
   function toText(score) {
     const lead = score.lanes.find(lane => lane.role === 'lead')?.id;
     return score.phrases.filter(phrase => visible(phrase).length).map(phrase => {
-      const marker = phrase.laneId === lead ? '' : `[${phrase.laneId}] `;
+      const lane=score.lanes.find(l=>l.id===phrase.laneId);
+      const marker = phrase.laneId === lead && lane.id==='lead' ? '' : `[${lane.id==='backing'?'backing':lane.label}] `;
       return (marker + visible(phrase).map(encode).join(' ')).trimEnd();
     }).join('\n');
-  }
-
-  function parseLine(line, score, fallbackLaneId) {
-    const match = /^\[([A-Za-z0-9_-]+)\]\s*/.exec(line);
-    // Only a known lane ID is a lane marker; "[Chorus]" stays lyric text.
-    if (match && score.lanes.some(lane => lane.id === match[1])) {
-      return { laneId: match[1], tokens: line.slice(match[0].length).trim().split(/\s+/).filter(Boolean) };
-    }
-    const lead = score.lanes.find(lane => lane.role === 'lead')?.id ?? fallbackLaneId;
-    return { laneId: lead, tokens: line.trim().split(/\s+/).filter(Boolean) };
   }
 
   // Only complete, balanced groups are shorthand; unfinished typing stays literal.
@@ -57,9 +48,8 @@
   function parseText(text, score) {
     const parsed = [], backingLane = score.lanes.find(lane => lane.role === 'backing');
     let previousMain = null;
-    linesOf(text).forEach((line, index) => {
-      if (!line.trim()) return;
-      const entry = { ...parseLine(line, score, null), line: index + 1 };
+    core.parseVocalText(text,score.lanes).entries.forEach(segment => {
+      const entry = { laneId:segment.laneId,tokens:segment.text.split(/\s+/),line:segment.line };
       const parts = parentheticalParts(entry.tokens.join(' '));
       if (!parts.found) {
         if (score.lanes.find(lane => lane.id === entry.laneId)?.role === 'lead') previousMain = parsed.length;
@@ -91,12 +81,6 @@
       else j++;
     }
     return pairs;
-  }
-
-  function linesOf(text) {
-    const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
-    while (lines.length && !lines.at(-1).trim()) lines.pop();
-    return lines;
   }
 
   // Similarity of two token lists: shared words in order over the longer length.
@@ -167,12 +151,35 @@
     }
   }
 
-  function diff(score, text, {backingStart='beginning'} = {}) {
+  function diff(score, text, {backingStart='beginning',laneEdits=[]} = {}) {
     if(!['beginning','near-end'].includes(backingStart))fail('INVALID_BACKING_START','Choose beginning or near-end backing placement.');
     if (typeof text !== 'string' || text.length > 200000) fail('INVALID_TEXT', 'Transcript text must be a string under 200,000 characters.');
+    const vocal=core.parseVocalText(text,score.lanes),prefix=[],changesBefore=[];
+    for(const lane of vocal.lanes){
+      const old=score.lanes.find(l=>l.id===lane.id),edit=laneEdits.find(l=>l.id===lane.id),value=edit?{...lane,...edit}:lane;
+      if(!old||old.label!==value.label||old.role!==value.role){prefix.push({type:'setLane',laneId:value.id,label:value.label,role:value.role});changesBefore.push({kind:'track',from:old?.label||'',to:`${value.label} (${value.role==='lead'?'Main':'Backing'})`});}
+    }
+    // Resolve text against the pre-rename labels, then apply metadata and splits.
+    const parsed = parseText(text, {...score,lanes:vocal.lanes});
+    let working=score;
+    for(const op of prefix)working=core.applyOperation(working,op,working.revision);
+    const groups=new Map();for(const entry of parsed){if(!groups.has(entry.line))groups.set(entry.line,[]);groups.get(entry.line).push(entry);}
+    const used=new Set();
+    for(const entries of groups.values()){
+      if(entries.length<2||entries.some(e=>e.autoBacking||e.hasBacking))continue;
+      const tokens=entries.flatMap(e=>e.tokens.map(tokenText));
+      const phrase=working.phrases.find(p=>!used.has(p.id)&&JSON.stringify(visible(p).map(w=>w.text))===JSON.stringify(tokens));
+      if(!phrase)continue;used.add(phrase.id);
+      let offset=0;const visibleWords=visible(phrase),parts=entries.map(e=>{const words=visibleWords.slice(offset,offset+e.tokens.length);offset+=e.tokens.length;return {laneId:e.laneId,wordIds:words.map(w=>w.id)};});
+      // Hidden words remain attached to the preceding visible part.
+      let part=0;for(const word of phrase.words){const at=parts.findIndex(p=>p.wordIds.includes(word.id));if(at>=0)part=at;else parts[part].wordIds.push(word.id);}
+      for(const p of parts)p.wordIds.sort((a,b)=>phrase.words.findIndex(w=>w.id===a)-phrase.words.findIndex(w=>w.id===b));
+      const op={type:'splitPhraseLanes',phraseId:phrase.id,parts};prefix.push(op);working=core.applyOperation(working,op,working.revision);
+      changesBefore.push({line:entries[0].line,kind:'split-track',from:visible(phrase).map(w=>w.text).join(' '),to:'Separate vocal tracks; timing preserved'});
+    }
+    score=working;
     // Phrases whose words are all hidden are deleted from the transcript's point of view.
     const phrases = score.phrases.filter(phrase => visible(phrase).length);
-    const parsed = parseText(text, score);
     const lineIndexes = parsed.map((entry, i) => entry ? i : -1).filter(i => i >= 0);
     const pairs = alignLines(phrases.map(phrase => visible(phrase).map(word => word.text)), lineIndexes.map(i => parsed[i].tokens.map(tokenText)), (pi, li) => {
       const entry = parsed[lineIndexes[li]], role = score.lanes.find(lane => lane.id === phrases[pi].laneId)?.role;
@@ -229,7 +236,7 @@
     });
     flush(null);
     changes.sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
-    return { operations: [...operations, ...inserts], changes };
+    return { operations: [...prefix,...operations, ...inserts], changes:[...changesBefore,...changes] };
   }
 
   return { toText, diff };

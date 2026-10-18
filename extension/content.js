@@ -654,7 +654,7 @@
       <div class="lvx-tap-status" role="status" aria-live="polite">Choose a word to begin.</div>
       <div class="lvx-tap-actions"><button data-sync="tap-use">Use take in preview</button><button data-sync="tap-undo">↶ Undo mark</button><button data-sync="tap-discard">Discard take</button><button data-sync="take-export" disabled>Export take</button></div>
       <button data-sync="events-restore" title="Reopen the latest syllable or word-hold recording for this video. Changed phrases remain separate for review.">Review last recording ↗</button>
-      <button data-sync="transcript-open" class="lvx-transcript-open">✎ Lyrics text</button><dialog class="lvx-transcript-editor" aria-label="Lyrics text"><h3>Lyrics</h3><p class="lvx-sync-hint">Paste or edit the lyrics, one phrase per line. Prefix a word with = to show it all at once (e.g. =NoOoOoOo); remove = to follow syllables. Parentheses, like <code>Stay with me (with me)</code>, add backing lyrics. Apply asks whether they begin with the main phrase or near its end. <code>[backing]</code> puts a whole line on the backing lane. Fixed words keep their timing; new lines get estimated timing to retime; deleted words and lines are hidden. Undo preview reverts.</p><textarea data-sync="transcript-text" rows="18" spellcheck="true" aria-label="Lyrics, one phrase per line"></textarea><ul class="lvx-transcript-changes" aria-live="polite"></ul><div class="lvx-tap-actions"><button data-sync="transcript-apply">Apply to preview</button><button data-sync="transcript-close">Close</button></div></dialog><section class="lvx-event-review" hidden aria-label="Assign recorded events"><p class="lvx-event-summary" role="status"></p><div class="lvx-event-phrases"></div><div class="lvx-tap-actions"><button data-sync="events-review">Use reviewed assignments</button><button data-sync="events-export">Export events</button></div><p class="lvx-sync-hint">Counts group your recorded entrances into words. Amber means uncertain or changed. Raw timestamps never move. A word starts at its first entrance; its end stays provisional until word-boundary cleanup. Long gaps are flagged because a held syllable can look like the next word. Unresolved phrases stay in the take.</p></section>
+      <button data-sync="transcript-open" class="lvx-transcript-open">✎ Lyrics text</button><dialog class="lvx-transcript-editor" aria-label="Lyrics text"><h3>Lyrics</h3><p class="lvx-sync-hint">One phrase per line. <code>[Bubi]</code> alone sets the singer for following lines; inside a line it switches singers from that word onward. Names are not sung. Multiple Main tracks can overlap.</p><details class="lvx-transcript-help"><summary>Text shortcuts &amp; timing</summary><p class="lvx-sync-hint">Use <code>[lead]</code> for the original Main track or <code>[backing]</code> for backing. Parentheses add backing lyrics; Apply asks where they begin. Prefix a word with <code>=</code> to show it whole. Singer assignments preserve existing word timing. New words and lines get estimated timing; deleted words are hidden. Undo preview reverts.</p></details><div class="lvx-transcript-tracks"></div><textarea data-sync="transcript-text" rows="12" spellcheck="true" aria-label="Lyrics, one phrase per line"></textarea><ul class="lvx-transcript-changes" aria-live="polite"></ul><div class="lvx-tap-actions"><button data-sync="transcript-apply">Apply to preview</button><button data-sync="transcript-close">Close</button></div></dialog><section class="lvx-event-review" hidden aria-label="Assign recorded events"><p class="lvx-event-summary" role="status"></p><div class="lvx-event-phrases"></div><div class="lvx-tap-actions"><button data-sync="events-review">Use reviewed assignments</button><button data-sync="events-export">Export events</button></div><p class="lvx-sync-hint">Counts group your recorded entrances into words. Amber means uncertain or changed. Raw timestamps never move. A word starts at its first entrance; its end stays provisional until word-boundary cleanup. Long gaps are flagged because a held syllable can look like the next word. Unresolved phrases stay in the take.</p></section>
       <section class="lvx-mark-correction" hidden aria-label="Correct recorded timing"><label>Recorded <select data-sync="correct-mark" aria-label="Recorded mark to correct"></select></label><div class="lvx-correction-times"><label>Start ms <input data-sync="correct-start" type="number" min="0" step="10"></label><label>End ms <input data-sync="correct-end" type="number" min="0" step="10"></label></div><div class="lvx-tap-actions"><button data-sync="correct-hear">▶ Hear this mark</button><button data-sync="correct-save">Use exact times</button></div><label>Adjust <select data-sync="correct-edge"><option value="move">Whole mark</option><option value="start">Start only</option><option value="end">End only</option></select></label><div class="lvx-tap-actions"><button data-sync="correct-earlier">← Earlier 10 ms</button><button data-sync="correct-later">Later 10 ms →</button><button data-sync="correct-undo">↶ Undo correction</button></div><p class="lvx-sync-hint">Alt + ← / → adjusts the selected edge by 10 ms; add Shift for 50 ms. Corrections use original song time. Hear this mark plays a short loop at practice speed.</p></section>
       <details class="lvx-perform-options"><summary>Performance options <span>units · grid · clicks</span></summary>
       <div class="lvx-tap-settings"><label>Word gesture <select data-sync="tap-cadence"><option value="hold">Hold for word duration</option><option value="flow">Space → next lyric</option><option value="pairs">Separate start / end</option></select></label><label>Word pass <select data-sync="tap-scope"><option value="lane">Continue through vocal track</option><option value="phrase">This phrase only</option></select></label></div>
@@ -918,19 +918,35 @@
     const list=transcriptDialog.querySelector('.lvx-transcript-changes'),area=syncButton('transcript-text');list.replaceChildren();
     if(!timing.draft){if(area.value.trim()){const li=document.createElement('li');li.textContent='Pasted lyrics will use estimated timing until you record them.';list.append(li);}return null;}
     try{
-      const result=LvTranscriptText.diff(timing.draft.score,area.value);
-      const labels={display:'display',respell:'fix',replace:'replace (re-estimated)',insert:'insert (re-estimated)',hide:'hide words','delete-line':'hide line','add-line':'new line (estimated)','add-backing':'new backing (choose placement on Apply)',lane:'lane'};
-      for(const c of result.changes){const li=document.createElement('li');li.textContent=`${c.line?`Line ${c.line}`:'Removed'} · ${labels[c.kind]}: ${c.from||'∅'} → ${c.to||'(hidden)'}`;if(c.kind!=='respell')li.dataset.review='true';list.append(li);}
+      const result=LvTranscriptText.diff(timing.draft.score,area.value,{laneEdits:transcript.laneEdits||[]});
+      const labels={track:'vocal track','split-track':'vocal assignment',display:'display',respell:'fix',replace:'replace (re-estimated)',insert:'insert (re-estimated)',hide:'hide words','delete-line':'hide line','add-line':'new line (estimated)','add-backing':'new backing (choose placement on Apply)',lane:'lane'};
+      for(const c of result.changes){const li=document.createElement('li');li.textContent=`${c.line?`Line ${c.line}`:c.kind==='track'?'Track':'Removed'} · ${labels[c.kind]}: ${c.from||'∅'} → ${c.to||'(hidden)'}`;if(c.kind!=='respell')li.dataset.review='true';list.append(li);}
       if(!result.changes.length){const li=document.createElement('li');li.textContent='No changes.';list.append(li);}
       return result;
     }catch(error){const li=document.createElement('li');li.dataset.review='true';li.textContent=error.message;list.append(li);return null;}
+  }
+  function refreshTranscriptTracks(){
+    const host=transcriptDialog.querySelector('.lvx-transcript-tracks');if(!host)return;
+    const base=timing.draft?.score.lanes||[{id:'lead',label:'Main',role:'lead'},{id:'backing',label:'Backing',role:'backing'}];
+    const lanes=LvScore.parseVocalText(syncButton('transcript-text').value,base).lanes;
+    const signature=JSON.stringify(lanes);
+    if(host.dataset.lanes===signature)return;host.dataset.lanes=signature;host.replaceChildren();
+    const heading=document.createElement('h4');heading.textContent='Vocal tracks';host.append(heading);
+    for(const lane of lanes){
+      const value=transcript.laneEdits?.find(l=>l.id===lane.id)||lane,row=document.createElement('div'),name=document.createElement('input'),role=document.createElement('select');
+      row.className='lvx-transcript-track';name.value=value.label;name.maxLength=80;name.setAttribute('aria-label',`Name for ${lane.label}`);name.dataset.lane=lane.id;
+      for(const [id,label]of [['lead','Main'],['backing','Backing']]){const option=document.createElement('option');option.value=id;option.textContent=label;role.append(option);}role.value=value.role;role.setAttribute('aria-label',`Role for ${lane.label}`);
+      const change=()=>{transcript.laneEdits=[...(transcript.laneEdits||[]).filter(l=>l.id!==lane.id),{id:lane.id,label:name.value,role:role.value}];transcript.dirty=true;refreshTranscriptEditor();transcriptReview();};
+      name.addEventListener('input',change);role.addEventListener('change',change);row.append(name,role);host.append(row);
+    }
   }
   function refreshTranscriptEditor(){
     const area=syncButton('transcript-text');if(!area)return;
     // An older worker may inject this overlay without the transcript module until the extension reloads.
     const missing=typeof LvTranscriptText==='undefined';syncButton('transcript-open').hidden=missing;if(missing)return;
     const draft=timing.draft,binding=draft?`${draft.token}:${draft.previewRevision}`:null;
-    if(!transcript.dirty&&draft&&transcript.shownFor!==binding){area.value=LvTranscriptText.toText(draft.score);transcript.shownFor=binding;}
+    if(!transcript.dirty&&draft&&transcript.shownFor!==binding){area.value=LvTranscriptText.toText(draft.score);transcript.shownFor=binding;transcript.laneEdits=[];}
+    refreshTranscriptTracks();
     const sourceReady=Boolean(LvScore.mediaKey({url:location.href}));
     syncButton('transcript-apply').disabled=timing.busy||!sourceReady||!transcript.dirty||!area.value.trim()||tapPending()||countIn.active||countIn.preparing;syncButton('transcript-apply').textContent=tapPending()?'Stop or keep the take before applying':draft?'Apply to preview':'Use pasted lyrics';syncButton('transcript-open').disabled=timing.busy||!sourceReady;area.disabled=timing.busy||!sourceReady;area.placeholder='Paste lyrics here, one phrase per line. No cloud lookup required.';
   }
@@ -967,7 +983,11 @@
       state.score=result.score;state.plainLyrics={text,mediaKey:key,title:result.score.source.title,artist:result.score.source.artist,provider:'Manual paste'};
       const current=await timingRequest('LV_TIMING_CURRENT');timing.draft=(current.preview?current:await timingRequest('LV_TIMING_PREPARE',{fromSaved:true})).preview;timing.view='proposed';selectInitialTimingPhrase();
       existing=!result.created;
-      if(!existing){transcript.dirty=false;transcript.shownFor=null;transcriptDialog.close();errorPanel.hidden=true;state.scoreSignature='';setHud('Pasted lyrics are ready. Open Edit timing to record them; current timing is estimated.',false,true);}
+      if(!existing){
+        const edits=LvTranscriptText.diff(timing.draft.score,text,{laneEdits:transcript.laneEdits||[]});
+        if(edits.operations.length)timing.draft=(await timingRequest('LV_TIMING_TUNE',{operations:edits.operations,allowProtected:true})).preview;
+        transcript.dirty=false;transcript.shownFor=null;transcriptDialog.close();errorPanel.hidden=true;state.scoreSignature='';setHud('Pasted lyrics are ready. Open Edit timing to record them; current timing is estimated.',false,true);
+      }
     }catch(error){const list=transcriptDialog.querySelector('.lvx-transcript-changes'),li=document.createElement('li');li.dataset.review='true';li.textContent=error.message;list.replaceChildren(li);setHud(error.message,true,true);}
     finally{timing.busy=false;refreshTimingPanel();}
     if(existing)await applyTranscript();
@@ -975,7 +995,7 @@
   async function applyTranscript(){
     if(timing.busy||!transcript.dirty)return;
     if(!timing.draft){await createPastedLyrics();return;}
-    if(tapPending()||countIn.active||countIn.preparing){setSyncNotice('Stop or keep the current take before applying lyric changes. Your text is retained.','warn');return;}
+    if(tapPending()||captureTracks.slots.size||countIn.active||countIn.preparing){setSyncNotice('Keep or save the recorded tracks before applying lyric changes. Your text is retained.','warn');return;}
     let result=transcriptReview();if(!result)return;
     if(!result.operations.length){transcript.dirty=false;transcript.shownFor=null;refreshTimingPanel();return;}
     const binding=tapBinding(),text=syncButton('transcript-text').value;
@@ -984,12 +1004,13 @@
       if(result.changes.some(c=>c.kind==='add-backing')){
         const backingStart=await chooseBackingStart();if(!backingStart)return;
         if(tapBinding()!==binding||syncButton('transcript-text').value!==text||LvScore.mediaKey({url:location.href})!==LvScore.mediaKey(timing.draft?.score.source))throw Error('The preview changed while choosing backing placement. Your text is retained; review it again.');
-        result=LvTranscriptText.diff(timing.draft.score,text,{backingStart});
+        result=LvTranscriptText.diff(timing.draft.score,text,{backingStart,laneEdits:transcript.laneEdits||[]});
       }
       setSyncNotice(`Applying ${result.changes.length} lyric changes…`);
       const {extra,notes}=await respellSyllables(result.operations);
       const response=await timingRequest('LV_TIMING_TUNE',{operations:[...result.operations,...extra],allowProtected:true});
       timing.draft=response.preview;timing.auditioned=false;state.scoreSignature='';
+      if(!timingPhrase()?.words.some(w=>!w.excluded))selectInitialTimingPhrase();
       transcript.dirty=false;transcript.shownFor=null;transcriptDialog.close();
       setSyncNotice(`${result.changes.length} lyric changes are in the preview${extra.length?` · ${extra.length} words kept their syllable timings`:''}${notes.length?' · '+notes.join('; '):''}. Undo preview reverts; Save timings keeps them.`);
     }catch(error){setSyncNotice(error.message,'error');}finally{timing.busy=false;refreshTimingPanel();}
@@ -2514,7 +2535,7 @@
       const area=syncButton('transcript-text');
       if(!timing.draft&&!transcript.dirty){area.value='';state.plainLyrics={text:'',mediaKey:LvScore.mediaKey({url:location.href}),provider:'Manual paste'};}
       transcript.shownFor=transcript.dirty?transcript.shownFor:null;refreshTranscriptEditor();transcriptDialog.showModal();
-      if(!transcript.dirty){area.select();transcriptDialog.querySelector('.lvx-transcript-changes').replaceChildren();}
+      if(!transcript.dirty){area.select();const pending=transcriptReview();if(pending?.operations.length)transcript.dirty=true;else transcriptDialog.querySelector('.lvx-transcript-changes').replaceChildren();}
     }catch(error){setHud(error.message,true,true);}finally{timing.busy=false;refreshTranscriptEditor();}
   }
   syncButton('transcript-open').addEventListener('click',openTranscriptEditor);

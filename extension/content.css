@@ -2334,7 +2334,7 @@
 #lvx-root dialog.lvx-transcript-editor{pointer-events:auto;width:min(720px,92vw);max-height:86vh;padding:14px 16px;border:1px solid #58606a;border-radius:8px;background:#1d2126;color:#e8ecef;overflow:auto}
 #lvx-root dialog.lvx-transcript-editor::backdrop{background:rgba(0,0,0,.55)}
 #lvx-root dialog.lvx-transcript-editor h3{margin:0 0 6px;font-size:15px}
-#lvx-root dialog.lvx-transcript-editor textarea{width:100%;min-height:320px;font:13px/1.5 ui-monospace,Consolas,monospace;box-sizing:border-box;white-space:pre;overflow-wrap:normal;overflow-x:auto;background:#111417;color:#e8ecef;border:1px solid #58606a;border-radius:6px;padding:8px}
+#lvx-root dialog.lvx-transcript-editor textarea{width:100%;min-height:180px;font:13px/1.5 ui-monospace,Consolas,monospace;box-sizing:border-box;white-space:pre;overflow-wrap:normal;overflow-x:auto;background:#111417;color:#e8ecef;border:1px solid #58606a;border-radius:6px;padding:8px}
 #lvx-root .lvx-transcript-changes{margin:6px 0;padding-left:18px;font-size:11px;max-height:140px;overflow:auto}
 #lvx-root .lvx-transcript-changes li[data-review="true"]{color:#f2c879}
 /* Steps that now happen automatically on pause/stop. */
@@ -2848,7 +2848,7 @@
 @media(max-width:600px){#lvx-root .lvx-sidebar .lvx-speed-group [data-playback-rate]{display:none}}
 .lvx-completion{margin:8px 0 12px;padding:10px 12px;border:1px solid #ffffff18;border-radius:12px;background:#10232980}
 .lvx-completion-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;font-size:12px}.lvx-completion-heading small,.lvx-completion-hint{color:#a7b9bd;font-size:10px}
-.lvx-completion-grid{display:grid;grid-template-columns:48px repeat(3,minmax(0,1fr));gap:4px;align-items:center}.lvx-completion-grid>small{font-size:10px;text-align:center;color:#b0c3c7}.lvx-completion-grid>strong{font-size:11px;overflow-wrap:anywhere}
+.lvx-completion-grid{display:grid;grid-template-columns:minmax(90px,1.2fr) repeat(3,minmax(0,1fr));gap:4px;align-items:center}.lvx-completion-grid>small{font-size:10px;text-align:center;color:#b0c3c7}.lvx-completion-grid>strong{font-size:11px;overflow-wrap:break-word;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 #lvx-root .lvx-completion-grid button{display:flex;flex-direction:column;gap:2px;align-items:center;justify-content:center;min-width:0;padding:6px 2px;border:1px solid #ffffff16;border-radius:7px;background:#ffffff06;color:#b9cbd0;font-size:10px;line-height:1.2;transition:background .18s ease-out,border-color .18s ease-out}
 #lvx-root .lvx-completion-grid button small{font-size:10px;opacity:.8}#lvx-root .lvx-completion-grid button[data-status=partial]{color:#f5cd81;border-color:#dba34855}#lvx-root .lvx-completion-grid button[data-status=complete]{color:#9be7c5;border-color:#72d9b03b;opacity:1}#lvx-root .lvx-completion-grid button[data-current=true]{background:#ffffff0c}#lvx-root .lvx-completion-grid button:enabled:hover{background:#ffffff1a;border-color:#a3e3ec}#lvx-root .lvx-completion-grid button:focus-visible{outline:2px solid #a3e3ec;outline-offset:1px}.lvx-completion-hint{display:block;margin-top:7px;line-height:1.35}
 
@@ -3001,3 +3001,12 @@
 #lvx-root .lvx-capture-tracks label{display:grid;gap:4px;color:#cee9ed;font:600 12px/1.3 system-ui;min-width:0;}
 #lvx-root .lvx-capture-tracks select{width:100%;min-width:0;}
 #lvx-root .lvx-capture-tracks small{grid-column:1/-1;color:#bdd1da;font:11px/1.4 system-ui;}
+
+/* Singer identities stay editable beside the transcript. */
+#lvx-root .lvx-transcript-tracks{display:grid;gap:6px;margin:12px 0}
+#lvx-root .lvx-transcript-tracks h4{margin:0;font:600 12px system-ui;color:#c8d2e5}
+#lvx-root .lvx-transcript-track{display:grid;grid-template-columns:minmax(0,1fr) 95px;gap:8px}
+#lvx-root .lvx-transcript-track input,#lvx-root .lvx-transcript-track select{min-width:0;width:100%;box-sizing:border-box;background:#182130;color:#eef3fc;border:1px solid #53627b;border-radius:5px;padding:6px;font:12px system-ui}
+
+#lvx-root .lvx-transcript-help{font:12px/1.4 system-ui;margin:8px 0;color:#c8d2e5}
+#lvx-root .lvx-transcript-editor>.lvx-tap-actions{position:sticky;bottom:-14px;background:#1d2126;padding:10px 0;margin:0}
