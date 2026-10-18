@@ -235,9 +235,39 @@
     }
     return best?.slots;
   }
+  const layoutOrigins=Object.freeze({'top-left':'Top left','top-right':'Top right','bottom-left':'Bottom left','bottom-right':'Bottom right','center-out-cw':'Center outward · CW','center-out-ccw':'Center outward · CCW','center-in-cw':'Center inward · CW','center-in-ccw':'Center inward · CCW'});
+  function perimeter(words,width,height,measure,{origin,upsideDown,maxFont,weights}){
+    const short=Math.min(width,height),clockwise=origin.endsWith('-cw'),outward=origin.startsWith('center-out-'),edges=clockwise?['top','right','bottom','left']:['top','left','bottom','right'];
+    // Two thin rails frame a protected center. Inner words are deliberately smaller.
+    const split=Math.ceil(words.length/2),rings=[words.slice(0,split),words.slice(split)],slots=[];
+    let offset=0;
+    for(let ring=0;ring<rings.length;ring++){
+      const group=rings[ring];if(!group.length)continue;
+      const inner=outward?ring===0:ring===1,inset=short*(inner?.20:.06),corner=short*.065;
+      const lengths={top:Math.max(1,width-2*(inset+corner)),bottom:Math.max(1,width-2*(inset+corner)),left:Math.max(1,height-2*(inset+corner)),right:Math.max(1,height-2*(inset+corner))},total=edges.reduce((sum,e)=>sum+lengths[e],0);
+      let font=Math.min(maxFont,short*.07)*(inner?.65:1),placed;
+      for(let attempt=0;attempt<100;attempt++,font*=.92){
+        const boxes=group.map((word,i)=>{const size=font*Math.max(.8,Math.min(1.15,weights[word.id]?.weight??1));return {index:offset+i,font:size,width:Math.max(size*.2,measure(word.text,size,word))+size*.08,height:size*1.3};}),gap=font*.22,run=boxes.reduce((sum,b)=>sum+b.width+gap,0),bins=Object.fromEntries(edges.map(e=>[e,[]]));let at=0;
+        for(const box of boxes){let target=(at+box.width/2)/run*total,edge=edges.at(-1);for(const e of edges){if(target<=lengths[e]){edge=e;break;}target-=lengths[e];}bins[edge].push(box);at+=box.width+gap;}
+        if(edges.some(e=>bins[e].reduce((sum,b)=>sum+b.width,0)+gap*Math.max(0,bins[e].length-1)>lengths[e]))continue;
+        placed=[];
+        for(const edge of edges){const row=bins[edge],used=row.reduce((sum,b)=>sum+b.width,0)+gap*Math.max(0,row.length-1);let along=(lengths[edge]-used)/2;
+          for(const box of row){const distance=corner+along+box.width/2,vertical=edge==='left'||edge==='right',forward=vertical?(clockwise?edge==='right':edge==='left'):(edge==='bottom'||!upsideDown);let x,y;
+            if(vertical){x=edge==='left'?inset:width-inset;y=forward?inset+distance:height-inset-distance;}else{x=forward?inset+distance:width-inset-distance;y=edge==='top'?inset:height-inset;}
+            const angle=edge==='bottom'?0:edge==='top'?(upsideDown?180:0):(forward?90:270);
+            placed.push({...box,x,y,angle,edge,ring:inner?'inner':'outer',boxWidth:vertical?box.height:box.width,boxHeight:vertical?box.width:box.height});along+=box.width+gap;
+          }
+        }
+        break;
+      }
+      if(!placed)return null;slots.push(...placed);offset+=group.length;
+    }
+    return slots.sort((a,b)=>a.index-b.index);
+  }
   function layout(words,width,height,measure,{mode='fall',upsideDown=false,maxFont=80,minFont=0,weights={},arrangement='chaotic',origin='top-left'}={}){
     width=Math.max(1,width);height=Math.max(1,height);minFont=Math.max(0,minFont);maxFont=Math.max(minFont,maxFont);
     if(!words.length)return [];
+    if(mode==='puzzle'&&Object.hasOwn(layoutOrigins,origin)&&origin.startsWith('center-')){const framed=perimeter(words,width,height,measure,{origin,upsideDown,maxFont,weights});if(framed)return framed;}
     if(mode==='puzzle'&&height>=140&&width>=180&&words.length>=3){
       const packed=arrangement==='ordered'?ordered(words,width,height,measure,{maxFont,minFont,weights}):puzzle(words,width,height,measure,{upsideDown,maxFont,minFont,weights});
       if(packed)return packed.map(slot=>({...slot,x:origin.endsWith('right')?width-slot.x:slot.x,y:origin.startsWith('bottom')?height-slot.y:slot.y}));
@@ -359,5 +389,5 @@
     const particles=(count,smoke)=>Array.from({length:count},(_,i)=>{const seed=i+(smoke?47:11),period=(smoke?3100:1700)+hash(seed,3)*1900,age=((time+hash(seed,9)*period)%period)/period;return {x:(hash(seed,4)-.5)*2.5+Math.sin(age*4+seed)*.13,y:(smoke?.15:.55)-age*(smoke?.65:.95),alpha:(smoke?.12:.8)*Math.sin(Math.PI*age),size:smoke?.06+.07*age:.025};});
     return {width,height,time,palette:firePalettes[color]||firePalettes.ember,pixels,embers:reduced?[]:particles(4,false),smoke:reduced?[]:particles(3,true)};
   }
-  const api={landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,validateWordRuleSets,wordRuleAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
+  const api={layoutOrigins,landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,validateWordRuleSets,wordRuleAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

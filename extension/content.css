@@ -3069,3 +3069,5 @@
 /* Word-local disco art; source-media clock owns all motion and light changes. */
 .lvx-word-disco { position:absolute; left:50%; top:-1em; width:calc(100% + 1em); height:2.7em; transform:translateX(-50%); overflow:visible; z-index:-1; }
 .lvx-disco-facets { border-radius:50%; overflow:hidden; }
+
+#lvx-root .lvx-perimeter-hint { flex-basis:100%; color:#b6c2c8; font:12px/1.5 system-ui; }
