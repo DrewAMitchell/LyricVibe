@@ -33,6 +33,21 @@
     }
     return cues;
   }
+  // Bounded painted copies: no cloned DOM, random state or wall-clock animation.
+  function accentShadow(type,phase,strength,reduced=false){
+    if(reduced||strength<=0)return '';
+    if(type==='echo'){
+      const drift=(.07+.055*(1-Math.cos(phase*2*Math.PI)))*strength;
+      return [1,2,3].map(i=>`${(-drift*i).toFixed(4)}em ${(drift*i*.3).toFixed(4)}em 0 color-mix(in srgb,currentColor ${[30,17,8][i-1]}%,transparent)`).join(',');
+    }
+    if(type==='glitch'){
+      // Two brief splits per second-equivalent phase; no opacity flashing.
+      const step=Math.floor(phase*8),burst=step%4===0;
+      const d=(burst?.11:.018)*strength*(step%2?-1:1);
+      return `${d.toFixed(4)}em 0 0 #47e8ed,${(-d).toFixed(4)}em .015em 0 #f16dbc`;
+    }
+    return '';
+  }
   // Geometry, expression, and authored beat accents use separate transform layers.
   function expressionAt(cue,now,{mode='classic',reduced=false,effects=[],automatic=true}={}){
     const out={x:0,y:0,turn:0,scale:1,color:null,brightness:1,wave:0,wavePhase:0,reason:''};
@@ -43,6 +58,7 @@
       out.reason='authored';
       for(const effect of effects){const strength=Math.max(0,Math.min(1,effect.strength??.3));
         if(!reduced&&effect.type==='groove'){out.wave=.16*strength*envelope;out.wavePhase=t*Math.PI*2/1.2;out.waveAxis=effect.axis||'vertical';}
+        if(['echo','glitch'].includes(effect.type))out.shadow=accentShadow(effect.type,t,strength*envelope,reduced);
         if(effect.type==='glow')out.brightness=1+strength*(reduced?.2:.5*envelope);
         if(!reduced&&effect.type==='bounce')out.y-=Math.abs(Math.sin(t*Math.PI*2))*strength*12*envelope;
         if(!reduced&&effect.type==='shake')out.x+=Math.sin(t*Math.PI*12.5)*strength*2;
@@ -266,5 +282,5 @@
     const particles=(count,smoke)=>Array.from({length:count},(_,i)=>{const seed=i+(smoke?47:11),period=(smoke?3100:1700)+hash(seed,3)*1900,age=((time+hash(seed,9)*period)%period)/period;return {x:(hash(seed,4)-.5)*2.5+Math.sin(age*4+seed)*.13,y:(smoke?.15:.55)-age*(smoke?.65:.95),alpha:(smoke?.12:.8)*Math.sin(Math.PI*age),size:smoke?.06+.07*age:.025};});
     return {width,height,time,palette:firePalettes[color]||firePalettes.ember,pixels,embers:reduced?[]:particles(4,false),smoke:reduced?[]:particles(3,true)};
   }
-  const api={layout,readablePages,arrival,compose,expressionAt,danceAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
+  const api={accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

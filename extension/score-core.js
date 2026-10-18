@@ -10,11 +10,11 @@
     version: 'lyricvibe.display.v1',
     looks: Object.freeze(['samay','flow','fire','neon','glass','hype','soft','clean','retro','elegant','aurora','matrix','vinyl','cosmic']),
     motions: Object.freeze(['off','mix','tip','flex','bounce','launch']),
-    wordEffects: Object.freeze(['shake','tilt','pulse','bounce','glow','groove']),
-    beatEffects: Object.freeze(['pulse','breath','color','bounce','glow','groove']),
+    wordEffects: Object.freeze(['shake','tilt','pulse','bounce','glow','groove','echo','glitch']),
+    beatEffects: Object.freeze(['pulse','breath','color','bounce','glow','groove','echo','glitch']),
     layouts: Object.freeze(['classic','fall','puzzle','vinyl'])
   });
-  const EFFECTS = new Set(["shake", "tilt", "pulse", "bounce", "glow", "groove"]);
+  const EFFECTS = new Set(["shake", "tilt", "pulse", "bounce", "glow", "groove", "echo", "glitch"]);
   const REVEAL_EASINGS = new Set(["linear", "ease-out", "ease-in-out"]);
   const ID_RE = /^[A-Za-z0-9_-]{11}$/;
   const HASH_RE = /^[a-f0-9]{64}$/i;
@@ -324,7 +324,7 @@
       if(!Array.isArray(score.beatCues)||score.beatCues.length>5000)bad('beat cues must be a bounded list');
       const cueIds=new Set();
       for(const cue of score.beatCues){
-        if(!cue||typeof cue.id!=='string'||!cue.id||cueIds.has(cue.id)||!Number.isFinite(cue.beat)||!Number.isFinite(cue.durationBeats)||cue.durationBeats<=0||cue.durationBeats>64||!['pulse','breath','color','bounce','glow','groove'].includes(cue.effect)||!Number.isFinite(cue.strength)||cue.strength<0||cue.strength>1||cue.provenance!=='manual'||cue.axis!==undefined&&(cue.effect!=='groove'||!['horizontal','vertical'].includes(cue.axis)))bad('invalid beat cue');
+        if(!cue||typeof cue.id!=='string'||!cue.id||cueIds.has(cue.id)||!Number.isFinite(cue.beat)||!Number.isFinite(cue.durationBeats)||cue.durationBeats<=0||cue.durationBeats>64||!['pulse','breath','color','bounce','glow','groove','echo','glitch'].includes(cue.effect)||!Number.isFinite(cue.strength)||cue.strength<0||cue.strength>1||cue.provenance!=='manual'||cue.axis!==undefined&&(cue.effect!=='groove'||!['horizontal','vertical'].includes(cue.axis)))bad('invalid beat cue');
         cueIds.add(cue.id);const target=cue.target;
         if(!target||!['screen','active','lane','phrase','word','syllable'].includes(target.kind))bad('invalid beat target');
         if(['lane','phrase','word','syllable'].includes(target.kind)&&!ids.has(target.id))bad('unknown beat target');

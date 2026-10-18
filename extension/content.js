@@ -103,7 +103,7 @@
   const performanceTake = { armed: false, binding: null, laneId: null, rate: 1, marks: [] };
   const effectGesture = { input:null, type:'clear', samples:new Map(), base:[], groupId:null };
   const effectTracks=[];
-  const effectColors={pulse:'#63cbd5',tilt:'#b59aeb',shake:'#ed8d8d',bounce:'#8ed39c',glow:'#e9c66f',groove:'#7eacf0',breath:'#c7a2dc',color:'#e5a3cb',blank:'#7f919a'};
+  const effectColors={pulse:'#63cbd5',tilt:'#b59aeb',shake:'#ed8d8d',bounce:'#8ed39c',glow:'#e9c66f',groove:'#7eacf0',echo:'#75d4bb',glitch:'#ef87cf',breath:'#c7a2dc',color:'#e5a3cb',blank:'#7f919a'};
 
   /* ══════════════════════════════════════
      DOM CONSTRUCTION
@@ -654,7 +654,7 @@
       <label class="lvx-sync-loop"><input type="checkbox" data-sync="tap-click"> Audible marks · words only</label>
       </details>
     </details>
-    <details class="lvx-effect-panel"><summary>Perform effects <span>second pass</span></summary><p class="lvx-sync-hint">Hold Space to overwrite. Space alone clears; press 1–6 while holding to apply an effect. Release to listen.</p><div class="lvx-beat-settings"><label>Clock <select data-sync="effect-clock"><option value="interval">Sung intervals</option><option value="beat">Beats · through gaps</option></select></label><label>Target <select data-sync="beat-target"><option value="active">Visible lyrics</option><option value="screen">Screen glow</option><option value="lane">Current vocal lane</option><option value="phrase">This phrase</option><option value="word">Selected word</option><option value="syllable">Selected syllable</option></select></label><label>Length · beats <input data-sync="beat-duration" type="number" min="0.25" max="64" step="0.25" value="4"></label><label class="lvx-sync-loop"><input data-sync="beat-snap" type="checkbox" checked> Snap effect to ¼ beat</label></div><label class="lvx-sync-loop lvx-interval-target">Target <select data-sync="effect-scope"><option value="phrase">Phrase</option><option value="word" selected>Word</option><option value="syllable">Authored syllable</option></select></label><div class="lvx-tap-actions"><button data-sync="effect-start">▶ Start effects pass · Enter</button><button data-sync="effect-stop">■ Stop · Enter</button></div><label class="lvx-groove-direction">Groove direction <select data-sync="groove-axis" aria-label="Groove direction"><option value="vertical">Vertical ↕</option><option value="horizontal">Horizontal ↔</option></select></label><div class="lvx-effect-pads"><button data-effect="pulse">1 · Pulse</button><button data-effect="tilt">2 · Tilt</button><button data-effect="shake">3 · Shake</button><button data-effect="bounce">4 · Bounce</button><button data-effect="glow">5 · Glow</button><button data-effect="groove">6 · Groove</button></div><p class="lvx-effect-status" role="status">Effects are buffered until you use the pass.</p><div class="lvx-beat-cue-list"></div><label class="lvx-gap-setting">Phrase linger override · beats<input data-sync="gap-beats" type="number" min="0" max="64" step="0.25" value="0"></label><button data-sync="gap-use">Use phrase override</button><button data-sync="gap-default">Use display default</button><p class="lvx-sync-hint">0 disables linger for this phrase. A beat override ends at the next lyric in this lane. Use display default removes the override; sung timings stay fixed.</p><div class="lvx-tap-actions"><button data-sync="effect-use">Use effects in preview</button><button data-sync="effect-undo">↶ Undo effect</button><button data-sync="effect-discard">Discard effects</button></div></details>
+    <details class="lvx-effect-panel"><summary>Perform effects <span>second pass</span></summary><p class="lvx-sync-hint">Hold Space to overwrite. Space alone clears; press 1–8 while holding to apply an effect. Release to listen.</p><div class="lvx-beat-settings"><label>Clock <select data-sync="effect-clock"><option value="interval">Sung intervals</option><option value="beat">Beats · through gaps</option></select></label><label>Target <select data-sync="beat-target"><option value="active">Visible lyrics</option><option value="screen">Screen glow</option><option value="lane">Current vocal lane</option><option value="phrase">This phrase</option><option value="word">Selected word</option><option value="syllable">Selected syllable</option></select></label><label>Length · beats <input data-sync="beat-duration" type="number" min="0.25" max="64" step="0.25" value="4"></label><label class="lvx-sync-loop"><input data-sync="beat-snap" type="checkbox" checked> Snap effect to ¼ beat</label></div><label class="lvx-sync-loop lvx-interval-target">Target <select data-sync="effect-scope"><option value="phrase">Phrase</option><option value="word" selected>Word</option><option value="syllable">Authored syllable</option></select></label><div class="lvx-tap-actions"><button data-sync="effect-start">▶ Start effects pass · Enter</button><button data-sync="effect-stop">■ Stop · Enter</button></div><label class="lvx-groove-direction">Groove direction <select data-sync="groove-axis" aria-label="Groove direction"><option value="vertical">Vertical ↕</option><option value="horizontal">Horizontal ↔</option></select></label><div class="lvx-effect-pads"><button data-effect="pulse">1 · Pulse</button><button data-effect="tilt">2 · Tilt</button><button data-effect="shake">3 · Shake</button><button data-effect="bounce">4 · Bounce</button><button data-effect="glow">5 · Glow</button><button data-effect="groove">6 · Groove</button><button data-effect="echo">7 · Echo</button><button data-effect="glitch">8 · Glitch</button></div><p class="lvx-effect-status" role="status">Effects are buffered until you use the pass.</p><div class="lvx-beat-cue-list"></div><label class="lvx-gap-setting">Phrase linger override · beats<input data-sync="gap-beats" type="number" min="0" max="64" step="0.25" value="0"></label><button data-sync="gap-use">Use phrase override</button><button data-sync="gap-default">Use display default</button><p class="lvx-sync-hint">0 disables linger for this phrase. A beat override ends at the next lyric in this lane. Use display default removes the override; sung timings stay fixed.</p><div class="lvx-tap-actions"><button data-sync="effect-use">Use effects in preview</button><button data-sync="effect-undo">↶ Undo effect</button><button data-sync="effect-discard">Discard effects</button></div></details>
     <details><summary>Exact word timings <span>milliseconds</span></summary><p class="lvx-sync-hint">One word per line: word, start, end. These changes affect the preview until you apply.</p><label class="lvx-sync-protected"><input type="checkbox" data-sync="protected"> Edit saved timings in this phrase</label><textarea aria-label="Exact word timings in milliseconds" spellcheck="false" rows="5"></textarea><div class="lvx-sync-text-actions"><button data-sync="tune">Use these times</button><button data-sync="reset">Reset text</button></div></details>
     <div class="lvx-sync-text-actions"><button data-sync="export">↓ Export preview JSON</button><button data-sync="discard-all" class="lvx-danger">Discard all changes</button></div>
     <footer><button data-sync="undo">↶ Undo saved change</button><span class="lvx-save-wrap" tabindex="-1"><span class="lvx-save-tooltip" role="tooltip" id="lvx-save-reason"></span><button data-sync="apply" class="lvx-sync-primary" aria-describedby="lvx-save-reason"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/></svg> Save timings</button></span></footer>`;
@@ -2560,18 +2560,18 @@
       performanceTake.armed = true; performanceTake.binding = binding; performanceTake.laneId = phrase.laneId; performanceTake.rate = media.playbackRate;
       performanceTake.clock=syncButton('effect-clock').value;
       timing.view = 'proposed'; timing.auditioned = false; state.scoreSignature = '';
-      setSyncNotice('Listening. Hold Space alone to clear; press 1–6 during the hold to apply an effect. Release Space to listen. Enter or Stop adds edits to preview.');
+      setSyncNotice('Listening. Hold Space alone to clear; press 1–8 during the hold to apply an effect. Release Space to listen. Enter or Stop adds edits to preview.');
     } catch (error) { setSyncNotice(error.message,'error'); }
     finally { timing.busy = false; refreshTimingPanel(); syncButton('effect-stop').focus(); }
   }
   function markEffect(type, event = {}, sample=null) {
-    if (!performanceTake.armed || event.repeat || !['pulse','tilt','shake','bounce','glow','groove','clear'].includes(type)) return;
+    if (!performanceTake.armed || event.repeat || !['pulse','tilt','shake','bounce','glow','groove','echo','glitch','clear'].includes(type)) return;
     if (!effectSourceReady()) { stopEffects('Effects stopped because playback or its source changed. Gestures retained.'); return; }
     const target = sample?.target||activeEffectTarget();
     if (!target) { setSyncNotice('No unique active lyric in this vocal track. Nothing added during this gap or overlap.'); return; }
     if (performanceTake.marks.length >= 512) { stopEffects('Gesture buffer is full. Use or discard this pass before continuing.'); return; }
     if(performanceTake.clock==='beat'){
-      if(type==='groove'&&target.target.kind==='screen'){setSyncNotice('Groove bends letters. Choose Phrase, Word, Syllable or visible lyrics.');return;}
+      if(['groove','echo','glitch'].includes(type)&&target.target.kind==='screen'){setSyncNotice('This effect uses letters. Choose Phrase, Word, Syllable or visible lyrics.');return;}
       const rawSourceMs=sample?.mediaMs??Math.round(getMediaTimeMs()),at=LvTapTiming.tempoAt(tempo.map,rawSourceMs);if(!at)return;
       const beat=syncButton('beat-snap').checked?Math.round(at.beat*4)/4:at.beat,durationBeats=Number(syncButton('beat-duration').value);
       if(!Number.isFinite(durationBeats)||durationBeats<=0||durationBeats>64){setSyncNotice('Effect length must be more than 0 and at most 64 beats.');return;}
@@ -2581,7 +2581,7 @@
         for(const mark of performanceTake.marks){if(mark.operation.type==='setBeatCue')cues.set(mark.operation.cue.id,mark.operation.cue);else if(mark.operation.type==='deleteBeatCue')cues.delete(mark.operation.cueId);}
         for(const cue of [...cues.values()].filter(match))performanceTake.marks.push({targetId:cue.id,atMs:rawSourceMs,operation:{type:'deleteBeatCue',cueId:cue.id}});
       }else{
-        const cue={id:'beat-'+crypto.randomUUID(),beat,durationBeats,effect:{pulse:'pulse',tilt:'breath',shake:'color',bounce:'bounce',glow:'glow',groove:'groove'}[type],strength:.6,...(type==='groove'?{axis:syncButton('groove-axis').value}:{}),target:target.target,rawSourceMs,snappedSourceMs:Math.max(0,Math.round(LvTapTiming.tempoTimeAtBeat(tempo.map,beat))),provenance:'manual'};
+        const cue={id:'beat-'+crypto.randomUUID(),beat,durationBeats,effect:{pulse:'pulse',tilt:'breath',shake:'color',bounce:'bounce',glow:'glow',groove:'groove',echo:'echo',glitch:'glitch'}[type],strength:.6,...(type==='groove'?{axis:syncButton('groove-axis').value}:{}),target:target.target,rawSourceMs,snappedSourceMs:Math.max(0,Math.round(LvTapTiming.tempoTimeAtBeat(tempo.map,beat))),provenance:'manual'};
         performanceTake.marks.push({targetId:cue.id,atMs:rawSourceMs,operation:{type:'setBeatCue',cue}});
       }
       timing.auditioned=false;state.scoreSignature='';if(!sample){refreshEffectPanel();setSyncNotice(`Beat effect → ${target.text} · ${durationBeats} beats · buffered`);}return;
@@ -2614,10 +2614,10 @@
   const effectTargets=document.createElement('div');effectTargets.className='lvx-effect-targets';effectTargets.setAttribute('role','group');effectTargets.setAttribute('aria-label','Effect target');
   for(const [value,label]of [['phrase','Phrase'],['word','Word'],['syllable','Syllable']]){const button=document.createElement('button');button.type='button';button.dataset.effectTarget=value;button.textContent=label;button.onclick=()=>{syncButton('effect-scope').value=value;syncButton('beat-target').value=value;refreshEffectPanel();};effectTargets.append(button);}
   syncPanel.querySelector('.lvx-effect-panel>.lvx-sync-hint').after(effectTargets);
-  syncPanel.querySelector('.lvx-effect-panel>.lvx-sync-hint').textContent='Hold Space to overwrite. Space alone clears; press 1–6 while holding to apply an effect. Release Space to listen. Enter starts / stops playback.';
+  syncPanel.querySelector('.lvx-effect-panel>.lvx-sync-hint').textContent='Hold Space to overwrite. Space alone clears; press 1–8 while holding to apply an effect. Release Space to listen. Enter starts / stops playback.';
   syncButton('effect-start').textContent='▶ Start effects pass · Enter';syncButton('effect-stop').textContent='■ Stop · Enter';
   const effectHold=document.createElement('button');effectHold.dataset.sync='effect-hold';effectHold.textContent='Hold to overwrite · Space';effectHold.type='button';effectHold.setAttribute('aria-pressed','false');syncButton('effect-stop').after(effectHold);
-  const effectLive=document.createElement('div');effectLive.className='lvx-effect-live';effectLive.innerHTML='<strong></strong><span></span><small>Space = blank · Space + 1–6 = effect</small>';syncPanel.querySelector('.lvx-effect-pads').before(effectLive);
+  const effectLive=document.createElement('div');effectLive.className='lvx-effect-live';effectLive.innerHTML='<strong></strong><span></span><small>Space = blank · Space + 1–8 = effect</small>';syncPanel.querySelector('.lvx-effect-pads').before(effectLive);
   effectLive.after(createEffectTrack('effects'));
   for(const pad of syncPanel.querySelectorAll('.lvx-effect-pads [data-effect]'))pad.style.setProperty('--effect-color',effectColors[pad.dataset.effect]);
   const effectClear=document.createElement('button');effectClear.dataset.sync='effect-clear-track';effectClear.type='button';effectClear.textContent='Clear effects track…';syncButton('effect-discard').after(effectClear);
@@ -2667,12 +2667,12 @@
     const time=bloomMotion.matches?1000:500+(now-effectPreview.start)%2000;
     expressLine(effectPreviewLine,effectPreview.words,time,effectPreview.cues,{...choreography,mode:'classic',automatic:false,dance:'off'});
     const beatMode=syncButton('effect-clock').value==='beat';
-    for(const node of effectPreviewLine.children){node.style.removeProperty('translate');node.style.removeProperty('scale');node.style.removeProperty('filter');for(const letter of node.querySelectorAll('.lvx-dance-letter'))letter.style.removeProperty('translate');}
+    for(const node of effectPreviewLine.children){node.style.removeProperty('translate');node.style.removeProperty('scale');node.style.removeProperty('filter');paintAccent(node,'','beat');for(const letter of node.querySelectorAll('.lvx-dance-letter'))letter.style.removeProperty('translate');}
     if(beatMode&&effectPreview.type!=='clear'){
       const map=tempo.map||{version:1,anchorMs:0,segments:[{startMs:0,bpm:120,transition:'step',provenance:'manual'}]},beat=LvTapTiming.tempoAt(map,0)?.beat||0;
       const cue={beat,durationBeats:64,effect:{tilt:'breath',shake:'color'}[effectPreview.type]||effectPreview.type,strength:.6,axis:syncButton('groove-axis').value};
       const visual=LvBeatTrack.cueAt(cue,map,time,bloomMotion.matches);
-      if(visual)for(const node of effectPreviewLine.children){node.style.translate='0 '+(visual.y||0)+'px';node.style.scale=String(visual.scale);node.style.filter=`brightness(${visual.brightness}) hue-rotate(${visual.hue}deg)`;if(visual.groove)paintBeatGroove(node,visual.groove,false);}
+      if(visual)for(const node of effectPreviewLine.children){node.style.translate='0 '+(visual.y||0)+'px';node.style.scale=String(visual.scale);node.style.filter=`brightness(${visual.brightness}) hue-rotate(${visual.hue}deg)`;if(visual.groove)paintBeatGroove(node,visual.groove,false);paintAccent(node,visual.accent?LvChoreography.accentShadow(visual.accent.type,visual.accent.phase,visual.accent.strength):'','beat');}
     }
     if(effectPreview.type!=='clear'&&!bloomMotion.matches)effectPreview.frame=requestAnimationFrame(effectPreviewTick);
   }
@@ -4428,6 +4428,11 @@
     letters.forEach((letter,i)=>{if(!letter.style.getPropertyValue('--lvx-fire-glyph-x'))letter.style.setProperty('--lvx-fire-glyph-x',(-i*.53).toFixed(2)+'em');});
     return letters;
   }
+  function paintAccent(node,shadow,owner){
+    const key='--lvx-'+owner+'-shadow';
+    if(shadow)node.style.setProperty(key,shadow);else node.style.removeProperty(key);
+    node.classList.toggle('lvx-accent-shadow',Boolean(node.style.getPropertyValue('--lvx-expression-shadow')||node.style.getPropertyValue('--lvx-beat-shadow')));
+  }
   const beatGrooveLetters=new Set();
   function paintBeatGroove(node,groove,track=true){const letters=ensureDanceLetters(node);letters.forEach((letter,i)=>{const offset=Math.sin((i+.5)/Math.max(1,letters.length)*Math.PI*2-groove.phase)*groove.strength*.16;letter.style.translate=groove.axis==='horizontal'?offset.toFixed(4)+'em 0':'0 '+offset.toFixed(4)+'em';if(track)beatGrooveLetters.add(letter);});}
   function expressLine(line,words,clock,cues,settings=choreography){
@@ -4444,6 +4449,7 @@
       const wave=heldMotion?value.wave:0;
       if(dance.kind==='flex'||wave>0)ensureDanceLetters(node);
       const letters=[...node.querySelectorAll('.lvx-dance-letter')];letters.forEach((letter,i)=>{const p=(i+.5)/Math.max(1,letters.length),a=p*Math.PI*2+dance.phase;if(!heldMotion)return;letter.style.transform=dance.kind==='flex'?`translateY(${(Math.sin(a)*dance.flex).toFixed(4)}em) skewY(${(Math.cos(a)*dance.flex*28).toFixed(3)}deg)`:wave>0?`translate${value.waveAxis==='horizontal'?'X':'Y'}(${(Math.sin(p*Math.PI*2-value.wavePhase)*wave).toFixed(4)}em)`:'';});
+      paintAccent(node,value.shadow,'expression');
       node.style.setProperty('--lvx-expression-bright',value.brightness.toFixed(4));
       if(value.color){node.dataset.expressionColor='true';node.style.setProperty('--lvx-expression-color',value.color);}else{delete node.dataset.expressionColor;node.style.removeProperty('--lvx-expression-color');}
     };
@@ -4494,7 +4500,7 @@
     const frame=LvChoreography.paintVinyl(ctx,canvas.__track,clock,width,height,{reduced:bloomMotion.matches});canvas.dataset.wordCount=String(frame.words.length);canvas.dataset.glyphCount=String(frame.glyphs.length);canvas.dataset.firstWord=frame.words[0]||'';canvas.dataset.sourceMs=String(mediaMs);canvas.dataset.scoreMs=String(clock);
     if(canvas.__transcript!==frame.text){canvas.__transcript=frame.text;canvas.setAttribute('aria-label','Sung lyric history: '+(frame.text||'waiting for the first word'));}
     // Clear a prior DOM layout's beat treatment; the record owns its own geometry.
-    for(const node of beatStyledNodes){node.classList.remove('lvx-beat-target');for(const prop of ['scale','bright','hue','y'])node.style.removeProperty('--lvx-beat-'+prop);}beatStyledNodes.clear();
+    for(const node of beatStyledNodes){node.classList.remove('lvx-beat-target');paintAccent(node,'','beat');for(const prop of ['scale','bright','hue','y'])node.style.removeProperty('--lvx-beat-'+prop);}beatStyledNodes.clear();
   }
   function renderScore(mediaMs) {
     refreshRecordingTransport();
@@ -4625,10 +4631,10 @@
       const visual=LvBeatTrack.cueAt(cue,tempo.map,sourceMs,reduced,beat);if(!visual)continue;
       const t=cue.target,selector=t.kind==='active'||t.kind==='lane'?'.lvx-score-phrase':t.kind==='phrase'?`[data-phrase="${CSS.escape(t.id)}"]`:t.kind==='word'?`[data-word="${CSS.escape(t.id)}"]`:t.kind==='syllable'?`[data-syllable="${CSS.escape(t.id)}"]`:null;
       const nodes=t.kind==='screen'?[stage]:[...stage.querySelectorAll(selector)].filter(n=>t.kind!=='lane'||score.phrases.find(p=>p.id===n.dataset.phrase)?.laneId===t.id);
-      for(const node of nodes){if(visual.groove)paintBeatGroove(node,visual.groove);const prior=values.get(node)||{scale:1,brightness:1,hue:0};values.set(node,{scale:Math.max(prior.scale,visual.scale),brightness:Math.max(prior.brightness,visual.brightness),hue:prior.hue+visual.hue,y:(prior.y||0)+(visual.y||0)});}
+      for(const node of nodes){if(visual.groove)paintBeatGroove(node,visual.groove);const prior=values.get(node)||{scale:1,brightness:1,hue:0};values.set(node,{scale:Math.max(prior.scale,visual.scale),brightness:Math.max(prior.brightness,visual.brightness),hue:prior.hue+visual.hue,y:(prior.y||0)+(visual.y||0),shadow:visual.accent?LvChoreography.accentShadow(visual.accent.type,visual.accent.phase,visual.accent.strength):prior.shadow});}
     }
-    for(const node of beatStyledNodes)if(!values.has(node)){node.classList.remove('lvx-beat-target');for(const key of ['scale','bright','hue','y'])node.style.removeProperty('--lvx-beat-'+key);beatStyledNodes.delete(node);}
-    for(const [node,value]of values){node.classList.add('lvx-beat-target');const props={scale:node===stage?'1':value.scale.toFixed(4),bright:value.brightness.toFixed(4),hue:value.hue.toFixed(2)+'deg',y:(value.y||0).toFixed(3)+'px'};for(const [key,v]of Object.entries(props))if(node.style.getPropertyValue('--lvx-beat-'+key)!==v)node.style.setProperty('--lvx-beat-'+key,v);beatStyledNodes.add(node);}
+    for(const node of beatStyledNodes)if(!values.has(node)){node.classList.remove('lvx-beat-target');paintAccent(node,'','beat');for(const key of ['scale','bright','hue','y'])node.style.removeProperty('--lvx-beat-'+key);beatStyledNodes.delete(node);}
+    for(const [node,value]of values){paintAccent(node,value.shadow,'beat');node.classList.add('lvx-beat-target');const props={scale:node===stage?'1':value.scale.toFixed(4),bright:value.brightness.toFixed(4),hue:value.hue.toFixed(2)+'deg',y:(value.y||0).toFixed(3)+'px'};for(const [key,v]of Object.entries(props))if(node.style.getPropertyValue('--lvx-beat-'+key)!==v)node.style.setProperty('--lvx-beat-'+key,v);beatStyledNodes.add(node);}
   }
   function applyReveal(node, item, clockMs) {
     if(item.displayMode==='whole'){node.style.clipPath='';return;}
@@ -5090,7 +5096,7 @@
     // Keep it away from YouTube shortcuts without canceling button activation.
     if(event.key==='Enter'&&target?.closest?.('button')&&syncPanel.contains(target)){event.stopImmediatePropagation();return;}
     if(event.key==='0'&&timingWorkspace.view==='effects'){event.preventDefault();event.stopImmediatePropagation();return;}
-    const effect = {'1':'pulse','2':'tilt','3':'shake','4':'bounce','5':'glow','6':'groove'}[event.key];
+    const effect = {'1':'pulse','2':'tilt','3':'shake','4':'bounce','5':'glow','6':'groove','7':'echo','8':'glitch'}[event.key];
     if (performanceTake.armed && effect) {
       event.preventDefault(); event.stopImmediatePropagation(); if (event.type === 'keydown'&&!event.repeat){if(effectGesture.input)sampleEffectGesture(effect);else setSyncNotice('Hold Space to arm effect numbers. Without Space, existing effects stay unchanged.');} return;
     }

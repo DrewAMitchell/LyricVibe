@@ -174,3 +174,20 @@ test('Groove travels through letters along the selected axis and reduces to stil
  const cue={startMs:1000,endMs:4000,sustained:[]};
  for(const axis of ['horizontal','vertical']){const options={effects:[{type:'groove',strength:.8,axis}]},a=expressionAt(cue,1400,options),b=expressionAt(cue,1700,options);assert.equal(a.waveAxis,axis);assert.ok(a.wave>0);assert.notEqual(a.wavePhase,b.wavePhase);assert.deepEqual(expressionAt(cue,1400,options),a);assert.equal(expressionAt(cue,1400,{...options,reduced:true}).wave,0);assert.equal(expressionAt(cue,4000,options).wave,0);}
 });
+
+
+test('Echo and Glitch reconstruct painted copies on seek and suppress them for reduced motion',()=>{
+  const C=require('../extension/choreography.js'),B=require('../extension/beat-track.js');
+  const cue={startMs:1000,endMs:3000,sustained:[]};
+  for(const type of ['echo','glitch']){
+    const options={effects:[{type,strength:.6}]};
+    const first=C.expressionAt(cue,1250,options);
+    assert.ok(first.shadow);assert.deepEqual(C.expressionAt(cue,1250,options),first);
+    assert.notEqual(C.expressionAt(cue,1500,options).shadow,first.shadow);
+    assert.ok(!C.expressionAt(cue,3000,options).shadow);
+    assert.ok(!C.expressionAt(cue,1250,{...options,reduced:true}).shadow);
+    const beat={beat:0,durationBeats:4,effect:type,strength:.6};
+    assert.equal(B.cueAt(beat,null,0,false,1).accent.type,type);
+    assert.equal(B.cueAt(beat,null,0,true,1).accent,undefined);
+  }
+});

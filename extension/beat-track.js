@@ -44,6 +44,7 @@
     const elapsed=beat-cue.beat,phase=elapsed-Math.floor(elapsed),strength=cue.strength;
     if(reducedMotion)return {scale:1,brightness:1+.12*strength,hue:0,glow:.12*strength};
     const pulse=Math.max(0,1-phase/.35)**2;
+    if(['echo','glitch'].includes(cue.effect))return {scale:1,brightness:1,hue:0,glow:0,accent:{type:cue.effect,phase:elapsed/2,strength:strength*Math.min(1,elapsed/.15,(cue.durationBeats-elapsed)/.15)}};
     if(cue.effect==='groove')return {scale:1,brightness:1,hue:0,glow:0,groove:{phase:elapsed*Math.PI,strength:strength*Math.min(1,elapsed/.25,(cue.durationBeats-elapsed)/.25),axis:cue.axis||'vertical'}};
     if(cue.effect==='bounce')return {scale:1,brightness:1+.1*strength,hue:0,glow:0,y:-Math.sin(Math.PI*phase)*12*strength};
     if(cue.effect==='glow')return {scale:1,brightness:1+.5*strength,hue:0,glow:.5*strength};

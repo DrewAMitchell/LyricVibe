@@ -2972,3 +2972,6 @@
 #lvx-root .lvx-sidebar[data-orientation=horizontal] .lvx-hud-status{grid-column:1/-1;min-height:18px}
 #lvx-root .lvx-sidebar[data-orientation=horizontal] .lvx-hud-offset{align-self:start}
 @media(max-width:680px){#lvx-root .lvx-sidebar[data-orientation=horizontal]:is(:hover,:focus-within,.lvx-sidebar-pinned) .lvx-hud{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Echo/Glitch own bounded paint only while their source-clock cue is active. */
+#lvx-root .lvx-accent-shadow{ text-shadow:var(--lvx-beat-shadow,var(--lvx-expression-shadow))!important }
