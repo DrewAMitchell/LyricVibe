@@ -368,6 +368,43 @@
   themePicker.className = 'lvx-theme-picker'; themePicker.hidden = true;
   const studio={view:'look',page:0,effectsOpen:false,areaOpen:false,exitOpen:false};
   let backingDisplay=LvChoreography.backingSettings(),backingLabels={};
+  let wordRules=LvChoreography.validateWordRules(LvChoreography.defaultWordRules),wordRulesHistory=[];
+  function setWordRules(rules,remember=true){
+    const next=LvChoreography.validateWordRules(rules);if(remember)wordRulesHistory=[...wordRulesHistory,wordRules].slice(-20);wordRules=next;
+    chrome.storage.local.set({lvxWordRules:wordRules}).catch(error=>setHud('Word rules changed in this tab; local save failed: '+error.message,true,true));
+    state.scoreSignature='';if(state.score)renderScore(getMediaTimeMs());renderStylePreview();return next;
+  }
+  function buildWordRulesEditor(){
+    const panel=document.createElement('details');panel.className='lvx-word-rules';panel.open=Boolean(studio.wordRulesOpen);
+    panel.innerHTML='<summary>Word rules <span>Motion + effects</span></summary><p>Exact words, ignoring case and surrounding punctuation. Saved across songs. Authored effects take priority.</p><label class="lvx-rules-enable"><input type="checkbox" aria-label="Enable automatic word expression"> Automatic expression</label><div class="lvx-rule-list" role="group" aria-label="Saved word rules"></div><div class="lvx-rule-toolbar"><button type="button" data-rule-new>+ Add word</button><button type="button" data-rule-undo>Undo rule change</button><button type="button" data-rule-defaults>Restore starters</button></div><form class="lvx-rule-form"><label>Word<input aria-label="Word to match" maxlength="64" required autocomplete="off" spellcheck="false"></label><label>Motion<select aria-label="Word rule motion"></select></label><fieldset><legend>Effects · combine any</legend></fieldset><div class="lvx-rule-preview" aria-label="Word rule preview"><div class="lvx-rule-preview-line"><span class="lvx-score-word"></span></div></div><div class="lvx-rule-toolbar"><button type="button" data-rule-play>Play preview</button><button type="submit">Save rule</button><button type="button" data-rule-delete>Remove rule</button></div><p class="lvx-rule-status" role="status"></p></form>';
+    panel.ontoggle=()=>{studio.wordRulesOpen=panel.open;renderWordRulePreview();};
+    const list=panel.querySelector('.lvx-rule-list'),form=panel.querySelector('form'),input=form.querySelector('input'),motion=form.querySelector('select'),status=form.querySelector('[role=status]'),enabled=panel.querySelector('.lvx-rules-enable input');
+    enabled.checked=choreography.automatic;enabled.disabled=choreography.mode==='vinyl';enabled.onchange=()=>{setChoreography({...choreography,automatic:enabled.checked});};
+    if(choreography.mode==='vinyl')panel.querySelector('p').textContent='Preview and edit rules here. Word expression appears in Classic, Falling words and Word puzzle; Vinyl keeps its shared spiral.';
+    for(const [value,label]of Object.entries(LvChoreography.wordRuleMotions)){const option=document.createElement('option');option.value=value;option.textContent=label;motion.append(option);}
+    for(const [value,text]of Object.entries(LvChoreography.wordRuleEffects)){const label=document.createElement('label'),check=document.createElement('input');check.type='checkbox';check.value=value;label.append(check,document.createTextNode(text));form.querySelector('fieldset').append(label);}
+    const select=word=>{const rule=wordRules.find(r=>r.word===word);panel.__selectedWord=rule?.word||null;studio.wordRule=rule?.word||null;input.value=rule?.word||'';motion.value=rule?.motion||'off';for(const check of form.querySelectorAll('fieldset input'))check.checked=rule?.effects.includes(check.value)||false;form.querySelector('[data-rule-delete]').disabled=!rule;for(const button of list.children)button.setAttribute('aria-pressed',String(button.dataset.word===rule?.word));status.textContent='';previewTime=700;renderWordRulePreview();};
+    const refresh=()=>{list.replaceChildren();for(const rule of wordRules){const button=document.createElement('button'),name=document.createElement('strong'),detail=document.createElement('small');button.type='button';button.dataset.word=rule.word;name.textContent=rule.word;detail.textContent=[...(rule.motion==='off'?[]:[LvChoreography.wordRuleMotions[rule.motion]]),...rule.effects.map(id=>LvChoreography.wordRuleEffects[id])].join(' + ')||'Still';button.append(name,detail);button.onclick=()=>select(rule.word);list.append(button);}panel.querySelector('[data-rule-undo]').disabled=!wordRulesHistory.length;};
+    panel.querySelector('[data-rule-new]').onclick=()=>{select(null);input.focus();};
+    panel.querySelector('[data-rule-undo]').onclick=()=>{if(wordRulesHistory.length){setWordRules(wordRulesHistory.pop(),false);refresh();select(wordRules[0]?.word);status.textContent='Previous rules restored.';}};
+    panel.querySelector('[data-rule-defaults]').onclick=()=>{setWordRules(LvChoreography.defaultWordRules);refresh();select(wordRules[0]?.word);status.textContent='Starter rules restored. Undo keeps your previous set available.';};
+    form.onsubmit=event=>{event.preventDefault();try{const rule={word:input.value,motion:motion.value,effects:[...form.querySelectorAll('fieldset input:checked')].map(n=>n.value)},rules=wordRules.filter(r=>r.word!==panel.__selectedWord);rules.push(rule);setWordRules(rules);refresh();select(LvChoreography.ruleWord(rule.word));status.textContent='Saved across songs. '+(choreography.automatic?'Automatic expression is on.':'Turn on Automatic expression to use rules in the song.');}catch(error){status.textContent=error.message;}};
+    form.querySelector('[data-rule-delete]').onclick=()=>{if(!panel.__selectedWord)return;setWordRules(wordRules.filter(r=>r.word!==panel.__selectedWord));refresh();select(wordRules[0]?.word);status.textContent='Rule removed. Undo restores it.';};
+    form.querySelector('[data-rule-play]').onclick=()=>setPreviewPlaying(!previewPlaying);
+    form.oninput=()=>renderWordRulePreview();refresh();select(studio.wordRule||wordRules[0]?.word);return panel;
+  }
+  function renderWordRulePreview(){
+    const panel=themePicker.querySelector('.lvx-word-rules');if(!panel?.open||!panel.getClientRects().length)return;
+    const form=panel.querySelector('form'),input=form.querySelector('input'),motion=form.querySelector('select');
+    const raw={word:input.value||'word',motion:motion.value,effects:[...form.querySelectorAll('fieldset input:checked')].map(n=>n.value)};
+    let rule;try{rule=LvChoreography.validateWordRules([raw])[0];}catch{return;}
+    const line=panel.querySelector('.lvx-rule-preview-line'),node=line.firstElementChild;
+    if(node.textContent!==rule.word){node.textContent=rule.word;delete node.dataset.flexLetters;}
+    node.style.fontSize=Math.max(16,Math.min(58,(panel.clientWidth-65)/Math.max(2,rule.word.length)*1.4))+'px';
+    const word={id:'word-rule-preview',text:rule.word,startMs:250,endMs:2250,effects:[]},clock=previewTime%2700,cues=LvChoreography.compose({phrases:[{id:'rule-preview',words:[word]}]},[rule]);
+    expressLine(line,[word],clock,cues,{...choreography,mode:'classic',automatic:true,dance:'off'});
+    const button=form.querySelector('[data-rule-play]');button.textContent=previewPlaying?'Pause preview':'Play preview';button.setAttribute('aria-pressed',String(previewPlaying));
+  }
   function backingLabelKey(){const score=timing.draft?.score||state.score;return score?LvScore.mediaKey(score.source):null;}
   function backingLabelMode(){return backingLabels[backingLabelKey()]||'hidden';}
   function setBackingLabel(value){const key=backingLabelKey();if(!key)return;backingLabels={...backingLabels,[key]:['header','prefix'].includes(value)?value:'hidden'};state.scoreSignature='';chrome.storage.local.set({lvxBackingLabels:backingLabels}).catch(error=>setHud('Backing names changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
@@ -398,6 +435,7 @@
     if(fire){const paint=firePaint(clock);node.style.setProperty('--lvx-fire-image',paint.image);node.style.setProperty('--lvx-fire-embers',paint.embers);node.style.setProperty('--lvx-fire-smoke',paint.smoke);}
   }
   function renderStylePreview(activeOnly=false){
+    renderWordRulePreview();
     const sample=themePicker.querySelector('.lvx-motion-sample');if(sample){sample.dataset.theme=previewTheme;sample.querySelector('.lvx-tile-name').textContent=THEME_LABELS[previewTheme]+(previewTheme===state.theme?' · applied':' · preview');}
     for(const tile of themePicker.querySelectorAll('.lvx-motion-sample')){
       const selected=tile.dataset.theme===previewTheme;if(activeOnly&&!selected)continue;tile.dataset.previewing=String(selected);
@@ -410,7 +448,7 @@
       words.forEach((word,i)=>paintWordTexture(line.children[i],word,clock,tile.dataset.theme));
       const previewHeight=Math.max(60,tile.querySelector('.lvx-tile-stage').clientHeight-16);
       choreographLine(line,words,clock,tile.querySelector('.lvx-tile-stage').clientWidth-16,previewHeight,Math.min(64,previewHeight*.7),{},Math.min(48,previewHeight*.54));
-      if(typeof LvChoreography!=='undefined')expressLine(line,words,clock,LvChoreography.compose({source:{durationMs:words.length*450+1800},phrases:[{id:'preview',laneId:'lead',words}]}),{...choreography,theme:tile.dataset.theme});
+      if(typeof LvChoreography!=='undefined')expressLine(line,words,clock,LvChoreography.compose({source:{durationMs:words.length*450+1800},phrases:[{id:'preview',laneId:'lead',words}]},wordRules),{...choreography,theme:tile.dataset.theme});
     }
   }
   function setPreviewPlaying(value){previewPlaying=value;cancelAnimationFrame(previewFrame);previewFrame=0;previewLast=0;themePicker.dataset.playing=String(value);const b=themePicker.querySelector('[data-preview-play]');if(b){b.textContent=value?'Pause preview':'Play preview';b.setAttribute('aria-pressed',String(value));}renderStylePreview();if(value&&!themePicker.hidden)previewFrame=requestAnimationFrame(previewTick);}
@@ -516,7 +554,7 @@
     const tip=danceLabel.querySelector('option[value=tip]');if(tip)tip.textContent='Topple · backward fall';
     const sample=tiles.find(t=>t.dataset.theme===state.theme).cloneNode(true);sample.removeAttribute('aria-pressed');sample.removeAttribute('type');sample.setAttribute('aria-label','Current lyric motion preview');sample.classList.add('lvx-motion-sample');sample.onclick=()=>setPreviewPlaying(!previewPlaying);
     sample.querySelector('.lvx-tile-name').textContent='CURRENT LOOK · '+THEME_LABELS[state.theme];
-    panels.motion.append(layoutRow,effects);
+    panels.motion.append(layoutRow,effects,buildWordRulesEditor());
     const fireLabel=document.createElement('label');fireLabel.className='lvx-auto-fire';fireLabel.innerHTML='<input type="checkbox" aria-label="Automatic fire words"> Fire texture on the word “fire”';fireLabel.querySelector('input').checked=choreography.autoFire;fireLabel.querySelector('input').onchange=event=>{setChoreography({...choreography,autoFire:event.target.checked});renderStylePreview();};panels.look.append(fireLabel);
     const fireOptions=document.createElement('div');fireOptions.className='lvx-fire-options';fireOptions.innerHTML='<label>Fire color <select aria-label="Fire color"></select></label><label><input type="checkbox" aria-label="Fire smoke"> Smoke</label>';
     const fireColor=fireOptions.querySelector('select'),fireSmoke=fireOptions.querySelector('input');
@@ -3307,7 +3345,8 @@
     observation: Object.freeze({status:()=>trackWatch?.status()}),
     hints: getPageHints,
     placement:Object.freeze({getState:()=>({...placement}),set:value=>applyPlacement(value,true)}),
-    choreography:Object.freeze({getState:()=>({...choreography}),set:value=>setChoreography({...choreography,...value}),inspect:()=>{const score=timing.draft&&timing.view==='proposed'?timing.draft.score:state.score;return score&&typeof LvChoreography!=='undefined'?LvChoreography.compose(score):{};}}),
+    choreography:Object.freeze({getState:()=>({...choreography}),set:value=>setChoreography({...choreography,...value}),inspect:()=>{const score=timing.draft&&timing.view==='proposed'?timing.draft.score:state.score;return score&&typeof LvChoreography!=='undefined'?LvChoreography.compose(score,wordRules):{};}}),
+    wordRules:Object.freeze({getState:()=>structuredClone(wordRules),set:setWordRules}),
     linger:Object.freeze({getState:()=>({...linger}),set:setLinger}),
     backingDisplay:Object.freeze({getState:()=>({...backingDisplay,labels:backingLabelMode()}),set:setBackingDisplay,setLabels:setBackingLabel}),
     tempo:Object.freeze({getState:()=>JSON.parse(JSON.stringify({mediaKey:tempo.mediaKey,map:tempo.map,taps:tempo.taps,estimate:tempo.estimate,revision:tempo.revision})),at:ms=>LvTapTiming.tempoAt(tempo.map,ms),tap:tapTempo,setMap:updateTempoMap}),
@@ -3324,7 +3363,8 @@
 
   /* Load saved preferences (theme, font scale, lite mode) */
   try {
-    chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement','lvxBloomEnabled','lvxChoreography','lvxLinger','lvxRecordOtherParts','lvxBackingDisplay','lvxBackingLabels','lvxControlPlacement','lvxCaptureLeadInMs'], (result) => {
+    chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement','lvxBloomEnabled','lvxChoreography','lvxLinger','lvxRecordOtherParts','lvxBackingDisplay','lvxBackingLabels','lvxControlPlacement','lvxCaptureLeadInMs','lvxWordRules'], (result) => {
+      if(Array.isArray(result?.lvxWordRules))try{wordRules=LvChoreography.validateWordRules(result.lvxWordRules);}catch(error){setHud('Saved word rules need review: '+error.message,true,true);}
       if(!captureLeadInEdited&&Number.isFinite(result?.lvxCaptureLeadInMs)){captureLeadInMs=clamp(result.lvxCaptureLeadInMs,0,30000);refreshLeadInControls();}
       const savedControls=result?.lvxControlPlacement;if(savedControls){controlPlacement={x:Number.isFinite(savedControls.x)?clamp(savedControls.x,0,1):0,y:Number.isFinite(savedControls.y)?clamp(savedControls.y,0,1):0,orientation:savedControls.orientation==='horizontal'?'horizontal':'vertical'};placeControls();}
       backingDisplay=LvChoreography.backingSettings(result?.lvxBackingDisplay);
@@ -4736,7 +4776,7 @@
   let beatDisplayCache={score:null,map:null,ends:{}};
   const beatStyledNodes=new Set();
   let expressionPlan={score:null,cues:{}};
-  function expressionCues(score){if(expressionPlan.score!==score)expressionPlan={score,cues:LvChoreography.compose(score)};return expressionPlan.cues;}
+  function expressionCues(score){if(expressionPlan.score!==score||expressionPlan.rules!==wordRules)expressionPlan={score,rules:wordRules,cues:LvChoreography.compose(score,wordRules)};return expressionPlan.cues;}
   function ensureDanceLetters(node){
     if(!node.dataset.flexLetters){const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT),texts=[];while(walker.nextNode())texts.push(walker.currentNode);
       for(const text of texts){if(text.parentElement.closest('.lvx-dance-letter'))continue;const fragment=document.createDocumentFragment();for(const char of Array.from(text.textContent)){const letter=document.createElement('span');letter.className='lvx-dance-letter';letter.textContent=char;fragment.append(letter);}text.replaceWith(fragment);}node.dataset.flexLetters='true';}
@@ -4751,6 +4791,26 @@
   }
   const beatGrooveLetters=new Set();
   function paintBeatGroove(node,groove,track=true){const letters=ensureDanceLetters(node);letters.forEach((letter,i)=>{const offset=Math.sin((i+.5)/Math.max(1,letters.length)*Math.PI*2-groove.phase)*groove.strength*.16;letter.style.translate=groove.axis==='horizontal'?offset.toFixed(4)+'em 0':'0 '+offset.toFixed(4)+'em';if(track)beatGrooveLetters.add(letter);});}
+  function paintWordRuleDecoration(node,cue,clock,automatic){
+    const value=automatic?LvChoreography.wordRuleAt(cue,clock,{reduced:bloomMotion.matches}):null;
+    let art=node.querySelector(':scope > .lvx-word-art');
+    const rays=value?.effects.includes('rays'),glasses=value?.effects.includes('sunglasses');
+    node.classList.toggle('lvx-word-illustrated',Boolean(rays||glasses));
+    if(!rays&&!glasses){if(art)art.hidden=true;delete node.dataset.wordRule;return;}
+    if(!art){art=document.createElement('span');art.className='lvx-word-art';art.setAttribute('aria-hidden','true');
+      const spokes=Array.from({length:12},(_,i)=>`<path d="M50 10 L50 0" transform="rotate(${i*30} 50 50)"/>`).join('');
+      art.innerHTML='<svg class="lvx-word-rays" viewBox="0 0 100 100" preserveAspectRatio="none" focusable="false">'+spokes+'</svg><svg class="lvx-word-glasses" viewBox="0 0 100 36" focusable="false"><path d="M3 8 L12 10 M88 10 L97 8 M43 14 Q50 8 57 14" fill="none" stroke="#fff3c5" stroke-width="5"/><path d="M7 7 Q23 2 43 8 L41 25 Q26 37 12 24 Z M57 8 Q77 2 93 7 L88 24 Q74 37 59 25 Z" fill="#121923" stroke="#fff3c5" stroke-width="3"/><path d="M15 12 L29 9 M65 12 L79 9" stroke="#bfeaff" stroke-width="3" opacity=".75"/></svg>';node.append(art);}
+    art.hidden=false;art.style.opacity=value.presence.toFixed(4);node.dataset.wordRule=value.word;
+    const sun=art.querySelector('.lvx-word-rays'),shades=art.querySelector('.lvx-word-glasses');sun.style.display=rays?'':'none';shades.style.display=glasses?'':'none';
+    if(rays)sun.style.transform=`translate(-50%,-50%) rotate(${value.raysTurn.toFixed(3)}deg) scale(${value.raysScale.toFixed(4)})`;
+    if(glasses){
+      const letters=ensureDanceLetters(node),os=letters.filter(letter=>letter.textContent.toLowerCase()==='o');
+      const position=letter=>{let x=letter.offsetWidth/2,y=letter.offsetHeight*.32,part=letter;while(part&&part!==node){x+=part.offsetLeft;y+=part.offsetTop;part=part.offsetParent;}return {x,y};};
+      const font=parseFloat(getComputedStyle(node).fontSize)||40,a=os[0]?position(os[0]):{x:node.offsetWidth*.35,y:font*.32},b=os[1]?position(os[1]):{x:node.offsetWidth*.65,y:a.y};
+      const distance=Math.max(font*.3,b.x-a.x),width=distance*2;
+      Object.assign(shades.style,{width:width+'px',height:width*.36+'px',left:(a.x-distance*.5)+'px',top:(a.y-width*.18)+'px',transform:`translateY(${(-value.glassesLift*.62).toFixed(4)}em) rotate(${((1-value.glassesLift)*-8).toFixed(3)}deg)`});
+    }
+  }
   function expressLine(line,words,clock,cues,settings=choreography){
     if(typeof LvChoreography==='undefined')return;
     const paint=(node,cue,effects,automatic,danceAllowed=false,heldMotion=true,motion)=>{
@@ -4773,10 +4833,11 @@
       const node=line.children[i],cue=cues[word.id];if(!node)return;paintWordTexture(node,word,clock,settings.theme||state.theme);if(!cue)return;
       const parts=[...node.querySelectorAll('[data-syllable]')],authored=word.effects?.length||word.syllables?.some(s=>s.effects?.length)||node.closest('.lvx-beat-target')||node.querySelector('.lvx-beat-target');
       const automatic=settings.automatic&&!authored&&word.appearance?.motion===undefined;
-      paint(node,parts.length?{...cue,sustained:[]}:cue,word.effects||[],automatic,!authored,true,word.appearance?.motion);
+      paint(node,parts.length?{...cue,sustained:[]}:cue,word.effects||[],automatic,!authored,true,word.appearance?.motion??(automatic&&cue.rule?cue.rule.motion:undefined));
       for(const part of parts){const syllable=word.syllables?.find(s=>s.id===part.dataset.syllable);if(!syllable)continue;
-        paint(part,{...cue,startMs:syllable.startMs,endMs:syllable.endMs,impact:false,direction:null,sustained:cue.sustained.filter(s=>s.id===syllable.id)},syllable.effects||[],automatic,false,node.dataset.dance!=='flex'&&(!word.effects?.some(e=>e.type==='groove')||Boolean(syllable.effects?.length)));
+        paint(part,{...cue,rule:null,startMs:syllable.startMs,endMs:syllable.endMs,impact:false,direction:null,sustained:cue.sustained.filter(s=>s.id===syllable.id)},syllable.effects||[],automatic&&!cue.rule,false,node.dataset.dance!=='flex'&&(!word.effects?.some(e=>e.type==='groove')||Boolean(syllable.effects?.length)));
       }
+      paintWordRuleDecoration(node,cue,clock,automatic);
     });
   }
   function landLine(line,words,clock,settings=choreography){

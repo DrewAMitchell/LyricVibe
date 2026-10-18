@@ -2,6 +2,16 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {layout,arrival,compose,expressionAt}=require('../extension/choreography.js');
 const words='LET THE LIGHT FALL INTO PLACE AGAIN'.split(' ').map(text=>({text}));
 const measure=(text,font)=>text.length*font*.6;
+test('word rules match exact normalized words without mutating timing or overriding authored effects',()=>{
+  const {validateWordRules,wordRuleAt,danceAt,defaultWordRules}=require('../extension/choreography.js');
+  const score={phrases:[{words:['BABY!','bright','cool','cooler'].map((text,i)=>({id:String(i),text,startMs:100,endMs:2100}))}]},before=structuredClone(score),cues=compose(score);
+  assert.deepEqual(score,before);assert.equal(cues[0].rule.motion,'rock');assert.deepEqual(cues[1].rule.effects,['rays']);assert.deepEqual(cues[2].rule.effects,['sunglasses']);assert.equal(cues[3].rule,undefined);
+  assert.equal(expressionAt(cues[0],600).wave,0,'A matched rule replaces automatic held shaking');assert.equal(expressionAt(cues[0],600,{effects:[{type:'glow'}]}).reason,'authored');assert.equal(expressionAt(cues[0],600,{automatic:false}).reason,'');
+  const rock=danceAt(cues[0],500,{kind:'rock'});assert.ok(rock.turn>0);assert.ok(danceAt(cues[0],1300,{kind:'rock'}).turn<0);assert.deepEqual(danceAt(cues[0],500,{kind:'rock'}),rock);assert.equal(danceAt(cues[0],500,{kind:'rock',reduced:true}).kind,'off');
+  const frame=wordRuleAt(cues[2],600);assert.deepEqual(wordRuleAt(cues[2],600),frame);assert.equal(wordRuleAt(cues[2],2100),null);assert.equal(wordRuleAt(cues[2],99),null);assert.deepEqual(wordRuleAt(cues[2],600,{reduced:true}),wordRuleAt(cues[2],1600,{reduced:true}));
+  assert.throws(()=>validateWordRules([...defaultWordRules,{word:'COOL!',motion:'off',effects:[]}]),/already exists/);assert.throws(()=>validateWordRules([{word:'two words',motion:'off',effects:[]}]),/one word/);assert.throws(()=>validateWordRules([{word:'cool',motion:'unknown',effects:[]}]),/supported/);
+  const combined=compose(score,[{word:'bright',motion:'rock',effects:['rays','glow','echo']}]);const expression=expressionAt(combined[1],600);assert.ok(expression.brightness>1);assert.ok(expression.shadow);assert.deepEqual(wordRuleAt(combined[1],600).effects,['rays','glow','echo']);
+});
 test('pixel fire reconstructs on seek, evolves beyond the old loop, and shares geometry across color palettes',()=>{
   const {fireFrame,firePalettes}=require('../extension/choreography.js');
   const first=fireFrame(1750),later=fireFrame(4150);

@@ -4,9 +4,33 @@
   const median=values=>{const sorted=values.filter(n=>n>0&&Number.isFinite(n)).sort((a,b)=>a-b);return sorted.length?sorted[Math.floor(sorted.length/2)]:0;};
   const token=text=>String(text).toLowerCase().replace(/[^a-z']/g,'');
   const lightWords=new Set(['a','an','the','and','or','of','to','in','it','is','as','at','on','for']);
+  const wordRuleMotions=Object.freeze({off:'Still',rock:'Rock in an arc',tip:'Backward fall',flex:'Flex',bounce:'Bounce',launch:'Launch'});
+  const wordRuleEffects=Object.freeze({rays:'Sun rays',sunglasses:'Lifting sunglasses',glow:'Glow',echo:'Echo',glitch:'Glitch',groove:'Groove',shake:'Shake',pulse:'Pulse'});
+  const defaultWordRules=Object.freeze([{word:'baby',motion:'rock',effects:[]},{word:'bright',motion:'off',effects:['rays']},{word:'cool',motion:'off',effects:['sunglasses']}].map(r=>Object.freeze({...r,effects:Object.freeze(r.effects)})));
+  const ruleWord=text=>String(text).normalize('NFKC').toLowerCase().trim().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu,'');
+  function validateWordRules(rules){
+    if(!Array.isArray(rules)||rules.length>200)throw Error('Use at most 200 word rules.');
+    const seen=new Set();return rules.map(rule=>{
+      const word=ruleWord(rule?.word??'');
+      if(!word||word.length>64||/\s/u.test(word))throw Error('Enter one word, up to 64 characters.');
+      if(seen.has(word))throw Error('A rule for “'+word+'” already exists.');seen.add(word);
+      if(!Object.hasOwn(wordRuleMotions,rule.motion)||!Array.isArray(rule.effects)||rule.effects.some(effect=>!Object.hasOwn(wordRuleEffects,effect)))throw Error('Choose a supported motion and effects.');
+      return {word,motion:rule.motion,effects:[...new Set(rule.effects)]};
+    });
+  }
+  function wordRuleAt(cue,now,{reduced=false}={}){
+    if(!cue?.rule||now<cue.startMs||now>=cue.endMs)return null;
+    const elapsed=now-cue.startMs,duration=Math.max(1,cue.endMs-cue.startMs),phase=elapsed/1000;
+    const ease=x=>{x=clamp(x);return x*x*(3-2*x);};
+    return {word:cue.rule.word,motion:cue.rule.motion,effects:cue.rule.effects,
+      presence:reduced?1:ease(elapsed/Math.min(160,duration*.2))*ease((cue.endMs-now)/Math.min(160,duration*.2)),
+      raysTurn:reduced?0:Math.sin(phase*1.3)*7,raysScale:reduced?1:1+.07*Math.sin(phase*2.2),
+      glassesLift:reduced?1:ease(elapsed/Math.min(750,duration*.65))};
+  }
   // Unknown syllable counts remain estimates; they never become timing evidence.
   function syllableCount(word){return word.syllables?.length||Math.max(1,(token(word.text).replace(/e$/,'').match(/[aeiouy]+/g)||[]).length);}
-  function compose(score){
+  function compose(score,rules=defaultWordRules){
+    const ruleMap=new Map(validateWordRules(rules).map(rule=>[rule.word,rule]));
     const phrases=score.phrases.map(phrase=>{
       const words=phrase.words.filter(w=>!w.excluded),start=words[0]?.startMs,end=Math.max(...words.map(w=>w.endMs));
       return {phrase,words,start,end,rate:words.reduce((n,w)=>n+syllableCount(w),0)*1000/Math.max(1,end-start)};
@@ -24,10 +48,11 @@
         const text=token(word.text),previous=p.words.slice(Math.max(0,i-2),i).map(w=>token(w.text));
         const direction=text==='up'?[0,-1]:text==='down'?[0,1]:['left','right'].includes(text)&&previous.includes('the')&&previous.includes('to')?[text==='left'?-1:1,0]:null;
         const impact=fast&&gap>=550&&i===p.words.length-1;
-        const reasons=[...(sustained.length?['sustained']:[]),...(impact?['fast-then-stop']:[]),...(direction?['direction-'+text]:[])];
+        const rule=ruleMap.get(ruleWord(word.text));
+        const reasons=[...(sustained.length?['sustained']:[]),...(impact?['fast-then-stop']:[]),...(direction?['direction-'+text]:[]),...(rule?['word-rule:'+rule.word]:[])];
         cues[word.id]={wordId:word.id,phraseId:p.phrase.id,startMs:word.startMs,endMs:word.endMs,
           weight:(lightWords.has(text)?.78:1)+Math.min(.25,text.length*.018)+Math.min(.16,(count-1)*.06)+(impact?.4:0)+(sustained.length?.18:0),
-          sustained:sustained.map(u=>({id:u.id,startMs:u.startMs,endMs:u.endMs})),impact,direction,reasons,
+          sustained:sustained.map(u=>({id:u.id,startMs:u.startMs,endMs:u.endMs})),impact,direction,reasons,...(rule?{rule}:{}),
           evidence:{phraseSyllablesPerSecond:p.rate,pauseAfterMs:gap,syllableBasis:word.syllables?.length?'authored':'estimated-from-spelling'}};
       });
     }
@@ -68,6 +93,10 @@
       return out;
     }
     if(!automatic)return out;
+    if(cue.rule){
+      const value=expressionAt({...cue,rule:null},now,{mode,reduced,automatic:false,effects:cue.rule.effects.filter(type=>!['rays','sunglasses'].includes(type)).map(type=>({type,strength:.5}))});
+      return {...value,reason:'word-rule:'+cue.rule.word};
+    }
     const held=cue.sustained?.find(u=>now>=u.startMs&&now<u.endMs);
     if(held){
       const phase=(now-held.startMs)/1000,breath=reduced?.5:(1-Math.cos(phase*Math.PI*2/1.15))/2;
@@ -90,10 +119,13 @@
     const out={kind:'off',x:0,y:0,turn:0,tip:0,flex:0,phase:0,scaleX:1,scaleY:1};
     if(!cue||now<cue.startMs||reduced||authored||kind==='off')return out;
     if(kind==='mix'){let hash=0;for(const ch of cue.wordId)hash=(hash*31+ch.charCodeAt(0))>>>0;kind=dances[hash%4];}
-    if(!dances.includes(kind))return out;
+    if(!dances.includes(kind)&&kind!=='rock')return out;
     const u=clamp((now-cue.startMs)/Math.max(1,cue.endMs-cue.startMs)),t=u*4.2;
     const smooth=x=>{x=clamp(x);return x*x*(3-2*x);};out.kind=kind;
-    if(kind==='tip'){
+    if(kind==='rock'){
+      const elapsed=now-cue.startMs,envelope=smooth(Math.min(elapsed,cue.endMs-now)/180),angle=Math.sin(elapsed/1600*Math.PI*2)*18*envelope;
+      out.turn=angle;out.x=.9*Math.sin(angle*Math.PI/180);out.y=.9*(Math.cos(angle*Math.PI/180)-1);
+    }else if(kind==='tip'){
       if(t<2.45)out.tip=0;
       else if(t<2.56)out.tip=-6*Math.sin(Math.PI*(t-2.45)/.11);
       else if(t<3.04)out.tip=82*smooth((t-2.56)/.48);
@@ -299,5 +331,5 @@
     const particles=(count,smoke)=>Array.from({length:count},(_,i)=>{const seed=i+(smoke?47:11),period=(smoke?3100:1700)+hash(seed,3)*1900,age=((time+hash(seed,9)*period)%period)/period;return {x:(hash(seed,4)-.5)*2.5+Math.sin(age*4+seed)*.13,y:(smoke?.15:.55)-age*(smoke?.65:.95),alpha:(smoke?.12:.8)*Math.sin(Math.PI*age),size:smoke?.06+.07*age:.025};});
     return {width,height,time,palette:firePalettes[color]||firePalettes.ember,pixels,embers:reduced?[]:particles(4,false),smoke:reduced?[]:particles(3,true)};
   }
-  const api={landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
+  const api={landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,wordRuleAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);
