@@ -546,16 +546,18 @@
   document.addEventListener('pointerdown', event => { if (!themePicker.hidden && !themePicker.contains(event.target) && !bounds.contains(event.target) && event.target !== themeButton) toggleThemePicker(false); }, true);
 
   const recordingTransport=document.createElement('div');recordingTransport.className='lvx-recording-playback';recordingTransport.hidden=true;recordingTransport.setAttribute('aria-label','Recording playback');
-  recordingTransport.innerHTML='<label>Speed <select aria-label="Recording playback speed">'+[.25,.5,.75,1,1.25,1.5,1.75,2].map(rate=>`<option value="${rate}">${rate}×</option>`).join('')+'</select></label><button type="button" data-record-restart>↶ Restart playback</button><button type="button" data-record-forward>Next lead-in →</button>';
+  recordingTransport.innerHTML='<label>Speed <select aria-label="Recording playback speed">'+[.25,.5,.75,1,1.25,1.5,1.75,2].map(rate=>`<option value="${rate}">${rate}×</option>`).join('')+'</select></label><button type="button" data-record-restart title="Play from 0:00; retain the current take">↶ Restart · 0:00</button><button type="button" data-record-phrase>↶ Replay phrase</button><button type="button" data-record-forward>Next lead-in →</button>';
   recordingTransport.querySelector('select').onchange=event=>setPlaybackSpeed(Number(event.target.value));
-  recordingTransport.querySelector('[data-record-restart]').onclick=()=>rewindCapturePhrase(true);
+  recordingTransport.querySelector('[data-record-restart]').onclick=()=>restartPlayback();
+  recordingTransport.querySelector('[data-record-phrase]').onclick=()=>rewindCapturePhrase(true);
   recordingTransport.querySelector('[data-record-forward]').onclick=()=>jumpCaptureLeadIn();viewport.append(recordingTransport);
   function refreshRecordingTransport(){
     const take=tapping.take,visible=Boolean(timing.draft&&!syncPanel.hidden&&(countIn.previewTake||take&&['armed','complete'].includes(take.status)));
     recordingTransport.hidden=!visible;if(!visible)return;
     const blocked=timing.busy||countIn.active||countIn.preparing||!take||take.pendingStartMs!==null||isAdvertisement()||youtubeMediaState()?.clockUsable===false;
     recordingTransport.querySelector('select').disabled=blocked;
-    recordingTransport.querySelector('[data-record-restart]').disabled=blocked;
+    recordingTransport.querySelector('[data-record-restart]').disabled=timing.busy||countIn.active||countIn.preparing||!getMedia();
+    recordingTransport.querySelector('[data-record-phrase]').disabled=blocked;
     const now=getMediaTimeMs()-timingOffsetMs(),target=captureTarget(now);
     recordingTransport.querySelector('[data-record-forward]').disabled=blocked||take?.status!=='armed'||!target||target.startMs<=now;
   }
@@ -640,7 +642,7 @@
       <div class="lvx-perform-cue"><small>READY</small><strong class="lvx-perform-phrase"></strong><div class="lvx-upcoming-phrases" aria-label="Upcoming lyrics"></div><span class="lvx-perform-instruction">Then start performing</span><p class="lvx-estimated-phrase" aria-live="off"></p><p class="lvx-cue-legend">Blue follows your recording cue</p><div class="lvx-live-recovery" hidden><button data-sync="tap-back">← Back one</button><button data-sync="tap-skip">Skip one →</button><button data-sync="tap-reassign-back">Last tap ← word</button><button data-sync="tap-reassign-next">Last tap → word</button><small>Left / Right moves the cue; Ctrl + Left / Right reassigns the last tap. The song keeps playing.</small></div></div>
       <label class="lvx-practice-speed">YouTube practice speed <select data-sync="tap-speed" aria-label="Practice playback speed"><option value="0.5">½× · Half speed</option><option value="0.25">¼× · Quarter speed</option><option value="0.75">¾× · Slower</option><option value="1">1× · Normal</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
       <label class="lvx-syllable-flow">Syllable pass <select data-sync="tap-syllable-flow"><option value="holds">Hold syllables · beginning and end</option><option value="events">Tap freely · assign afterward</option><option value="words">Word pass · hold each word over your syllable taps</option><option value="phrase-stream">Suggested word cursor · legacy</option><option value="continuous">Fixed word frames · optional</option><option value="phrase">Phrase practice · prepared spelling</option></select></label>
-      <div class="lvx-other-parts"><label><input type="checkbox" data-sync="record-other-parts"> Record other parts</label><small data-sync="other-parts-hint"></small></div><div class="lvx-tap-actions lvx-perform-actions"><button data-sync="tap-arm">▶ Start take</button><button data-sync="tap-stop">■ Stop</button><button data-sync="capture-restart" title="Replay this phrase from its lead-in; keep recorded timing">↶ Restart playback</button><button data-sync="capture-forward" title="Jump to the next lead-in without skipping a lyric (Shift+→)">⏩ Next lead-in</button><button data-sync="retime-flag" title="Flag the phrase you just performed for retiming (F)">⚑ Flag phrase · F</button><button data-sync="tap-mark">Next lyric · Space</button><button data-sync="tap-release">Release · Enter</button></div>
+      <div class="lvx-other-parts"><label><input type="checkbox" data-sync="record-other-parts"> Record other parts</label><small data-sync="other-parts-hint"></small></div><div class="lvx-tap-actions lvx-perform-actions"><button data-sync="tap-arm">▶ Start take</button><button data-sync="tap-stop">■ Stop</button><button data-sync="capture-restart" title="Play from 0:00; retain the current take">↶ Restart · 0:00</button><button data-sync="capture-phrase" title="Replay the selected phrase from its lead-in; keep recorded timing">↶ Replay phrase</button><button data-sync="capture-forward" title="Jump to the next lead-in without skipping a lyric (Shift+→)">⏩ Next lead-in</button><button data-sync="retime-flag" title="Flag the phrase you just performed for retiming (F)">⚑ Flag phrase · F</button><button data-sync="tap-mark">Next lyric · Space</button><button data-sync="tap-release">Release · Enter</button></div>
       <div class="lvx-tap-words" hidden aria-hidden="true"></div>
       <section class="lvx-phrase-syllables" hidden aria-label="Phrase syllable spelling"><details><summary>Syllable spelling <span>Edit cuts with |</span></summary><p class="lvx-sync-hint">One Space press per syllable entrance. Dictionary suggestions guide spelling, not audio alignment.</p><div class="lvx-phrase-syllable-fields"></div><button data-sync="phrase-suggest">Suggest phrase syllables</button></details><p class="lvx-phrase-syllable-hint" role="status"></p></section>
       <div class="lvx-tap-actions lvx-syllable-review" hidden><button data-sync="syllable-retake">↻ Retake phrase</button><button data-sync="syllable-hear">▶ Hear this take</button><button data-sync="syllable-next">✓ Keep phrase & next</button></div>
@@ -1031,7 +1033,7 @@
     countInStage.querySelector('output').textContent='4';
     countInStage.querySelector('strong').textContent=phrase.words.filter(w=>!w.excluded).map(w=>w.text).join(' ');
     countInStage.querySelector('small').textContent=countInPanel.querySelector('span').textContent;
-    refreshTimingPanel();setSyncNotice('Count in, then record from the beginning of this phrase.');
+    refreshTimingPanel();setSyncNotice('Count in, then record from the selected playback position.');
     cancelBeatClicks();for(let beat=0;beat<4;beat++)playBeatClick(beat===0,beat*interval,true,true);
     try{return await new Promise((resolve,reject)=>{
       let timer;const finish=(error)=>{clearTimeout(timer);countIn.cancel=null;error?reject(error):resolve(true);};
@@ -1206,7 +1208,7 @@
     tapping.heldInput = null;
     if(rawTake(tapping.take))void archiveEvents().catch(error=>setSyncNotice('Events remain in this tab; local backup failed: '+error.message));
     refreshTimingPanel(); setSyncNotice(reason);
-    void finishStoppedTake();
+    return finishStoppedTake();
   }
   function refreshTapPanel() {
     refreshCompletion();
@@ -1310,7 +1312,8 @@
     syncButton('tap-back').disabled=timing.busy||!take;
     syncButton('tap-back').textContent='← Restart phrase';
     syncButton('tap-skip').hidden=eventTake(take);
-    syncButton('capture-restart').disabled=timing.busy||!getMedia()||!tapping.take||tapping.take.pendingStartMs!==null;
+    syncButton('capture-restart').disabled=timing.busy||countIn.active||countIn.preparing||!getMedia();
+    syncButton('capture-phrase').disabled=timing.busy||!getMedia()||!take||take.pendingStartMs!==null;
     syncButton('tap-skip').disabled=timing.busy||!take||take.index>=take.units.length-1;
     if(eventPass()){
       syncPanel.querySelector('.lvx-tap-panel > .lvx-sync-hint').textContent='Tap Space for every syllable you hear. Each press is a point cue, not a measured beginning or end. Group and review after Stop, or choose holds to capture durations.';
@@ -1876,7 +1879,7 @@
       state.auditionLoop = null;if(mode!=='syllable'||continuousPass())syncButton('loop').checked = false;
       const nextUnit = take.units[take.index];
       if(fromPause){const first=capturePhraseUnits(take,phrase)[0];if(first)take.index=first.index;}
-      tapping.armSeekMs=fromPause?capturePhraseStart(take,phrase):retiming?nextUnit.minMs-800:syllableStart||mode==='syllable'&&!continuousPass()?phrase.startMs+timingOffsetMs()-800:Math.round(media.currentTime*1000);
+      tapping.armSeekMs=fromPause?Math.min(Math.round(media.currentTime*1000),capturePhraseStart(take,phrase)):retiming?nextUnit.minMs-800:syllableStart||mode==='syllable'&&!continuousPass()?phrase.startMs+timingOffsetMs()-800:Math.round(media.currentTime*1000);
       if(fromPause&&partStep){const anchor=timing.draft.score.phrases.find(p=>p.id===partStep.anchorId);tapping.armSeekMs=Math.min(anchor?.startMs??phrase.startMs,phrase.startMs)+timingOffsetMs();}
       tapping.armSeekMs=Math.max(0,tapping.armSeekMs);
       // Render the upcoming take without arming input or replacing a retained
@@ -1937,6 +1940,23 @@
     tapping.takeSeekUntil=performance.now()+1500;media.currentTime=tapping.armSeekMs/1000;
     refreshPerformClock(media.currentTime*1000-timingOffsetMs());state.scoreSignature='';renderScore(getMediaTimeMs());
     setSyncNotice(tapping.take?.status==='armed'?'Rewound. Existing timing plays until your next press; the take stays armed.':'Rewound. Press Start to record from here.','');
+  }
+  function restartPlayback(){
+    const media=getMedia();
+    if(!media||timing.busy||countIn.active||countIn.preparing||isAdvertisement()||youtubeMediaState()?.clockUsable===false)return;
+    if(timing.draft&&tempoSourceKey()!==LvScore.mediaKey(timing.draft.score.source))return;
+    if(tapping.take&&tapping.binding!==tapBinding()){setSyncNotice('Return to this take’s video and preview before restarting.');return;}
+    partRun=null;state.auditionLoop=null;syncButton('loop').checked=false;syncButton('record-repeat').checked=false;
+    listenToTake();
+    if(tapping.take){
+      tapping.take=completePhraseScope(tapping.take);
+      tapping.take={...tapping.take,index:0};
+      const first=tapping.take.units[0],index=timing.draft.score.phrases.findIndex(p=>p.id===first?.phraseId||p.words.some(w=>w.id===first?.wordId));
+      if(index>=0){timing.phraseIndex=index;tapping.wordId=first.wordId;}
+    }
+    seekCapture(0);refreshTimingPanel();
+    void media.play().catch(error=>setSyncNotice('At 0:00. Press Play: '+error.message));
+    setSyncNotice('Playback restarted at 0:00. Recorded timing is retained; an armed take stays armed.');
   }
   function completePhraseScope(take){
     if(partRun||syncButton('record-repeat').checked||take?.mode!=='phrase'||syncButton('tap-scope').value!=='lane'||tapping.binding!==tapBinding())return take;
@@ -2372,7 +2392,8 @@
   });
   syncButton('tap-snap').addEventListener('change', refreshTapPanel);
   syncButton('capture-forward').addEventListener('click',jumpCaptureLeadIn);
-  syncButton('capture-restart').addEventListener('click',()=>rewindCapturePhrase(true));
+  syncButton('capture-restart').addEventListener('click',restartPlayback);
+  syncButton('capture-phrase').addEventListener('click',()=>rewindCapturePhrase(true));
   syncButton('tap-arm').addEventListener('click', armTapTake);
   syncButton('tap-mark').addEventListener('click', event => { if (!holdCapture()) markTapTime(event); });
   syncButton('tap-mark').addEventListener('pointerdown', event => {
@@ -2393,6 +2414,7 @@
   async function openTranscriptEditor(){
     if(timing.busy||(!state.score&&!state.plainLyrics?.text))return;
     try{
+      if(tapping.take?.status==='armed')await stopTapTake('Take stopped for Lyrics text. Completed marks are retained.');
       if(!timing.draft){
         timing.busy=true;refreshTranscriptEditor();
         const current=await timingRequest('LV_TIMING_CURRENT');
@@ -2983,7 +3005,7 @@
     for(const [section,id]of [[capture,'record'],[effects,'effects'],[beat,'beat']]){section.open=true;section.classList.add('lvx-workspace-section');panes[id].append(section);}
     // Primary capture actions stay above the cue at every viewport height.
     capture.querySelector('.lvx-perform-cue').before(capture.querySelector('.lvx-record-choices'),capture.querySelector('.lvx-other-parts'),capture.querySelector('.lvx-perform-actions'));
-    const transport=document.createElement('div');transport.className='lvx-capture-transport';transport.append(syncButton('capture-restart'),syncButton('capture-forward'));capture.querySelector('.lvx-perform-actions').after(transport);
+    const transport=document.createElement('div');transport.className='lvx-capture-transport';transport.append(syncButton('capture-restart'),syncButton('capture-phrase'),syncButton('capture-forward'));capture.querySelector('.lvx-perform-actions').after(transport);
     const gap=document.createElement('details');gap.className='lvx-effect-gap';gap.innerHTML='<summary>Phrase exit <span>Override this phrase</span></summary>';
     const gapHint=syncButton('gap-default').nextElementSibling;
     gap.append(syncButton('gap-beats').closest('label'),syncButton('gap-use'),syncButton('gap-default'),gapHint);effects.append(gap);
