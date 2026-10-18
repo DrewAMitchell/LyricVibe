@@ -2996,3 +2996,8 @@
 #lvx-root .lvx-sidebar .lvx-editor-actions{gap:6px;padding:6px;}
 #lvx-root .lvx-sidebar .lvx-editor-actions>button{border:1px solid #657f8e;background:#1b2b35;border-radius:7px;}
 #lvx-root .lvx-sidebar .lvx-editor-actions>button:hover{border-color:#afcad8;background:#304956;}
+
+#lvx-root .lvx-capture-tracks{display:grid;grid-template-columns:minmax(0,1fr) 38px 38px;gap:6px;align-items:end;margin:10px 0;padding:8px;border:1px solid #668998;border-radius:9px;background:#152a34;}
+#lvx-root .lvx-capture-tracks label{display:grid;gap:4px;color:#cee9ed;font:600 12px/1.3 system-ui;min-width:0;}
+#lvx-root .lvx-capture-tracks select{width:100%;min-width:0;}
+#lvx-root .lvx-capture-tracks small{grid-column:1/-1;color:#bdd1da;font:11px/1.4 system-ui;}

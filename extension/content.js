@@ -101,6 +101,7 @@
   const observationFocused = () => overlayEnabled && !document.hidden && document.hasFocus();
   const timing = { draft: null, view: 'proposed', phraseIndex: 0, dirty: false, busy: false, auditioned: false, priorLoop: null };
   const tapping = { take: null, wordId: null, binding: null, clockMs: null, rate: 1, audio: null, splitDirty: false, heldInput: null, cancelledSpace: false, reviewId: null, correctionUndo: [], listening: false, backAnchorMs: null, backIndex: null, syllableStartKey: null };
+  const captureTracks={slots:new Map(),switching:false};
   const performanceTake = { armed: false, binding: null, laneId: null, rate: 1, marks: [] };
   const effectGesture = { input:null, type:'clear', samples:new Map(), base:[], groupId:null };
   const effectTracks=[];
@@ -684,6 +685,12 @@
   const captureActions=syncButton('tap-arm').parentElement;
   captureActions.before(syncPanel.querySelector('.lvx-phrase-syllables'),syncPanel.querySelector('.lvx-tap-words'),syllableFields);
   syncPanel.querySelector('.lvx-perform-cue').after(syncPanel.querySelector('.lvx-live-recovery'));
+  const captureTrackPicker=document.createElement('div');captureTrackPicker.className='lvx-capture-tracks';
+  captureTrackPicker.innerHTML='<label>Space records<select aria-label="Vocal track to record"></select></label><button type="button" aria-label="Previous vocal track">↑</button><button type="button" aria-label="Next vocal track">↓</button><small></small>';
+  syncPanel.querySelector('.lvx-perform-cue').prepend(captureTrackPicker);
+  captureTrackPicker.querySelector('select').onchange=e=>void switchCaptureTrack(e.target.value);
+  captureTrackPicker.querySelector('[aria-label="Previous vocal track"]').onclick=()=>void switchCaptureTrack(-1);
+  captureTrackPicker.querySelector('[aria-label="Next vocal track"]').onclick=()=>void switchCaptureTrack(1);
   // tone: '' for status, 'warn' for attention, 'error' for anything that blocks you (red box).
   const syncCopy=document.createElement('button');syncCopy.className='lvx-notice-copy';syncCopy.textContent='Copy message';syncCopy.hidden=true;syncNotice.after(syncCopy);
   const plainTimingNotice=document.createElement('p');plainTimingNotice.className='lvx-sync-hint';plainTimingNotice.hidden=true;syncCopy.after(plainTimingNotice);
@@ -811,7 +818,7 @@
   // A stopped take and a take already used in the preview are still unsaved.
   // Keep this independent of tapPending(), which only gates editor operations.
   function hasUnsavedWork() {
-    return Boolean(stageEdit?.fieldsDirty || stageEdit?.drag || timing.dirty || transcript.dirty || tapping.splitDirty || effectPending() ||
+    return Boolean([...captureTracks.slots.values()].some(slot=>tapCount(slot.state.take)) || stageEdit?.fieldsDirty || stageEdit?.drag || timing.dirty || transcript.dirty || tapping.splitDirty || effectPending() ||
       tapping.take && (tapping.take.status === 'armed' || tapCount(tapping.take) || tapping.take.pendingStartMs != null) ||
       timing.draft && (timing.draft.previewRevision > 0 || timing.draft.changedWords > 0));
   }
@@ -819,7 +826,7 @@
   let navigationHold = null, navigationGestureUntil = 0;
   const navigationWork = () => JSON.stringify([timing.draft?.token, timing.draft?.previewRevision,
     timing.dirty && syncText.value, transcript.dirty && syncButton('transcript-text').value,
-    tapping.splitDirty && [syncButton('tap-spoken').value, syncButton('tap-split').value], tapping.take, performanceTake.armed, performanceTake.marks]);
+    tapping.splitDirty && [syncButton('tap-spoken').value, syncButton('tap-split').value], tapping.take, [...captureTracks.slots], performanceTake.armed, performanceTake.marks]);
   const navigationSource = () => LvScore.mediaKey(timing.draft?.score.source || state.score?.source);
   function leavesEditedVideo(url) {
     const source = navigationSource();
@@ -1234,6 +1241,7 @@
     return finishStoppedTake();
   }
   function refreshTapPanel() {
+    refreshCaptureTracks();
     refreshCompletion();
     refreshOtherParts();
     const word = tapWord(), take = tapping.take, mode = syncButton('tap-mode').value;
@@ -1358,7 +1366,7 @@
       syncPanel.querySelector('.lvx-tap-status').textContent=(wordTake(take)?(take.retime?`Retiming phrase ${phraseOrdinal(take.retime.phraseId)} · `:'')+`${take.holds.length} / ${take.units.length} words held · ${take.syllableEvents.length} syllable taps`:'Start, then hold Space for each word')+(retimeFlags.items.length?` · ⚑ ${retimeFlags.items.length} flagged`:'');
       syncButton('tap-use').hidden=true;
     }else syncButton('tap-use').hidden=false;
-    const recordingLane=timing.draft?.score.lanes.find(l=>l.id===timingPhrase()?.laneId);if(take&&recordingLane?.role==='backing'){const label=cue.querySelector(':scope > small');label.textContent=`RECORD ${recordingLane.label||'BACKING'} · `+label.textContent;}
+    const recordingLane=timing.draft?.score.lanes.find(l=>l.id===timingPhrase()?.laneId);if(recordingLane){const label=cue.querySelector(':scope > small');label.textContent=`SPACE → ${recordingLane.label||(recordingLane.role==='lead'?'Main':'Backing')} · `+label.textContent;}
     refreshTranscriptEditor();
     if(state.score&&retimeFlags.mediaKey!==LvScore.mediaKey(state.score.source))void loadRetimeFlags();
     if(state.score&&tempo.mediaKey!==LvScore.mediaKey(state.score.source))void loadTempo();
@@ -1792,6 +1800,59 @@
     if(binding!==tapBinding())throw Error('The preview changed while preparing suggestions. Your existing take is retained.');
     return units;
   }
+  function captureLanes(){
+    const score=timing.draft?.score;
+    return score?score.lanes.filter(l=>score.phrases.some(p=>p.laneId===l.id&&p.words.some(w=>!w.excluded))).sort((a,b)=>(a.role==='backing')-(b.role==='backing')):[];
+  }
+  function refreshCaptureTracks(){
+    const host=syncPanel.querySelector('.lvx-capture-tracks');if(!host)return;
+    const lanes=captureLanes(),current=timingPhrase()?.laneId,blocked=timing.busy||captureTracks.switching||countIn.active||countIn.preparing||!!tapping.heldInput||tapping.take?.pendingStartMs!=null;
+    const select=host.querySelector('select');
+    const key=lanes.map(l=>l.id+':'+l.label).join('|');if(select.dataset.options!==key){select.replaceChildren(...lanes.map(l=>{const option=document.createElement('option');option.value=l.id;option.textContent=l.label||(l.role==='lead'?'Main':'Backing');return option;}));select.dataset.options=key;}
+    select.value=current||'';select.disabled=blocked||lanes.length<2;
+    for(const button of host.querySelectorAll('button'))button.disabled=blocked||lanes.length<2;
+    host.querySelector('small').textContent=captureTracks.switching?'Keeping this track…':'↑ / ↓ switch track · Space records the selected track';
+  }
+  function captureTrackSnapshot(){
+    const state=structuredClone(Object.fromEntries(Object.entries(tapping).filter(([key])=>key!=='audio')));
+    return {state,phraseId:timingPhrase()?.id,targets:state.take&&!rawTake(state.take)?timedTakeTargets(state.take,timing.draft.score):null,
+      controls:Object.fromEntries(['tap-mode','tap-cadence','tap-scope','tap-syllable-flow'].map(name=>[name,syncButton(name).value]))};
+  }
+  async function backupTrackCapture(capture){
+    if(!capture.take||!tapCount(capture.take))return;
+    if(rawTake(capture.take)){await archiveEvents(capture);return;}
+    const context=capture.recordingContext||recordingContext();
+    await chrome.storage.local.set({['lvBufferedTake:'+context.mediaKey+':'+crypto.randomUUID()]:{schema:'lyricvibe-buffered-take-v1',...context,clockBasis:'score',take:capture.take,createdAt:new Date().toISOString()}});
+  }
+  async function switchCaptureTrack(directionOrId){
+    refreshCaptureTracks();
+    const lanes=captureLanes(),current=timingPhrase()?.laneId,index=lanes.findIndex(l=>l.id===current);
+    if(index<0||lanes.length<2||timing.busy||captureTracks.switching||timing.dirty||transcript.dirty||tapping.splitDirty||effectPending()||countIn.active||countIn.preparing)return;
+    if(tapping.heldInput||tapping.take?.pendingStartMs!=null){setSyncNotice('Release Space, then switch vocal tracks. Your held timing stays on this track.');return;}
+    const target=typeof directionOrId==='string'?lanes.find(l=>l.id===directionOrId):lanes[(index+directionOrId+lanes.length)%lanes.length];if(!target||target.id===current)return;
+    const parked=captureTracks.slots.get(target.id);
+    if(parked?.state.take&&(rawTake(parked.state.take)?recordingConflicts(parked.state.take).size:parked.targets&&JSON.stringify(parked.targets)!==JSON.stringify(timedTakeTargets(parked.state.take,timing.draft.score)))){setSyncNotice('That track changed since its capture. Its recording is retained; finish or undo those edits before resuming it.','warn');refreshCaptureTracks();return;}
+    const wasArmed=tapping.take?.status==='armed',media=getMedia(),wasPaused=media?.paused,rate=media?.playbackRate;
+    captureTracks.switching=true;refreshCaptureTracks();
+    try{
+      if(wasArmed)await stopTapTake('Keeping this track before switching…');
+      timing.busy=true;refreshTimingPanel();await backupTrackCapture(tapping);
+      captureTracks.slots.set(current,captureTrackSnapshot());
+      discardTapTake();partRun=null;syncButton('record-other-parts').checked=false;
+      const phrases=timing.draft.score.phrases,now=getMediaTimeMs()-timingOffsetMs();
+      const next=phrases.find(p=>p.id===parked?.phraseId&&p.laneId===target.id)||phrases.find(p=>p.laneId===target.id&&!untimedPhrase(p)&&now>=p.startMs&&now<p.endMs)||phrases.find(p=>p.laneId===target.id&&p.words.some(w=>!w.excluded));
+      timing.phraseIndex=phrases.indexOf(next);tapping.wordId=next.words.find(w=>!w.excluded)?.id||null;
+      if(parked){Object.assign(tapping,parked.state);for(const [name,value]of Object.entries(parked.controls))syncButton(name).value=value;if(tapping.take)tapping.binding=tapBinding();captureTracks.slots.delete(target.id);}
+      tapping.syllableStartKey=LvScore.mediaKey(timing.draft.score.source);
+      timing.busy=false;
+      if(wasArmed&&tapping.take){tapping.take={...tapping.take,status:'armed'};tapping.listening=false;tapping.clockMs=(media?.currentTime||0)*1000;tapping.rate=rate;}else if(wasArmed)await armTapTake({keepPlayback:true});
+      if(media&&media.paused!==wasPaused)wasPaused?media.pause():await media.play();
+      if(media&&media.playbackRate!==rate)setPlaybackSpeed(rate);
+      state.scoreSignature='';refreshTimingPanel();renderScore(getMediaTimeMs());
+      setSyncNotice(`Space → ${target.label||(target.role==='lead'?'Main':'Backing')}. ↑ / ↓ changes vocal track. Previous input is kept.`);
+    }catch(error){setSyncNotice(error.message,'error');}
+    finally{timing.busy=false;captureTracks.switching=false;refreshTimingPanel();}
+  }
   function otherPartsSupported(){return syncButton('tap-mode').value!=='syllable'||!continuousPass();}
   function otherPartsPlan(){return timing.draft&&timingPhrase()?LvTapTiming.planOtherParts(timing.draft.score,timingPhrase().id,{scope:syncButton('record-repeat').checked||syncButton('tap-mode').value==='syllable'?'phrase':syncButton('tap-scope').value}):[];}
   function refreshOtherParts(){
@@ -1817,7 +1878,7 @@
     syncButton('tap-mode').value=run.mode;syncButton('tap-scope').value=run.scope;
     refreshTimingPanel();await armTapTake();
   }
-  async function armTapTake() {
+  async function armTapTake({keepPlayback=false}={}) {
     if(trackWatch?.loading()&&trackWatch?.status().generation>0)return;
     if(tapping.binding!==tapBinding())rebindRecording(timing.draft);
     const mode=syncButton('tap-mode').value;
@@ -1828,7 +1889,7 @@
     try {
       timing.busy=true;refreshTimingPanel();
       if(rawTake(tapping.take)&&recordingConflicts().size){await archiveEvents();discardTapTake();}
-      const fromPause=media.paused;
+      const fromPause=media.paused&&!keepPlayback,keepPaused=keepPlayback&&media.paused;
       countIn.preparing=fromPause;
       if(fromPause)await enableBeatAudio();
       await loadTempo();if(!hasBaselineTempo())throw Error('Set baseline BPM before recording.');
@@ -1838,7 +1899,7 @@
       if(syllableStart){word=phrase.words.find(w=>!w.excluded);tapping.wordId=word.id;}
       if(mode==='syllable'&&!continuousPass()){discardTapTake(true);await preparePhraseSyllables();phrase=timingPhrase();word=phrase.words.find(w=>!w.excluded);tapping.wordId=word?.id;const unresolved=[...phraseSpellingState()].filter(([,e])=>e.requiresChoice);if(unresolved.length){syncPanel.querySelector('.lvx-phrase-syllables details').open=true;throw Error('Choose the sung syllable count in Syllable spelling for: '+unresolved.map(([id])=>phrase.words.find(w=>w.id===id)?.text).join(', ')+'. Then Start phrase take.');}}
       const retiming=wordTake(tapping.take)&&tapping.take.retime;
-      if(!partRun&&!retiming&&!syllableStart&&!unplaced){
+      if(!keepPlayback&&!partRun&&!retiming&&!syllableStart&&!unplaced){
         // Start and Continue both begin at the phrase you are listening to, never a stale selection or the take's old end.
         const now=Math.round(media.currentTime*1000)-timingOffsetMs(),lane=timing.draft.score.phrases.filter(p=>p.laneId===phrase.laneId&&p.words.some(w=>!w.excluded));
         const parked=now>=phrase.startMs-1500&&now<phrase.endMs;
@@ -1852,7 +1913,7 @@
         const now=Math.round(media.currentTime*1000)-timingOffsetMs();
         word=phrase.words.find(w=>!w.excluded&&now>=w.startMs&&now<w.endMs)||phrase.words.find(w=>!w.excluded&&w.startMs>=now)||phrase.words.find(w=>!w.excluded)||word;tapping.wordId=word.id;
       }
-      if(!partRun&&!tapping.take&&syncButton('record-other-parts').checked&&otherPartsSupported()){
+      if(!keepPlayback&&!partRun&&!tapping.take&&syncButton('record-other-parts').checked&&otherPartsSupported()){
         let steps=otherPartsPlan();if(mode==='syllable')steps=steps.flatMap(step=>step.phraseIds.map((id,index)=>({...step,phraseIds:[id],countIn:step.countIn&&index===0})));if(steps.length)partRun={steps,index:0,mode,scope:syncButton('tap-scope').value,sourceKey:tempoSourceKey()};
       }
       const partStep=partRun?.steps[partRun.index];
@@ -1887,12 +1948,12 @@
       const retained=current;
       if(!current&&rawTake(tapping.take)){tapping.take=null;tapping.eventCounts={};tapping.eventApplied=[];}
       const take = retained ? { ...retained, status:'armed' } : wordPass()?LvTapTiming.beginWordHolds(units,syllableSource):eventPass()?LvTapTiming.beginEvents(units,{inputMode:syncButton('tap-syllable-flow').value==='holds'?'hold':'tap'}):LvTapTiming.begin(units, { mode, cadence:phraseStream()?'phrase-stream':continuousSyllables()?'word-frames':mode === 'syllable' ? 'entrances' : syncButton('tap-cadence').value === 'hold' ? 'pairs' : syncButton('tap-cadence').value, bpm: continuousPass()?null:syncButton('tap-snap').checked ? Number(syncButton('tap-bpm').value) : null, ...(!continuousPass()&&syncButton('tap-snap').checked&&tempo.map?{tempoMap:tempo.map,tempoOffsetMs:timingOffsetMs()}:{}) });
-      if(!retained&&mode==='word')take.index=Math.max(0,take.units.findIndex(u=>u.wordId===word.id));
+      if(!retained&&(mode==='word'||wordPass()))take.index=Math.max(0,take.units.findIndex(u=>u.wordId===word.id));
       if(!retained&&mode==='phrase')take.index=Math.max(0,take.units.findIndex(u=>u.phraseId===phrase.id));
       if(!take.repeatRange)take.repeatRange=recordingRepeatRange(take,phrase);
       tapping.correctionUndo = []; tapping.cancelledSpace=false;
       timing.busy = true; refreshTimingPanel();
-      if(syllableStart&&!setPlaybackSpeed(.5))throw Error('Could not set half speed for the first syllable phrase.');
+      if(syllableStart&&!keepPlayback&&!setPlaybackSpeed(.5))throw Error('Could not set half speed for the first syllable phrase.');
       const practiceRate = media.playbackRate;
       if (!Number.isFinite(practiceRate)||practiceRate<=0) throw Error('Choose a valid playback speed.');
       media.preservesPitch = true;
@@ -1909,16 +1970,16 @@
       // Render the upcoming take without arming input or replacing a retained
       // take. Cancellation during preparation must remain lossless.
       countIn.previewTake=take;state.scoreSignature='';
-      media.currentTime = tapping.armSeekMs / 1000;
+      if(!keepPlayback)media.currentTime = tapping.armSeekMs / 1000;
       renderScore(getMediaTimeMs());refreshCapturePlayback(getMediaTimeMs()-timingOffsetMs());
       const needsCountIn=fromPause&&(!partRun||partRun.index===0&&!partRun.repeating||partStep?.countIn);
       if(needsCountIn)await countInToPhrase(media,phrase,tapping.armSeekMs);
-      await media.play();
+      if(!keepPaused)await media.play();
       if (!timing.draft || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source)) throw Error('Source changed before the take started.');
       if(syllableStart)tapping.syllableStartKey=LvScore.mediaKey(state.score.source);
       // With a tapped tempo, snapping uses its beat phase instead of the first tap.
       if(take.bpm!==null&&tempo.estimate&&take.originMs===null&&Math.abs(take.bpm-tempo.estimate.bpm)<.01)take.originMs=tempo.estimate.anchorMs-timingOffsetMs();
-      tapping.take = take; tapping.binding = tapBinding(); if(!retained)tapping.recordingContext=recordingContext(); tapping.clockMs = media.currentTime * 1000; tapping.rate = media.playbackRate;tapping.followSeek=false;tapping.seekPhraseId=null;tapping.streamWordId=null;tapping.listening=fromPause||!unplaced;tapping.backAnchorMs=fromPause?tapping.armSeekMs:null;tapping.backIndex=fromPause?take.index:null;tapping.backPhraseId=fromPause?phrase.id:null;tapping.rewindPhraseId=null;
+      tapping.take = take; tapping.binding = tapBinding(); if(!retained)tapping.recordingContext=recordingContext(); tapping.clockMs = media.currentTime * 1000; tapping.rate = media.playbackRate;tapping.followSeek=false;tapping.seekPhraseId=null;tapping.streamWordId=null;tapping.listening=!keepPlayback&&(fromPause||!unplaced);tapping.backAnchorMs=fromPause?tapping.armSeekMs:null;tapping.backIndex=fromPause?take.index:null;tapping.backPhraseId=fromPause?phrase.id:null;tapping.rewindPhraseId=null;
       timing.view = 'proposed'; timing.auditioned = false; state.scoreSignature = '';
       setSyncNotice(mode === 'syllable' ? 'Tap Space at each syllable entrance, including the first. Phrase start and end stay fixed. The completed take plays back for review.' : syncButton('tap-cadence').value === 'hold' ? 'Hold Space for each sung word; release it at the end. Each release advances automatically.' : take.cadence === 'flow' ? 'Space starts each next lyric. Enter releases before a rest or at the end. Stop retains completed marks.' : 'Space marks START then END. Use take updates only the unsaved preview.');
       if(frameTake(take))setSyncNotice('Continuous syllable pass: tap each entrance. Two taps inside a word make two syllables. Stop whenever you want; untapped words keep their timing.');
@@ -2183,29 +2244,30 @@
     }
     return [...operations.filter(o=>o.type==='setSyllableLock'),...[...performances].map(([phraseId,words])=>({type:'setPhraseSyllablePerformance',phraseId,words}))];
   }
-  function eventEnvelope() {
-    const take=tapping.take;
-    const context=tapping.recordingContext||recordingContext();
+  function eventEnvelope(capture=tapping) {
+    const take=capture.take;
+    const context=capture.recordingContext||recordingContext();
     if(wordTake(take))return {schema:'lyricvibe-word-holds-v1',createdAt:new Date().toISOString(),...context,
       holds:take.holds,syllableEvents:take.syllableEvents,referenceUnits:take.units,stoppedScoreMs:take.stoppedScoreMs,
-      interpretation:LvTapTiming.associateWordHolds(take),appliedPhraseIds:tapping.eventApplied||[],reviewFailures:tapping.eventErrors||[],interpretationStatus:'human-review-required',audioIncluded:false};
+      interpretation:LvTapTiming.associateWordHolds(take),appliedPhraseIds:capture.eventApplied||[],reviewFailures:capture.eventErrors||[],interpretationStatus:'human-review-required',audioIncluded:false};
     return {schema:'lyricvibe-performance-events-v1',createdAt:new Date().toISOString(),...context,
-      inputMode:take.inputMode||'tap',pendingStartMs:take.pendingStartMs,events:take.events,referenceUnits:take.units,stoppedScoreMs:take.stoppedScoreMs,counts:tapping.eventCounts||{},
-      interpretation:LvTapTiming.associateEvents(take,{counts:tapping.eventCounts||{}}),appliedPhraseIds:tapping.eventApplied||[],
+      inputMode:take.inputMode||'tap',pendingStartMs:take.pendingStartMs,events:take.events,referenceUnits:take.units,stoppedScoreMs:take.stoppedScoreMs,counts:capture.eventCounts||{},
+      interpretation:LvTapTiming.associateEvents(take,{counts:capture.eventCounts||{}}),appliedPhraseIds:capture.eventApplied||[],
       interpretationStatus:'human-review-required',audioIncluded:false};
   }
-  async function archiveEvents() {
-    if(!rawTake(tapping.take)||!tapCount(tapping.take)||!timing.draft)return;
+  async function archiveEvents(capture=tapping) {
+    if(!rawTake(capture.take)||!tapCount(capture.take)||!timing.draft)return;
     // A stopped capture is an immutable local receipt, independent of score Undo.
-    const packet=eventEnvelope(),key='lvPerformanceEvents:'+packet.mediaKey+':'+Date.now()+':'+crypto.randomUUID();
-    await chrome.storage.local.set({[key]:packet});tapping.eventArchiveKey=key;return packet;
+    const packet=eventEnvelope(capture),key='lvPerformanceEvents:'+packet.mediaKey+':'+Date.now()+':'+crypto.randomUUID();
+    await chrome.storage.local.set({[key]:packet});capture.eventArchiveKey=key;return packet;
   }
   // Newest locally archived syllable taps for this video, from a free-tap pass or a word pass built on one.
   async function latestArchivedSyllableEvents() {
     const mediaKey=LvScore.mediaKey(state.score.source),prefix='lvPerformanceEvents:'+mediaKey+':';
     const all=await chrome.storage.local.get(null);
     const stamp=key=>Number(key.slice(prefix.length).split(':')[0]);
-    const packets=Object.entries(all).filter(([k,v])=>k.startsWith(prefix)&&v?.mediaKey===mediaKey&&v.lyricsHash===timing.draft.baseHash).sort((a,b)=>stamp(b[0])-stamp(a[0]));
+    const lanePhraseIds=new Set(timing.draft.score.phrases.filter(p=>p.laneId===timingPhrase()?.laneId).map(p=>p.id));
+    const packets=Object.entries(all).filter(([k,v])=>k.startsWith(prefix)&&v?.mediaKey===mediaKey&&v.lyricsHash===timing.draft.baseHash&&v.referenceUnits?.length&&v.referenceUnits.every(u=>lanePhraseIds.has(u.phraseId))).sort((a,b)=>stamp(b[0])-stamp(a[0]));
     for(const [,packet] of packets){const events=packet.schema==='lyricvibe-word-holds-v1'?packet.syllableEvents:packet.events;if(events?.length)return events;}
     return null;
   }
@@ -2215,7 +2277,8 @@
     try{
       const mediaKey=LvScore.mediaKey(state.score.source),all=await chrome.storage.local.get(null);
       if(LvScore.mediaKey({url:location.href})!==mediaKey)throw Error('Return to this preview’s video before reopening its recording.');
-      const latest=Object.entries(all).filter(([k,v])=>k.startsWith('lvPerformanceEvents:'+mediaKey+':')&&v?.mediaKey===mediaKey&&(v.schema==='lyricvibe-performance-events-v1'&&v.events?.length||v.schema==='lyricvibe-word-holds-v1'&&v.holds?.length)).sort((a,b)=>b[1].createdAt.localeCompare(a[1].createdAt))[0];
+      const lanePhraseIds=new Set(timing.draft.score.phrases.filter(p=>p.laneId===timingPhrase()?.laneId).map(p=>p.id));
+      const latest=Object.entries(all).filter(([k,v])=>k.startsWith('lvPerformanceEvents:'+mediaKey+':')&&v?.mediaKey===mediaKey&&v.referenceUnits?.length&&v.referenceUnits.every(u=>lanePhraseIds.has(u.phraseId))&&(v.schema==='lyricvibe-performance-events-v1'&&v.events?.length||v.schema==='lyricvibe-word-holds-v1'&&v.holds?.length)).sort((a,b)=>b[1].createdAt.localeCompare(a[1].createdAt))[0];
       if(!latest)throw Error('No syllable or word-hold recording is saved for this video yet.');
       const [key,packet]=latest;
       if(packet.lyricsHash!==timing.draft.baseHash)throw Error('The recorded pass belongs to different lyrics. Its raw events are retained.');
@@ -2899,6 +2962,7 @@
     syncSidebarState();
   }
   function discardTimingLocal() {
+    captureTracks.slots.clear();
     cancelCountIn();
     navigationHold=null;navigationApproval=null;
     discardTapTake();
@@ -2974,8 +3038,9 @@
     // Closing Lyrics text keeps its draft. Save must include those corrections,
     // or leave them intact if validation fails, never silently save older text.
     if(transcript.dirty){await applyTranscript();if(transcript.dirty||!timing.draft||timing.busy||tapPending())return;}
-    const retainedCaptureWarning=captureSaveWarning();timing.saveError=null;timing.busy = true; refreshTimingPanel();
+    const retainedCaptureWarning=[captureSaveWarning(),[...captureTracks.slots.values()].some(slot=>tapCount(slot.state.take))?'Other track captures are backed up separately.':''].filter(Boolean).join(' ');timing.saveError=null;timing.busy = true; refreshTimingPanel();
     try {
+      for(const slot of captureTracks.slots.values())await backupTrackCapture(slot.state);
       if(tapping.take&&tapCount(tapping.take)){
         if(rawTake(tapping.take))await archiveEvents();
         else await chrome.storage.local.set({['lvBufferedTake:'+LvScore.mediaKey(state.score.source)+':'+crypto.randomUUID()]:{schema:'lyricvibe-buffered-take-v1',mediaKey:LvScore.mediaKey(state.score.source),lyricsHash:timing.draft.baseHash,baseRevision:timing.draft.baseRevision,previewRevision:timing.draft.previewRevision,offsetMs:timingOffsetMs(),clockBasis:'score',take:tapping.take,createdAt:new Date().toISOString()}});
@@ -3193,7 +3258,7 @@
       selectPhrase: index => navigateTiming(index - timing.phraseIndex), setView: view => { if (['saved','proposed'].includes(view)) syncButton(view).click(); },
       tuneText: text => { syncText.value = text; timing.dirty = true; return tuneTimingText(); }, audition: auditionTiming, cancel: closeTimingReview,
       tap: Object.freeze({ getState: () => JSON.parse(JSON.stringify({take:tapping.take,binding:tapping.binding,wordId:tapWord()?.id,phraseId:timingPhrase()?.id,splitDirty:tapping.splitDirty,spellings:[...(tapping.spellings||new Map())],audioState:tapping.audio?.state||null})),
-        start: armTapTake, mark: markTapTime, release: () => markTapTime({release:true}), stop: stopTapTake, use: useTapTake,
+        switchTrack:switchCaptureTrack, tracks:()=>captureLanes().map(l=>({id:l.id,label:l.label,role:l.role,selected:l.id===timingPhrase()?.laneId})), start: armTapTake, mark: markTapTime, release: () => markTapTime({release:true}), stop: stopTapTake, use: useTapTake,
         reposition: repositionTap, moveCue:direction=>recoverStream(direction), reassignLast:direction=>recoverStream(direction,true), assignment:()=>rawTake(tapping.take)?recordingReport():null, restoreBuffered:restoreBufferedTake, discard: restartTranscript }),
       effects: Object.freeze({getState:() => JSON.parse(JSON.stringify(performanceTake)),start:startEffects,mark:markEffect,stop:stopEffects,use:useEffects,discard:() => {discardEffects();refreshTimingPanel();}}) })
   };
@@ -3277,7 +3342,7 @@
       return;
     }
     if(message.type==='LV_TIMING_PREVIEW_CLOSED'){
-      if(message.mediaKey===LvScore.mediaKey({url:location.href})&&message.mediaKey===LvScore.mediaKey(timing.draft?.score.source)&&!timing.busy&&!tapPending()&&!timing.dirty){discardTimingLocal();setSyncNotice('Preview closed. Saved timings remain available.');}return;
+      if(message.mediaKey===LvScore.mediaKey({url:location.href})&&message.mediaKey===LvScore.mediaKey(timing.draft?.score.source)&&!timing.busy&&!tapPending()&&!timing.dirty&&![...captureTracks.slots.values()].some(slot=>tapCount(slot.state.take))){discardTimingLocal();setSyncNotice('Preview closed. Saved timings remain available.');}return;
     }
 
     if (message.type === 'LV_ANALYSIS_CLOCK') {
@@ -4534,7 +4599,7 @@
       stage.replaceChildren();
       const context=document.createElement('div');context.className='lvx-capture-transcript';
       const label=document.createElement('small');label.textContent=wordTake(take)?`WORD PASS · ${take.holds.length} / ${take.units.length} words · hold Space per word`:eventTake(take)?(syllableHold(take)?'SYLLABLE HOLDS · '+take.events.length+' complete · hold Space':'PERFORMANCE EVENTS · '+take.events.length+' taps · Space records'):streamTake(take)?`PHRASE-GUIDED SYLLABLES · ${take.marks.length} taps · Space at each entrance`:frameTake(take)?`CONTINUOUS SYLLABLES · ${take.marks.length} taps · Space at each entrance`:take.status==='complete'?'PASS COMPLETE · LEFT TO RERECORD':`${take.mode.toUpperCase()} ${take.index+1} / ${take.units.length} · ${take.pendingStartMs===null?'NEXT TO RECORD':'RECORDING'}`;context.append(label);
-      const lane=timing.draft.score.lanes.find(l=>l.id===phrase.laneId);if(lane?.role==='backing')label.textContent=`RECORD ${lane.label||'BACKING'} · `+label.textContent;
+      const lane=timing.draft.score.lanes.find(l=>l.id===phrase.laneId);if(lane)label.textContent=`SPACE → ${lane.label||(lane.role==='lead'?'Main':'Backing')} · `+label.textContent;
       const recorded=LvTapTiming.captureProgress(take,phrase,timingOffsetMs()),recordedIds=new Set(recorded.wordIds);
       context.dataset.recorded=String(recorded.phraseRecorded);
       const line=document.createElement('p');
@@ -5247,6 +5312,9 @@
       event.preventDefault();event.stopImmediatePropagation();
       countIn.spaceHeld=event.type==='keydown';
       return;
+    }
+    if(['ArrowUp','ArrowDown'].includes(event.key)&&!inputTarget&&!event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&timing.draft&&timingWorkspace.view==='record'){
+      event.preventDefault();event.stopImmediatePropagation();if(event.type==='keydown'&&!event.repeat)void switchCaptureTrack(event.key==='ArrowUp'?-1:1);return;
     }
     if(event.shiftKey&&event.key==='ArrowLeft'&&!inputTarget&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&timing.draft){event.preventDefault();event.stopImmediatePropagation();if(event.type==='keydown'&&!event.repeat)seekCapture(getMediaTimeMs()-5000);return;}
     if(event.shiftKey&&event.key==='ArrowRight'&&!inputTarget&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&tapping.take?.status==='armed'){event.preventDefault();event.stopImmediatePropagation();if(event.type==='keydown'&&!event.repeat)jumpCaptureLeadIn();return;}
