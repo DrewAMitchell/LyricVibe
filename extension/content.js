@@ -4848,9 +4848,9 @@
     const value=automatic?LvChoreography.wordRuleAt(cue,clock,{reduced:bloomMotion.matches}):null;
     if(node.__champagneLetter){node.__champagneLetter.style.opacity='';node.__champagneLetter=null;}
     let art=node.querySelector(':scope > .lvx-word-art');
-    const rays=value?.effects.includes('rays'),glasses=value?.effects.includes('sunglasses'),bills=value?.effects.includes('bills'),champagne=value?.effects.includes('champagne');
-    node.classList.toggle('lvx-word-illustrated',Boolean(rays||glasses||bills||champagne));
-    if(!rays&&!glasses&&!bills&&!champagne){if(art)art.hidden=true;delete node.dataset.wordRule;return;}
+    const rays=value?.effects.includes('rays'),glasses=value?.effects.includes('sunglasses'),bills=value?.effects.includes('bills'),champagne=value?.effects.includes('champagne'),disco=value?.effects.includes('disco');
+    node.classList.toggle('lvx-word-illustrated',Boolean(rays||glasses||bills||champagne||disco));
+    if(!rays&&!glasses&&!bills&&!champagne&&!disco){if(art)art.hidden=true;delete node.dataset.wordRule;return;}
     if(!art){art=document.createElement('span');art.className='lvx-word-art';art.setAttribute('aria-hidden','true');
       const spokes=Array.from({length:12},(_,i)=>`<path d="M50 10 L50 0" transform="rotate(${i*30} 50 50)"/>`).join('');
       art.innerHTML='<svg class="lvx-word-rays" viewBox="0 0 100 100" preserveAspectRatio="none" focusable="false">'+spokes+'</svg><svg class="lvx-word-glasses" viewBox="0 0 100 36" focusable="false"><path d="M3 8 L12 10 M88 10 L97 8 M43 14 Q50 8 57 14" fill="none" stroke="#fff3c5" stroke-width="5"/><path d="M7 7 Q23 2 43 8 L41 25 Q26 37 12 24 Z M57 8 Q77 2 93 7 L88 24 Q74 37 59 25 Z" fill="#121923" stroke="#fff3c5" stroke-width="3"/><path d="M15 12 L29 9 M65 12 L79 9" stroke="#bfeaff" stroke-width="3" opacity=".75"/></svg>';node.append(art);}
@@ -4858,7 +4858,18 @@
       const notes=document.createElement('span');notes.className='lvx-word-bills';notes.innerHTML=Array.from({length:7},()=>'<svg class="lvx-word-bill" viewBox="0 0 60 30" focusable="false"><path d="M1 1 H59 V29 H1 Z" fill="#91c791" stroke="#d8f2ad" stroke-width="2"/><path d="M7 5 H53 V25 H7 Z M30 4 V26 M36 8 Q24 2 24 11 Q24 15 31 15 Q38 15 36 21 Q32 26 23 21" fill="none" stroke="#245b39" stroke-width="2"/></svg>').join('');art.append(notes);
       const cork=document.createElement('span');cork.className='lvx-word-champagne';cork.innerHTML='<span class="lvx-champagne-body"></span><span class="lvx-champagne-cap"></span>';art.append(cork);
     }
+    if(disco&&!art.querySelector('.lvx-word-disco')){
+      const party=document.createElementNS('http://www.w3.org/2000/svg','svg');party.classList.add('lvx-word-disco');party.setAttribute('viewBox','0 0 200 160');party.setAttribute('preserveAspectRatio','xMidYMin meet');party.setAttribute('focusable','false');
+      const colors=['#ff69cf','#70caff','#ffd66f','#a391ff','#6ff5cb'];
+      party.innerHTML='<g class="lvx-disco-beams">'+colors.map(color=>'<path fill="'+color+'"/>').join('')+'</g><g class="lvx-disco-glints">'+Array.from({length:9},(_,i)=>'<path d="M-2 0 H2 M0 -2 V2" stroke="'+colors[i%5]+'" stroke-width="1.5"/>').join('')+'</g><path d="M100 0 V12" stroke="#d3dff5" stroke-width="1"/><circle cx="100" cy="30" r="18.5" fill="#263e64" stroke="#d7edff" stroke-width="1"/><svg x="82" y="12" width="36" height="36" viewBox="0 0 36 36" class="lvx-disco-facets">'+Array.from({length:36},(_,i)=>'<rect x="'+(i%6*6+.5)+'" y="'+(Math.floor(i/6)*6+.5)+'" width="5" height="5" rx=".6" fill="'+(['#effaff','#80b8f1','#e3adf0'][i%3])+'"/>').join('')+'</svg><path d="M91 20 H97 M94 17 V23" stroke="white" stroke-width="1.5"/>';
+      art.append(party);
+    }
     art.hidden=false;art.style.opacity=value.presence.toFixed(4);node.dataset.wordRule=value.word;
+    const party=art.querySelector('.lvx-word-disco');if(party){party.style.display=disco?'':'none';if(disco){
+      [...party.querySelector('.lvx-disco-beams').children].forEach((beam,i)=>{const pose=value.disco.beams[i];beam.setAttribute('d',`M100 34 L${(pose.x-17).toFixed(2)} 145 L${(pose.x+17).toFixed(2)} 145 Z`);beam.style.opacity=pose.opacity.toFixed(4);});
+      [...party.querySelector('.lvx-disco-facets').children].forEach((tile,i)=>tile.style.opacity=value.disco.facets[i].toFixed(4));
+      [...party.querySelector('.lvx-disco-glints').children].forEach((glint,i)=>{const pose=value.disco.glints[i];glint.setAttribute('transform',`translate(${pose.x.toFixed(2)} ${pose.y})`);glint.style.opacity=pose.opacity.toFixed(4);});
+    }}
     const sun=art.querySelector('.lvx-word-rays'),shades=art.querySelector('.lvx-word-glasses');sun.style.display=rays?'':'none';shades.style.display=glasses?'':'none';
     const notes=art.querySelector('.lvx-word-bills'),cork=art.querySelector('.lvx-word-champagne');notes.style.display=bills?'':'none';cork.style.display=champagne?'':'none';
     const position=letter=>{let x=letter.offsetWidth/2,y=letter.offsetHeight*.32,part=letter;while(part&&part!==node){x+=part.offsetLeft;y+=part.offsetTop;part=part.offsetParent;}return {x,y};};

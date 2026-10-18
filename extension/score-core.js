@@ -10,7 +10,7 @@
     version: 'lyricvibe.display.v1',
     looks: Object.freeze(['samay','flow','fire','neon','glass','hype','soft','clean','retro','elegant','aurora','matrix','vinyl','cosmic']),
     motions: Object.freeze(['off','mix','tip','flex','bounce','launch','rock','float']),
-    wordArt: Object.freeze(['off','rays','sunglasses','fire','bills','champagne']),
+    wordArt: Object.freeze(['off','rays','sunglasses','fire','bills','champagne','disco']),
     wordEffects: Object.freeze(['shake','tilt','pulse','bounce','glow','groove','echo','glitch']),
     beatEffects: Object.freeze(['pulse','breath','color','bounce','glow','groove','echo','glitch']),
     landings: Object.freeze(['settle','glide','drop','still']),

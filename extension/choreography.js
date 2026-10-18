@@ -7,12 +7,12 @@
   const token=text=>String(text).toLowerCase().replace(/[^a-z']/g,'');
   const lightWords=new Set(['a','an','the','and','or','of','to','in','it','is','as','at','on','for']);
   const wordRuleMotions=Object.freeze({off:'Still',rock:'Rock in an arc',float:'Levitate',tip:'Backward fall',flex:'Flex',bounce:'Bounce',launch:'Launch'});
-  const wordRuleEffects=Object.freeze({rays:'Sun rays',sunglasses:'Lifting sunglasses',fire:'Fire texture',bills:'Flying dollar bills',champagne:'Champagne pop',glow:'Glow',echo:'Echo',glitch:'Glitch',groove:'Groove',shake:'Shake',pulse:'Pulse'});
+  const wordRuleEffects=Object.freeze({rays:'Sun rays',sunglasses:'Lifting sunglasses',fire:'Fire texture',bills:'Flying dollar bills',champagne:'Champagne pop',disco:'Disco ball & lights',glow:'Glow',echo:'Echo',glitch:'Glitch',groove:'Groove',shake:'Shake',pulse:'Pulse'});
   const starter=(words,motion,...effects)=>words.split('|').map(word=>({word,motion,effects}));
   const defaultWordRules=Object.freeze([
     ...starter('baby','rock'),...starter('air|flow|levitate','float'),...starter('bright|shine|sunshine','off','rays'),...starter('cool','off','sunglasses'),
     ...starter('fire|burn|burning|flame|flames|reignite','off','fire'),...starter('lay down|fall|falling|fell','tip'),
-    ...starter('money|cash','off','bills'),...starter('champagne','off','champagne'),
+    ...starter('groove|funk|disco','off','disco'),...starter('money|cash','off','bills'),...starter('champagne','off','champagne'),
     ...starter('glow|glowing','off','glow'),...starter('echo|echoes','off','echo'),...starter('dance|dancing','flex'),...starter('jump|bounce','bounce')
   ].map(r=>Object.freeze({...r,effects:Object.freeze(r.effects)})));
   const ruleWord=text=>String(text).normalize('NFKC').toLowerCase().trim().split(/\s+/u).map(part=>part.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu,'')).filter(Boolean).join(' ');
@@ -41,6 +41,9 @@
       raysTurn:reduced?0:Math.sin(phase*1.3)*7,raysScale:reduced?1:1+.07*Math.sin(phase*2.2),
       glassesLift:reduced?1:ease(elapsed/Math.min(750,duration*.65)),
       champagneFlip:reduced?180:180*ease((elapsed/duration-.04)/.28),champagnePop:reduced?.7:ease((elapsed/duration-.38)/.5),
+      disco:cue.rule.effects.includes('disco')?{beams:Array.from({length:5},(_,i)=>({x:100+(reduced?Math.sin(i*1.4):Math.sin(phase*1.7+i*1.4))*92,opacity:reduced?.24:.19+.11*(.5+.5*Math.sin(phase*2+i))})),
+        facets:Array.from({length:36},(_,i)=>reduced?.35+(i%5)*.12:.25+.7*(.5+.5*Math.sin(phase*2.8+(i%6)*.9+Math.floor(i/6)*.45))),
+        glints:Array.from({length:9},(_,i)=>({x:100+(reduced?Math.sin(i*2.4):Math.sin(phase*.8+i*2.4))*92,y:55+(i%3)*28,opacity:reduced?.5:.25+.55*(.5+.5*Math.sin(phase*2+i*1.8))}))}:null,
       bills:Array.from({length:7},(_,i)=>{const u=clamp((elapsed-i*40)/Math.min(1350,duration*.8));return {x:reduced?(i-3)*.36:(i-3)*.52*u,y:reduced?-.65:-1.6*Math.sin(u*Math.PI*.8)+.25*u,turn:reduced?(i-3)*8:(i-3)*18+Math.sin(u*9+i)*35,opacity:reduced?.8:Math.sin(Math.PI*u)};})};
   }
   // Unknown syllable counts remain estimates; they never become timing evidence.
@@ -113,7 +116,7 @@
     }
     if(!automatic)return out;
     if(cue.rule){
-      const value=expressionAt({...cue,rule:null},now,{mode,reduced,automatic:false,effects:cue.rule.effects.filter(type=>!['rays','sunglasses','fire','bills','champagne'].includes(type)).map(type=>({type,strength:.5}))});
+      const value=expressionAt({...cue,rule:null},now,{mode,reduced,automatic:false,effects:cue.rule.effects.filter(type=>!['rays','sunglasses','fire','bills','champagne','disco'].includes(type)).map(type=>({type,strength:.5}))});
       return {...value,reason:'word-rule:'+cue.rule.word};
     }
     const held=cue.sustained?.find(u=>now>=u.startMs&&now<u.endMs);

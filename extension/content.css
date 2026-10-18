@@ -3065,3 +3065,7 @@
 #lvx-root .lvx-word-emoji::after { content:attr(data-emoji);color:initial!important;-webkit-text-fill-color:initial;background:none;filter:none;text-shadow:none; }
 #lvx-root .lvx-word-emoji[hidden] { display:none; }
 @media(max-width:600px){#lvx-root .lvx-rule-emoji {grid-template-columns:1fr;} }
+
+/* Word-local disco art; source-media clock owns all motion and light changes. */
+.lvx-word-disco { position:absolute; left:50%; top:-1em; width:calc(100% + 1em); height:2.7em; transform:translateX(-50%); overflow:visible; z-index:-1; }
+.lvx-disco-facets { border-radius:50%; overflow:hidden; }
