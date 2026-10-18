@@ -1366,3 +1366,19 @@ test('a first backing entrance counts only preceding visible Main phrases', () =
   const step=tap.planOtherParts(score,'a').find(s=>s.other);
   assert.equal(step.gapPhrases,1);assert.equal(step.countIn,false);
 });
+
+
+test('untimed pasted lyrics wait through an intro; recorded releases can guide later listening', () => {
+  const units=[0,1,2].map(i=>({id:'w'+i,wordId:'w'+i,phraseId:'p'+i,text:'word',minMs:0,maxMs:60000,estimatedStartMs:i*3000,estimatedEndMs:(i+1)*3000,referenceEndMs:(i+1)*3000,timingEstimated:true}));
+  for(const mode of ['phrase','word','holds']){
+    let take=mode==='holds'?tap.beginWordHolds(units,[]):tap.begin(units,{mode,cadence:'pairs'});
+    const before=structuredClone(take);
+    assert.strictEqual(tap.followPlayback(take,17000,{rewind:true}),take,'17 seconds of intro cannot consume a lyric');
+    assert.deepEqual(take,before);
+    take=mode==='holds'?tap.pressWord(take,18000):tap.mark(take,18000);
+    take=mode==='holds'?tap.releaseWord(take,19000):tap.release(take,19000);
+    assert.equal(take.index,1);
+    assert.equal(tap.followPlayback(take,40000,{rewind:true}).index,1,'next untimed word waits after a recorded release');
+    assert.equal(tap.followPlayback(take,18500,{rewind:true}).index,0,'real recorded timing remains replayable');
+  }
+});

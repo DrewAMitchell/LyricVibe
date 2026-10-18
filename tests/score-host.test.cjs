@@ -133,14 +133,14 @@ test('opening overlay Sync after saved text replacement preserves edits and resu
   const source=fs.readFileSync(path.join(root,'extension/content.js'),'utf8');
   const opener=source.slice(source.indexOf('  async function openTimingReview()'),source.indexOf('  function discardTimingLocal()'));
   const timing={busy:false,draft:null}, panel={hidden:true,focus(){}}, notices=[];
-  const context=vm.createContext({timing,timingWorkspace:null,stageEdit:{active:false},syncPanel:panel,state:{auditionLoop:null,score:edited.score},unplacedWords:()=>[],loadTempo:async()=>{},hasBaselineTempo:()=>true,refreshTimingPanel(){},setSyncNotice:text=>notices.push(text),
+  const context=vm.createContext({timing,tapping:{},timingWorkspace:null,stageEdit:{active:false},syncPanel:panel,state:{auditionLoop:null,score:edited.score},unplacedWords:()=>[],loadTempo:async()=>{},hasBaselineTempo:()=>true,refreshTimingPanel(){},setSyncNotice:text=>notices.push(text),
     async timingRequest(type,extra={}) {
       const result=await h.dispatch({type,mediaKey:`youtube:${ID_A}`,expectedRevision:edited.score.revision,lyricsHash:edited.score.lyrics.contentHash,...extra},
         {id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`});
       if(!result.ok)throw Error(result.error.message);
       return result;
     }});
-  vm.runInContext(opener,context);
+  vm.runInContext(source.slice(source.indexOf('  function selectInitialTimingPhrase('),source.indexOf('  function unplacedWords('))+opener,context);
   await vm.runInContext('openTimingReview()',context);
   assert.ok(timing.draft,notices.at(-1));
   assert.equal(lookups,0);

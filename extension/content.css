@@ -2991,3 +2991,8 @@
 
 #lvx-root .lvx-landing-editor label{display:grid;gap:6px;margin:10px 0}
 #lvx-root .lvx-landing-editor select{width:100%;min-width:0}
+
+/* Keep the three editing actions distinct in the narrow floating sidebar. */
+#lvx-root .lvx-sidebar .lvx-editor-actions{gap:6px;padding:6px;}
+#lvx-root .lvx-sidebar .lvx-editor-actions>button{border:1px solid #657f8e;background:#1b2b35;border-radius:7px;}
+#lvx-root .lvx-sidebar .lvx-editor-actions>button:hover{border-color:#afcad8;background:#304956;}

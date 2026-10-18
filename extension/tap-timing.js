@@ -1430,7 +1430,7 @@
 
   // Listening moves only the cursor. It never creates marks, removes a take,
   // or advances a word that is currently held by the performer.
-  function followPlayback(take, nowMs, { rewind = false } = {}) {
+  function followPlayback(take, nowMs, { rewind = false, timingEstimated = unit => unit.timingEstimated === true } = {}) {
     if (!take || take.status !== 'armed' || !integerTime(nowMs) || take.pendingStartMs !== null ||
         !(take.cadence === 'word-holds' || take.mode === 'word' || take.mode === 'phrase')) return take;
     const recordedEnds=new Map(take.cadence==='word-holds'?(take.holds||[]).map(h=>[h.wordId,h.releaseMs]):(take.marks||[]).map(m=>[m.id,m.endMs]));
@@ -1439,7 +1439,7 @@
     // A recorded entrance supersedes an earlier word's stale estimated end.
     const entered=eligible.filter(({unit})=>nowMs>=(recordedStarts.get(take.cadence==='word-holds'?unit.wordId:unit.id)??Infinity)).at(-1)?.index??0;
     const candidates=eligible.filter(({index})=>index>=entered);
-    const found = candidates.find(({unit})=>nowMs < (recordedEnds.get(take.cadence==='word-holds'?unit.wordId:unit.id) ?? unit.referenceEndMs ?? unit.estimatedEndMs ?? unit.maxMs)) || candidates.at(-1);
+    const found = candidates.find(({unit})=>nowMs < (recordedEnds.get(take.cadence==='word-holds'?unit.wordId:unit.id) ?? (timingEstimated(unit) ? Infinity : unit.referenceEndMs ?? unit.estimatedEndMs ?? unit.maxMs))) || candidates.at(-1);
     if (!found) return take;
     const index = rewind ? found.index : Math.max(take.index,found.index);
     return index === take.index ? take : {...take,index};
