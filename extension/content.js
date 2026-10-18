@@ -549,12 +549,25 @@
   themePicker.addEventListener('keydown', event => { if (event.key === 'Escape') { event.stopPropagation(); toggleThemePicker(false); themeButton.focus(); } });
   document.addEventListener('pointerdown', event => { if (!themePicker.hidden && !themePicker.contains(event.target) && !bounds.contains(event.target) && event.target !== themeButton) toggleThemePicker(false); }, true);
 
+  let captureLeadInMs=800,captureLeadInEdited=false;
+  function leadInControl(label){
+    const host=document.createElement('label');host.className='lvx-lead-in';host.title='Seconds before the lyric for Next lead-in and Replay phrase. Next lead-in stays ahead of playback and after the previous phrase.';
+    host.innerHTML='Lead-in <input type="number" min="0" max="30" step="0.1" value="0.8" data-capture-lead-in> s';
+    const input=host.querySelector('input');input.setAttribute('aria-label',label);
+    input.onchange=()=>{
+      if(input.value.trim()===''||!Number.isFinite(input.valueAsNumber)){refreshLeadInControls();return;}
+      captureLeadInEdited=true;captureLeadInMs=Math.round(clamp(input.valueAsNumber,0,30)*1000);refreshLeadInControls();
+      chrome.storage.local.set({lvxCaptureLeadInMs:captureLeadInMs}).catch(error=>setSyncNotice('Lead-in changed in this tab; preference could not save: '+error.message));
+    };return host;
+  }
+  function refreshLeadInControls(){for(const input of root.querySelectorAll('[data-capture-lead-in]'))input.value=String(captureLeadInMs/1000);captureGuidanceFrame=null;}
   const recordingTransport=document.createElement('div');recordingTransport.className='lvx-recording-playback';recordingTransport.hidden=true;recordingTransport.setAttribute('aria-label','Recording playback');
   recordingTransport.innerHTML='<label>Speed <select aria-label="Recording playback speed">'+[.25,.5,.75,1,1.25,1.5,1.75,2].map(rate=>`<option value="${rate}">${rate}×</option>`).join('')+'</select></label><button type="button" data-record-restart title="Play from 0:00; retain the current take">↶ Restart · 0:00</button><button type="button" data-record-phrase>↶ Replay phrase</button><button type="button" data-record-forward>Next lead-in →</button>';
   recordingTransport.querySelector('select').onchange=event=>setPlaybackSpeed(Number(event.target.value));
   recordingTransport.querySelector('[data-record-restart]').onclick=()=>restartPlayback();
   recordingTransport.querySelector('[data-record-phrase]').onclick=()=>rewindCapturePhrase(true);
   recordingTransport.querySelector('[data-record-forward]').onclick=()=>jumpCaptureLeadIn();viewport.append(recordingTransport);
+  recordingTransport.append(leadInControl('Playback lead-in seconds'));
   function refreshRecordingTransport(){
     const take=tapping.take,visible=Boolean(timing.draft&&!syncPanel.hidden&&(countIn.previewTake||take&&['armed','complete'].includes(take.status)));
     recordingTransport.hidden=!visible;if(!visible)return;
@@ -1565,11 +1578,11 @@
   }
   // Keep the selected phrase on the playhead (score clock), in both directions.
   // The selection is kept while the playhead sits in its lead-in or body.
-  // Lead-in for parking playback before a phrase: up to 800ms, but never inside the previous phrase.
+  // User-selected lead-in, shortened when the previous phrase occupies the gap.
   function phraseLeadInMs(phrase){
     const lane=timing.draft.score.phrases.filter(p=>p.laneId===phrase.laneId&&p.words.some(w=>!w.excluded));
     const previous=lane.filter(p=>p.startMs<phrase.startMs).at(-1);
-    return Math.max(0,phrase.startMs-800,Math.min(phrase.startMs,previous?previous.endMs:0));
+    return Math.max(0,phrase.startMs-captureLeadInMs,Math.min(phrase.startMs,previous?previous.endMs:0));
   }
   function captureTarget(now) {
     const take=tapping.take;if(!timing.draft||!take||take.status!=='armed'||take.pendingStartMs!==null)return null;
@@ -1601,7 +1614,7 @@
     if(captureGuidanceFrame&&Object.keys(frame).every(key=>captureGuidanceFrame[key]===frame[key])&&syncPanel.querySelector('.lvx-capture-meta')&&(!stage.querySelector('.lvx-capture-transcript')||stage.querySelector('.lvx-capture-meta')))return;
     captureGuidanceFrame=frame;
     const cue=syncPanel.querySelector('.lvx-perform-cue'),target=captureTarget(now);
-    const remaining=target?LvTapTiming.leadInProgress(now,target.startMs,Math.max(800,target.startMs-phraseLeadInMs(target.phrase))):null;
+    const remaining=target?LvTapTiming.leadInProgress(now,target.startMs,Math.max(1,captureLeadInMs,target.startMs-phraseLeadInMs(target.phrase))):null;
     const recorded=LvTapTiming.captureProgress(take,phrase,timingOffsetMs());
     const text=(e,value)=>{if(e.textContent!==value)e.textContent=value};
     const visible=(e,on)=>{const value=on?'visible':'hidden';if(e.style.visibility!==value)e.style.visibility=value};
@@ -1625,7 +1638,7 @@
   function jumpCaptureLeadIn(){
     const take=tapping.take;if(!take||take.status!=='armed'||take.pendingStartMs!==null||timing.busy)return;
     const now=getMediaTimeMs()-timingOffsetMs(),target=captureTarget(now);if(!target||target.startMs<=now)return;
-    const lead=Math.min(target.startMs,Math.max(now,phraseLeadInMs(target.phrase),target.startMs-800));
+    const lead=Math.min(target.startMs,Math.max(now,phraseLeadInMs(target.phrase),target.startMs-captureLeadInMs));
     rewindPlaybackForTake(lead+timingOffsetMs());noteCaptureInput();setSyncNotice('Jumped to the next lead-in. Your recording cursor and completed inputs are unchanged.');
   }
   function followPlaybackPhrase(now){
@@ -2090,7 +2103,7 @@
     const anchor=capturePhraseStart(take,phrase);
     listenToTake();tapping.take={...tapping.take,index:first.index,status:'armed'};
     timing.phraseIndex=timing.draft.score.phrases.indexOf(phrase);tapping.wordId=first.unit.wordId;tapping.backPhraseId=phrase.id;tapping.rewindPhraseId=phrase.id;
-    seekCapture(anchor-800,anchor,first.index);refreshTimingPanel();
+    seekCapture(anchor-captureLeadInMs,anchor,first.index);refreshTimingPanel();
     if(restartOnly===true){const media=getMedia();if(media)void media.play().catch(error=>setSyncNotice('Press Play to restart: '+error.message));}
     setSyncNotice(restartOnly===true?'Replaying this phrase. Recorded timing stays until you press to re-record.':'Phrase start selected. Record from its first word or syllable; existing timing stays until your next press. Back again goes to the previous phrase.');
   }
@@ -3153,7 +3166,7 @@
     for(const [section,id]of [[capture,'record'],[effects,'effects'],[beat,'beat']]){section.open=true;section.classList.add('lvx-workspace-section');panes[id].append(section);}
     // Primary capture actions stay above the cue at every viewport height.
     capture.querySelector('.lvx-perform-cue').before(capture.querySelector('.lvx-record-choices'),capture.querySelector('.lvx-other-parts'),capture.querySelector('.lvx-perform-actions'));
-    const transport=document.createElement('div');transport.className='lvx-capture-transport';transport.append(syncButton('capture-restart'),syncButton('capture-phrase'),syncButton('capture-forward'));capture.querySelector('.lvx-perform-actions').after(transport);
+    const transport=document.createElement('div');transport.className='lvx-capture-transport';transport.append(syncButton('capture-restart'),syncButton('capture-phrase'),syncButton('capture-forward'),leadInControl('Recording lead-in seconds'));capture.querySelector('.lvx-perform-actions').after(transport);
     const gap=document.createElement('details');gap.className='lvx-effect-gap';gap.innerHTML='<summary>Phrase exit <span>Override this phrase</span></summary>';
     const gapHint=syncButton('gap-default').nextElementSibling;
     gap.append(syncButton('gap-beats').closest('label'),syncButton('gap-use'),syncButton('gap-default'),gapHint);effects.append(gap);
@@ -3288,7 +3301,8 @@
 
   /* Load saved preferences (theme, font scale, lite mode) */
   try {
-    chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement','lvxBloomEnabled','lvxChoreography','lvxLinger','lvxRecordOtherParts','lvxBackingDisplay','lvxBackingLabels','lvxControlPlacement'], (result) => {
+    chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement','lvxBloomEnabled','lvxChoreography','lvxLinger','lvxRecordOtherParts','lvxBackingDisplay','lvxBackingLabels','lvxControlPlacement','lvxCaptureLeadInMs'], (result) => {
+      if(!captureLeadInEdited&&Number.isFinite(result?.lvxCaptureLeadInMs)){captureLeadInMs=clamp(result.lvxCaptureLeadInMs,0,30000);refreshLeadInControls();}
       const savedControls=result?.lvxControlPlacement;if(savedControls){controlPlacement={x:Number.isFinite(savedControls.x)?clamp(savedControls.x,0,1):0,y:Number.isFinite(savedControls.y)?clamp(savedControls.y,0,1):0,orientation:savedControls.orientation==='horizontal'?'horizontal':'vertical'};placeControls();}
       backingDisplay=LvChoreography.backingSettings(result?.lvxBackingDisplay);
       backingLabels=Object.fromEntries(Object.entries(result?.lvxBackingLabels||{}).filter(([key,value])=>['hidden','header','prefix'].includes(value)));

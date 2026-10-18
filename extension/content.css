@@ -2698,7 +2698,10 @@
 #lvx-root .lvx-theme-picker .lvx-word-effects{padding-top:8px}
 #lvx-root .lvx-theme-picker .lvx-motion-sample{padding:4px}
 #lvx-root .lvx-sync-panel .lvx-perform-actions button{min-height:34px;padding:6px 8px;font-size:11px}
-#lvx-root .lvx-sync-panel .lvx-capture-transport{display:flex;gap:4px;margin:6px 0}
+#lvx-root .lvx-sync-panel .lvx-capture-transport{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
+#lvx-root .lvx-lead-in{display:flex;align-items:center;gap:5px;font:12px system-ui;color:#c9ded6}
+#lvx-root .lvx-lead-in input{width:60px;min-height:30px;box-sizing:border-box;border:1px solid #496657;border-radius:6px;padding:4px;background:#192c25;color:#edf5e7;font:12px system-ui}
+#lvx-root .lvx-sync-panel .lvx-capture-transport .lvx-lead-in{flex-basis:100%;justify-content:flex-end}
 #lvx-root .lvx-sync-panel .lvx-capture-transport button{flex:1;padding:6px 4px;font-size:10px;min-height:30px}
 
 #lvx-root .lvx-performance-controls [hidden]{display:none!important}
