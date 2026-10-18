@@ -453,9 +453,9 @@
   function backingLabelMode(){return backingLabels[backingLabelKey()]||'hidden';}
   function setBackingLabel(value){const key=backingLabelKey();if(!key)return;backingLabels={...backingLabels,[key]:['header','prefix'].includes(value)?value:'hidden'};state.scoreSignature='';chrome.storage.local.set({lvxBackingLabels:backingLabels}).catch(error=>setHud('Backing names changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
   function setBackingDisplay(value){backingDisplay=LvChoreography.backingSettings(value);state.scoreSignature='';chrome.storage.local.set({lvxBackingDisplay:backingDisplay}).catch(error=>setHud('Backing display changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
-  let choreography={landing:'settle',dance:'off',mode:'classic',upsideDown:false,automatic:false,autoFire:false,fireColor:'ember',fireSmoke:true,fillStage:true,arrangement:'chaotic',origin:'top-left'},previewPlaying=false,previewFrame=0,previewTime=1600,previewLast=0,previewTheme=state.theme;
+  let choreography={beatPulse:true,landing:'settle',dance:'off',mode:'classic',upsideDown:false,automatic:false,autoFire:false,fireColor:'ember',fireSmoke:true,fillStage:true,arrangement:'chaotic',origin:'top-left'},previewPlaying=false,previewFrame=0,previewTime=1600,previewLast=0,previewTheme=state.theme;
   const choreographyPlans=new WeakMap(),choreographyMeasure=document.createElement('canvas').getContext('2d');
-  function setChoreography(value){choreography={landing:Object.hasOwn(LvChoreography.landingStyles,value.landing)?value.landing:'settle',dance:['off','mix','tip','flex','bounce','launch'].includes(value.dance)?value.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic===true,autoFire:value.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,value.fireColor)?value.fireColor:'ember',fireSmoke:value.fireSmoke!==false,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:Object.hasOwn(LvChoreography.layoutOrigins,value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
+  function setChoreography(value){choreography={beatPulse:value.beatPulse!==false,landing:Object.hasOwn(LvChoreography.landingStyles,value.landing)?value.landing:'settle',dance:['off','mix','tip','flex','bounce','launch'].includes(value.dance)?value.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic===true,autoFire:value.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,value.fireColor)?value.fireColor:'ember',fireSmoke:value.fireSmoke!==false,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:Object.hasOwn(LvChoreography.layoutOrigins,value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
   function previewTick(now){
     if(themePicker.hidden||!previewPlaying||document.hidden){previewFrame=0;previewLast=0;return;}
     if(previewLast)previewTime+=Math.min(now-previewLast,100);previewLast=now;renderStylePreview(true);previewFrame=requestAnimationFrame(previewTick);
@@ -2873,7 +2873,7 @@
     syncButton('effect-clear-track').disabled=timing.busy||active||Boolean(effectGesture.input)||Boolean(tapping.take)||timing.dirty||tapping.splitDirty||transcript.dirty||performanceTake.marks.length>0||!effectClearOperations(timing.draft?.score).length;
     refreshEffectLive();
     effectPreviewBox.hidden=active||!effectPreview.type;
-    if(active)stopEffectPreview();
+    if(active)stopEffectPreview();refreshEffectsNavigation();
   }
   async function startEffects() {
     if(trackWatch?.loading()&&trackWatch?.status().generation>0)return;
@@ -3072,7 +3072,7 @@
     syncPanel.querySelector('.lvx-sync-protected').hidden = !protectedPhrase && !(syncButton('tap-scope').value === 'lane' && draft?.protectedIds.length);
     syncText.disabled = timing.busy || !draft;
     if (!timing.dirty) syncText.value = phrase?.words.map(w => `${w.text}\t${w.startMs}\t${w.endMs}`).join('\n') || '';
-    refreshTapPanel();
+    refreshTapPanel();refreshEffectsNavigation();
   }
   async function openTimingReview() {
     if (timing.busy) return;
@@ -3095,6 +3095,7 @@
     finally { timing.busy = false; refreshTimingPanel(); }
   }
   async function openTimingView(view){
+    if(view==='effects'){await openEffectsWorkspace();return;}
     if(timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active)return;
     await openTimingReview();
     if(!syncPanel.hidden&&timing.draft&&hasBaselineTempo())setTimingWorkspace(view);
@@ -3111,7 +3112,9 @@
   }
   async function closeTimingReview() {
     if (timing.busy) return;
+    if(stageEdit.dock==='effects'&&stageEdit.fieldsDirty){stageMessage('Apply or revert the item form before closing.',true);return;}
     if (hasUnsavedWork() && !window.confirm('Discard your unsaved take and preview edits and close Sync? Choose Cancel to keep editing, then use Save timings.')) return;
+    leaveEffectsStage();
     if (timing.draft) await timingRequest('LV_TIMING_CANCEL').catch(() => {});
     if (tapping.audio) { tapping.audio.close().catch(() => {}); tapping.audio = null; }
     discardTimingLocal(); transcript.dirty = false; transcript.shownFor = null;
@@ -3251,10 +3254,13 @@
   var timingWorkspace={view:'record',tabs:null};
   function setTimingWorkspace(view){
     if(!['record','review','effects','beat'].includes(view))return;
+    if(timingWorkspace.effectsTabs&&stageEdit.dock==='effects'&&timing.busy&&view!==timingWorkspace.view)return;
+    if(timingWorkspace.effectsTabs&&view!=='effects'&&!leaveEffectsStage())return;
     if((tapping.take?.status==='armed'||performanceTake.armed||countIn.active)&&timingWorkspace.view!==view)return;
     timingWorkspace.view=view;syncPanel.dataset.workspace=view;
     for(const tab of timingWorkspace.tabs?.children||[]){const active=tab.dataset.workspace===view;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;}
     for(const panel of syncPanel.querySelectorAll('[data-workspace-page]'))panel.hidden=panel.dataset.workspacePage!==view;
+    if(timingWorkspace.effectsTabs){if(view==='effects')setEffectsView(timingWorkspace.effectsView||'lyrics');else refreshEffectsNavigation();}
     refreshEffectTracks();
   }
   function buildTimingWorkspace(){
@@ -3297,6 +3303,60 @@
   stagePanel.innerHTML='<header><strong>Stage Edit</strong><span>Draw where a phrase belongs.</span><button type="button" data-stage="done">Done</button></header><div class="lvx-stage-edit-row"><label>Phrase<select data-stage="phrase" aria-label="Stage phrase"></select></label><button type="button" data-stage="seek">Rewind phrase</button><button type="button" data-stage="play">Play / pause</button><button type="button" data-stage="draw">Draw region</button><button type="button" data-stage="remove">Clear region</button></div><div class="lvx-stage-edit-row"><label>From · s<input data-stage="start" aria-label="Region start seconds" type="number" min="0" step="0.001"></label><label>To · s<input data-stage="end" aria-label="Region end seconds" type="number" min="0" step="0.001"></label><button type="button" data-stage="interval">Use interval</button><button type="button" data-stage="revert" hidden>Revert interval</button><button type="button" data-stage="undo">Undo edit</button><button type="button" data-stage="save">Save score</button></div><details><summary>Word appearance <span>Look · gesture</span></summary><div class="lvx-stage-edit-row"><label>Word<select data-stage="word" aria-label="Stage word"></select></label><label>Look<select data-stage="look" aria-label="Word look"></select></label><label>Gesture<select data-stage="motion" aria-label="Word gesture"></select></label><label>Illustration<select data-stage="art" aria-label="Word illustration"></select></label><label>Emoji<select data-stage="emoji" aria-label="Word emoji tag"></select></label><label>Find emoji<input data-stage="emoji-search" aria-label="Find word emoji" placeholder="Keyword"></label></div></details><p data-stage="status" role="status">Changes stay in your score preview until Save.</p>';
   const stageControl=name=>stagePanel.querySelector(`[data-stage="${name}"]`);
   stagePanel.querySelector('details').before(createEffectTrack('stage'));
+  function buildEffectsWorkspace(){
+    if(timingWorkspace.effectsTabs)return;
+    timingWorkspace.effectsView='lyrics';
+    const pane=syncPanel.querySelector('[data-workspace-page="effects"]'),lyrics=document.createElement('section'),stagePane=document.createElement('section'),tabs=document.createElement('div');
+    lyrics.dataset.effectsPage='lyrics';stagePane.dataset.effectsPage='stage';lyrics.append(...pane.children);pane.append(tabs,lyrics,stagePane);
+    timingWorkspace.tabs.after(tabs);tabs.className='lvx-effects-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Effects workspace');timingWorkspace.effectsTabs=tabs;
+    for(const [id,label]of [['lyrics','Lyrics'],['stage','Stage']]){const button=document.createElement('button');button.type='button';button.textContent=label;button.dataset.effectsView=id;button.id='lvx-effects-tab-'+id;button.setAttribute('role','tab');button.setAttribute('aria-controls','lvx-effects-'+id);button.onclick=()=>setEffectsView(id);tabs.append(button);const page=id==='lyrics'?lyrics:stagePane;page.id='lvx-effects-'+id;page.setAttribute('role','tabpanel');page.setAttribute('aria-labelledby',button.id);}
+    tabs.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;const choices=[...tabs.children].filter(b=>!b.disabled),at=choices.indexOf(document.activeElement);if(at<0)return;event.preventDefault();event.stopPropagation();const index=event.key==='Home'?0:event.key==='End'?choices.length-1:(at+(event.key==='ArrowRight'?1:-1)+choices.length)%choices.length;choices[index].click();choices[index].focus();};
+    const effects=lyrics.querySelector('.lvx-effect-panel'),targets=lyrics.querySelector('.lvx-effect-targets');effects.prepend(targets);
+    const actions=syncButton('effect-start').parentElement,track=effects.querySelector('[data-effect-track=effects]'),pads=effects.querySelector('.lvx-effect-pads');targets.after(actions,track,pads);
+    const hint=effects.querySelector(':scope > .lvx-sync-hint'),help=document.createElement('details');help.className='lvx-effects-help';help.innerHTML='<summary>Recording controls</summary>';help.append(hint);effects.append(help);
+    // Move the musical clock options behind one disclosure, leaving target and time blocks visible.
+    const clock=lyrics.querySelector('.lvx-beat-settings'),clockDetails=document.createElement('details');clockDetails.className='lvx-effects-clock';clockDetails.innerHTML='<summary>Timing & beat options</summary>';clock.before(clockDetails);clockDetails.append(clock);
+    const pulseLabel=document.createElement('label');pulseLabel.className='lvx-lyric-beat-pulse';pulseLabel.innerHTML='<input type="checkbox" data-sync="lyric-beat-pulse"> Pulse lyrics to BPM';pulseLabel.title='Default gentle pulse follows the song tempo. Authored pulses take precedence. Set BPM first if none is available.';targets.before(pulseLabel);pulseLabel.firstElementChild.checked=choreography.beatPulse!==false;pulseLabel.firstElementChild.onchange=event=>setChoreography({...choreography,beatPulse:event.target.checked});
+    refreshEffectsNavigation();
+  }
+  function refreshEffectsNavigation(){
+    if(!timingWorkspace?.effectsTabs)return;
+    if(syncButton('lyric-beat-pulse'))syncButton('lyric-beat-pulse').checked=choreography.beatPulse!==false;
+    const stageMode=timingWorkspace.view==='effects'&&timingWorkspace.effectsView==='stage',locked=timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active||Boolean(effectGesture.input);
+    timingWorkspace.effectsTabs.hidden=timingWorkspace.view!=='effects';syncPanel.dataset.effectsView=timingWorkspace.effectsView;
+    for(const button of timingWorkspace.effectsTabs.children){const selected=button.dataset.effectsView===timingWorkspace.effectsView;button.setAttribute('aria-selected',String(selected));button.tabIndex=selected?0:-1;button.disabled=!selected&&(locked||stageEdit.dock==='effects'&&stageEdit.fieldsDirty||button.dataset.effectsView==='stage'&&(effectPending()||timing.dirty||tapping.splitDirty||transcript.dirty));}
+    for(const page of syncPanel.querySelectorAll('[data-effects-page]'))page.hidden=page.dataset.effectsPage!==timingWorkspace.effectsView;
+    if(stageMode&&stageEdit.fieldsDirty)for(const tab of timingWorkspace.tabs.children)if(tab.dataset.workspace!=='effects')tab.disabled=true;
+    syncPanel.querySelector('h2').textContent=timingWorkspace.view==='effects'?'Effects':'Edit timing';
+    if(stageMode){syncPanel.querySelector('.lvx-sync-save-status').textContent='Stage items use the same score preview.';}
+  }
+  function leaveEffectsStage(){
+    if(stageEdit.dock!=='effects')return true;
+    if(stageEdit.fieldsDirty){stageMessage('Apply or revert the item form before switching views.',true);return false;}
+    stageEdit.active=false;stageEdit.dock=null;stageEdit.drawing=false;stageEdit.drag=null;stagePanel.hidden=true;stagePanel.classList.remove('lvx-stage-docked');root.append(stagePanel);stageSurface.hidden=true;syncPanel.classList.remove('lvx-effects-placing');root.classList.remove('lvx-effects-drawing');return true;
+  }
+  function setEffectsView(view){
+    if(!['lyrics','stage'].includes(view)||!timingWorkspace.effectsTabs)return false;
+    if(timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active||effectGesture.input)return false;
+    if(view==='stage'&&(effectPending()||timing.dirty||tapping.splitDirty||transcript.dirty)){setSyncNotice('Use or discard the current pass, or finish your typed edits, before Stage.');return false;}
+    if(view==='lyrics'&&!leaveEffectsStage())return false;
+    if(view==='stage'){
+      if(!timing.draft)return false;
+      const entering=stageEdit.dock!=='effects';
+      stageEdit.dock='effects';stageEdit.active=true;stageEdit.subject='performance';stagePanel.classList.add('lvx-stage-docked');stagePanel.hidden=false;stageSurface.hidden=true;root.classList.remove('lvx-stage-editing');
+      syncPanel.querySelector('[data-effects-page="stage"]').append(stagePanel);stopEffectPreview();
+      if(entering){timing.view='proposed';stageEdit.fieldsDirty=false;refreshPerformanceEditor(true);stageMessage('Place a stage item in source time. Apply to preview, then Save score.');}
+    }
+    timingWorkspace.effectsView=view;refreshEffectsNavigation();syncPanel.scrollTop=0;refreshTimingPanel();if(view==='stage')refreshPerformanceEditor();else refreshEffectPanel();syncSidebarState();return true;
+  }
+  async function openEffectsWorkspace(){
+    if(timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active)return;
+    if(stageEdit.active&&stageEdit.dock!=='effects'){closeStageEdit();if(stageEdit.active)return;}
+    if(!state.score){await openTimingReview();return;}
+    const opening=syncPanel.hidden;setLyricsOnly(false);toggleThemePicker(false);syncPanel.hidden=false;
+    if(!timing.draft){timing.busy=true;try{const current=await timingRequest('LV_TIMING_CURRENT');timing.draft=(current.preview?current:await timingRequest('LV_TIMING_PREPARE',{fromSaved:true})).preview;selectInitialTimingPhrase();timing.view='proposed';}catch(error){setSyncNotice(error.message,'error');}finally{timing.busy=false;}}
+    await loadTempo();if(opening&&!timing.openError)setSyncNotice('Lyric effects follow sung timing. Stage items have their own intervals.');root.classList.remove('lvx-tempo-required');setTimingWorkspace('effects');refreshTimingPanel();syncSidebarState();
+  }
   function buildPerformanceEditor(){
     if(stageControl('subject'))return;
     stageEdit.subject='lyrics';stageEdit.itemId=null;stageEdit.itemRect={x:.1,y:.55,width:.8,height:.35};
@@ -3340,7 +3400,7 @@
     stageControl('item-revert').disabled=stageEditBusy()||!stageEdit.fieldsDirty;stageControl('undo').disabled=stageEditBusy()||stageEdit.fieldsDirty||!timing.draft?.undoScores?.length;stageControl('save').disabled=stageEditBusy();stageControl('play').disabled=stageEditBusy();stageControl('done').disabled=stageEditBusy();
     const bassMode=stageControl('item-response').value==='bass';stageControl('item-beats').disabled=stageEditBusy()||bassMode;stageControl('item-audio').hidden=!bassMode&&!stageEdit.bass?.state().enabled;refreshPerformanceAudio();
     stageControl('item-tempo').textContent=bassMode?'Reacts to 35–180 Hz energy from this video. Enable once for this video; audio stays in temporary memory.':tempo.map?'Pulses follow this song’s beat grid.':'No tempo set: preview uses 120 BPM. Set the song tempo in Beat.';
-    paintStageBox();state.scoreSignature='';if(state.score)renderScore(getMediaTimeMs());
+    paintStageBox();refreshEffectsNavigation();state.scoreSignature='';if(state.score)renderScore(getMediaTimeMs());
   }
   function performanceItemDraft(rect=stageEdit.itemRect){
     const start=stageControl('item-start').value,end=stageControl('item-end').value;if(!start.trim()||!end.trim())throw Error('Enter the start and end of this item.');
@@ -3355,6 +3415,7 @@
   function stageMessage(text,error=false){const node=stageControl('status');node.textContent=text;node.dataset.error=String(error);}
   function stageEditBusy(){return timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active;}
   async function openStageEdit(){
+    if(!leaveEffectsStage())return;
     if(stageEditBusy()||timing.dirty||transcript.dirty||tapping.splitDirty){setHud('Finish the current recording or typed edit before Stage Edit.',true,true);return;}
     try{
       timing.busy=true;
@@ -3367,7 +3428,7 @@
       stageMessage('Draw a region, then play to preview. Save keeps these edits with this video.');refreshStageEdit(true);
     }catch(error){setHud(error.message,true,true);}finally{timing.busy=false;refreshStageEdit();}
   }
-  function closeStageEdit(){if(stageEdit.fieldsDirty){stageMessage('Apply or revert the current form before closing Stage Edit.',true);return;}stageEdit.active=false;stageEdit.drag=null;stageEdit.drawing=false;stagePanel.hidden=true;stageSurface.hidden=true;root.classList.remove('lvx-stage-editing');state.scoreSignature='';if(state.score)renderScore(getMediaTimeMs());}
+  function closeStageEdit(){if(stageEdit.dock==='effects'){setEffectsView('lyrics');return;}if(stageEdit.fieldsDirty){stageMessage('Apply or revert the current form before closing Stage Edit.',true);return;}stageEdit.active=false;stageEdit.drag=null;stageEdit.drawing=false;stagePanel.hidden=true;stageSurface.hidden=true;root.classList.remove('lvx-stage-editing');state.scoreSignature='';if(state.score)renderScore(getMediaTimeMs());}
   function refreshStageEdit(selectRegion=false){
     if(!stageEdit.active)return;
     refreshPerformanceEditor(selectRegion);if(stageEdit.subject==='performance')return;const p=stagePhrase();if(!p){stageEdit.subject='performance';refreshPerformanceEditor(true);return;}
@@ -3381,7 +3442,7 @@
     const emojiWord=p.words.find(w=>w.id===stageEdit.wordId);if(stageControl('emoji'))fillEmojiPicker(stageControl('emoji'),stageControl('emoji-search').value||emojiWord?.text,emojiWord?.appearance?.emoji??'auto');
     paintStageBox();state.scoreSignature='';renderScore(getMediaTimeMs());refreshEffectTracks();
   }
-  function paintStageBox(){const r=stageEdit.drag?.rect||selectedRegion()?.rect||{x:.1,y:.2,width:.8,height:.55};Object.assign(stageBox.style,{left:r.x*100+'%',top:r.y*100+'%',width:r.width*100+'%',height:r.height*100+'%'});stageSurface.classList.toggle('lvx-drawing-region',stageEdit.drawing);stageControl('draw').setAttribute('aria-pressed',String(stageEdit.drawing));stageBox.querySelector('span').textContent=stageEdit.subject==='performance'?'Performance item area':'Draw or drag this phrase’s region';const placing=stageEdit.subject==='performance'&&stageEdit.drawing;stagePanel.classList.toggle('lvx-stage-placing',placing);if(stageControl('item-placement-stop'))stageControl('item-placement-stop').hidden=!placing;}
+  function paintStageBox(){const r=stageEdit.drag?.rect||selectedRegion()?.rect||{x:.1,y:.2,width:.8,height:.55};Object.assign(stageBox.style,{left:r.x*100+'%',top:r.y*100+'%',width:r.width*100+'%',height:r.height*100+'%'});stageSurface.classList.toggle('lvx-drawing-region',stageEdit.drawing);stageControl('draw').setAttribute('aria-pressed',String(stageEdit.drawing));stageBox.querySelector('span').textContent=stageEdit.subject==='performance'?'Performance item area':'Draw or drag this phrase’s region';const placing=stageEdit.subject==='performance'&&stageEdit.drawing;stagePanel.classList.toggle('lvx-stage-placing',placing);root.classList.toggle('lvx-effects-drawing',placing&&stageEdit.dock==='effects');if(stageEdit.dock==='effects'){stageSurface.hidden=!placing;syncPanel.classList.toggle('lvx-effects-placing',placing);}if(stageControl('item-placement-stop'))stageControl('item-placement-stop').hidden=!placing;}
   async function stageOperation(operation){
     if(stageEditBusy()||!stageEdit.active)return false;
     if(stageEdit.previewRevision!==timing.draft?.previewRevision||stageEdit.token!==timing.draft?.token){stageMessage('The preview changed elsewhere. Revert the interval or reopen Stage Edit before changing it.',true);return false;}
@@ -3423,6 +3484,7 @@
   });
   stage.addEventListener('click',event=>{if(!stageEdit.active||stageEditBusy()||stageEdit.fieldsDirty)return;const word=event.target.closest('[data-word]'),phrase=event.target.closest('[data-phrase]');if(!word||!phrase)return;stageEdit.phraseId=phrase.dataset.phrase;refreshStageEdit(true);stageEdit.wordId=word.dataset.word;refreshStageEdit();stagePanel.querySelector('details').open=true;});
   root.append(viewport, preview, progress, sidebar, themePicker, shortcutsPanel, syncPanel, errorPanel,controlsNotice,stagePanel,transcriptDialog);
+  buildEffectsWorkspace();
   function mountRoot() {
     const surface = document.fullscreenElement;
     if (surface && !['VIDEO', 'AUDIO'].includes(surface.tagName)) surface.appendChild(root);
@@ -3473,7 +3535,7 @@
       backingLabels=Object.fromEntries(Object.entries(result?.lvxBackingLabels||{}).filter(([key,value])=>['hidden','header','prefix'].includes(value)));
       syncButton('record-other-parts').checked=result?.lvxRecordOtherParts===true;
       linger=LvBeatTrack.lingerSettings(result?.lvxLinger);
-      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={landing:Object.hasOwn(LvChoreography.landingStyles,c.landing)?c.landing:'settle',dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic===true,autoFire:c.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,c.fireColor)?c.fireColor:'ember',fireSmoke:c.fireSmoke!==false,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:Object.hasOwn(LvChoreography.layoutOrigins,c.origin)?c.origin:'top-left'};}
+      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={beatPulse:c.beatPulse!==false,landing:Object.hasOwn(LvChoreography.landingStyles,c.landing)?c.landing:'settle',dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic===true,autoFire:c.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,c.fireColor)?c.fireColor:'ember',fireSmoke:c.fireSmoke!==false,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:Object.hasOwn(LvChoreography.layoutOrigins,c.origin)?c.origin:'top-left'};}
       bloomEnabled=result?.lvxBloomEnabled!==false;
       if(result?.lvxPlacement)try{applyPlacement(result.lvxPlacement);}catch(error){setHud(error.message,true,true);}
       if (result && result.lvxTheme && THEMES.includes(result.lvxTheme)) {
@@ -4941,6 +5003,7 @@
     if(typeof LvChoreography==='undefined')return;
     const paint=(node,cue,effects,automatic,danceAllowed=false,heldMotion=true,motion)=>{
       const value=LvChoreography.expressionAt(cue,clock,{mode:settings.mode,reduced:bloomMotion.matches,effects,automatic});
+      if(settings.beatPulse!==false&&tempo.map&&!effects?.length&&value.reason==='sustained')value.scale=1;
       node.classList.add('lvx-expression');node.dataset.expression=value.reason;node.dataset.authoredExpression=String(Boolean(effects?.length));
       const angle=(parseFloat(node.style.rotate)||0)*Math.PI/180,x=value.x*Math.cos(angle)+value.y*Math.sin(angle),y=-value.x*Math.sin(angle)+value.y*Math.cos(angle);
       node.style.transform=`translate(${x.toFixed(3)}px,${y.toFixed(3)}px) rotate(${value.turn.toFixed(3)}deg) scale(${value.scale.toFixed(4)})`;
@@ -5034,7 +5097,7 @@
     if(trackWatch?.loading()&&trackWatch?.status().generation>0)return;
     refreshRecordingTransport();
     stage.classList.remove('lvx-vinyl-stage');
-    if ((countIn.previewTake||tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete')) && timing.draft && !syncPanel.hidden) {clearStagePerformance();renderCaptureScore();return;}
+    if ((countIn.previewTake||tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete')) && timing.draft && !syncPanel.hidden && !stageEdit.active) {clearStagePerformance();renderCaptureScore();return;}
     stage.classList.add('lvx-choreography-stage');
     const score = syllableTakeScore() || (timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score);
     renderStagePerformance(score,mediaMs);
@@ -5161,7 +5224,20 @@
       const visual=LvBeatTrack.cueAt(cue,tempo.map,sourceMs,reduced,beat);if(!visual)continue;
       const t=cue.target,selector=t.kind==='active'||t.kind==='lane'?'.lvx-score-phrase':t.kind==='phrase'?`[data-phrase="${CSS.escape(t.id)}"]`:t.kind==='word'?`[data-word="${CSS.escape(t.id)}"]`:t.kind==='syllable'?`[data-syllable="${CSS.escape(t.id)}"]`:null;
       const nodes=t.kind==='screen'?[stage]:[...stage.querySelectorAll(selector)].filter(n=>t.kind!=='lane'||score.phrases.find(p=>p.id===n.dataset.phrase)?.laneId===t.id);
-      for(const node of nodes){if(visual.groove)paintBeatGroove(node,visual.groove);const prior=values.get(node)||{scale:1,brightness:1,hue:0};values.set(node,{scale:Math.max(prior.scale,visual.scale),brightness:Math.max(prior.brightness,visual.brightness),hue:prior.hue+visual.hue,y:(prior.y||0)+(visual.y||0),shadow:visual.accent?LvChoreography.accentShadow(visual.accent.type,visual.accent.phase,visual.accent.strength):prior.shadow});}
+      for(const node of nodes){if(visual.groove)paintBeatGroove(node,visual.groove);const prior=values.get(node)||{scale:1,brightness:1,hue:0};values.set(node,{pulse:prior.pulse||['pulse','breath'].includes(cue.effect),scale:Math.max(prior.scale,visual.scale),brightness:Math.max(prior.brightness,visual.brightness),hue:prior.hue+visual.hue,y:(prior.y||0)+(visual.y||0),shadow:visual.accent?LvChoreography.accentShadow(visual.accent.type,visual.accent.phase,visual.accent.strength):prior.shadow});}
+    }
+    // One source-clock default; explicit pulse accents on a word or its relatives win.
+    if(choreography.beatPulse!==false&&Number.isFinite(beat)&&!reduced){
+      const scale=1+.025*Math.pow((1+Math.cos(beat*Math.PI*2))/2,3),plans=choreography.automatic?expressionCues(score):{};
+      for(const line of stage.querySelectorAll('.lvx-score-phrase')){
+        const phrase=score.phrases.find(p=>p.id===line.dataset.phrase);if(!phrase)continue;
+        for(const node of line.querySelectorAll('[data-word]')){
+        const word=phrase.words.find(w=>w.id===node.dataset.word);if(!word)continue;
+        const explicit=[...(word.effects||[]),...(word.syllables||[]).flatMap(s=>s.effects||[])].some(e=>e.type==='pulse')||plans[word.id]?.rule?.effects.includes('pulse');
+        const beatAccent=[...values].some(([target,value])=>(value.pulse||value.scale!==1)&&(target===node||target.contains(node)||node.contains(target)));
+        if(explicit||beatAccent)continue;
+        const prior=values.get(node)||{brightness:1,hue:0};values.set(node,{...prior,scale:Math.max(prior.scale||1,scale)});
+      }}
     }
     for(const node of beatStyledNodes)if(!values.has(node)){node.classList.remove('lvx-beat-target');paintAccent(node,'','beat');for(const key of ['scale','bright','hue','y'])node.style.removeProperty('--lvx-beat-'+key);beatStyledNodes.delete(node);}
     for(const [node,value]of values){paintAccent(node,value.shadow,'beat');node.classList.add('lvx-beat-target');const props={scale:node===stage?'1':value.scale.toFixed(4),bright:value.brightness.toFixed(4),hue:value.hue.toFixed(2)+'deg',y:(value.y||0).toFixed(3)+'px'};for(const [key,v]of Object.entries(props))if(node.style.getPropertyValue('--lvx-beat-'+key)!==v)node.style.setProperty('--lvx-beat-'+key,v);beatStyledNodes.add(node);}
@@ -5566,6 +5642,7 @@
       event.preventDefault();event.stopImmediatePropagation();correctMark((event.key==='ArrowLeft'?-1:1)*(event.shiftKey?50:10));return;
     }
     const space = event.code === 'Space' || event.key === ' ';
+    if(stageEdit.dock==='effects'){const typing=event.target?.matches?.('input,textarea,select')||event.target?.isContentEditable;if(typing||event.ctrlKey||event.metaKey||event.altKey)return;if(event.target?.closest?.('button')&&(space||event.key==='Enter')){event.stopImmediatePropagation();return;}if(space||event.key==='Enter'||/^[0-9]$/.test(event.key)){event.preventDefault();event.stopImmediatePropagation();if((space||event.key==='Enter')&&event.type==='keydown'&&!event.repeat)stageControl('play').click();}return;}
     const inputTarget=event.target?.matches?.('input,textarea,select')||event.target?.isContentEditable;
     if(space&&event.type==='keyup'&&effectGesture.input==='keyboard'){event.preventDefault();event.stopImmediatePropagation();finishEffectGesture();refreshEffectPanel();return;}
     if(space&&!inputTarget&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&timing.draft&&timingWorkspace.view==='effects'){

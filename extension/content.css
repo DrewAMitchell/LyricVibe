@@ -3088,3 +3088,60 @@
 #lvx-root .lvx-stage-edit-panel.lvx-performance-editing { max-height:74vh; }
 #lvx-root .lvx-stage-edit-panel.lvx-stage-placing > :not(header) { display:none!important; }
 #lvx-root .lvx-stage-edit-panel.lvx-stage-placing header { margin:0; }
+
+/* Effects has two jobs in one compact workspace; the stage form keeps its owner. */
+#lvx-root .lvx-effects-tabs{display:flex;gap:4px;padding:4px;margin:0 0 12px;border:1px solid #3d535f;border-radius:10px;background:#101e27;position:sticky;top:-18px;z-index:8}
+#lvx-root .lvx-effects-tabs>button{flex:1;border:0;min-height:36px;background:transparent;color:#aabec9}
+#lvx-root .lvx-effects-tabs>button[aria-selected=true]{background:#d9edc1;color:#182619}
+#lvx-root .lvx-effects-tabs>button:focus-visible{outline:2px solid #f7cc70;outline-offset:-2px}
+#lvx-root [data-effects-page][hidden]{display:none!important}
+#lvx-root .lvx-sync-panel[data-workspace=effects]>.lvx-sync-phrase{font-size:17px;line-height:1.35;margin:8px 0 4px}
+#lvx-root .lvx-sync-panel[data-workspace=effects]>.lvx-sync-nav{margin-top:8px}
+#lvx-root .lvx-sync-panel[data-workspace=effects]>.lvx-sync-notice{min-height:0;margin:6px 0}
+#lvx-root .lvx-sync-panel[data-workspace=effects]>.lvx-sync-save-status{display:none}
+#lvx-root .lvx-sync-panel[data-workspace=effects][data-effects-view=stage]>:is(.lvx-sync-nav,.lvx-sync-phrase,.lvx-sync-range,.lvx-sync-protected,.lvx-sync-notice,footer){display:none!important}
+#lvx-root .lvx-effect-targets{margin:0 0 10px;padding:3px;border-bottom:1px solid #3b505b;gap:3px}
+#lvx-root .lvx-effect-targets button{min-height:32px;border-radius:6px;font-size:11px}
+#lvx-root .lvx-effects-help,#lvx-root .lvx-effects-clock{margin:8px 0!important;padding-top:8px!important}
+#lvx-root .lvx-effects-clock summary{font-size:11px}
+#lvx-root .lvx-effects-clock .lvx-beat-settings{margin:8px 0}
+#lvx-root .lvx-stage-edit-panel.lvx-stage-docked{position:static;inset:auto;width:100%;max-width:none;max-height:none;margin:0;padding:0;border:0;border-radius:0;background:transparent;overflow:visible;box-shadow:none}
+#lvx-root .lvx-stage-docked>header,#lvx-root .lvx-stage-docked>.lvx-stage-subject{display:none}
+#lvx-root .lvx-stage-docked .lvx-stage-performance-editor>p:first-child{margin:0 0 10px;color:#b1c6d1;font-size:11px}
+#lvx-root .lvx-stage-docked .lvx-stage-edit-row{gap:6px;margin:10px 0;align-items:end}
+#lvx-root .lvx-stage-docked .lvx-stage-edit-row>label{min-width:90px;flex:1 1 100px}
+#lvx-root .lvx-stage-docked [data-stage=item]{min-width:0}
+#lvx-root .lvx-stage-docked .lvx-stage-edit-row:has([data-stage=item])>label{flex-basis:100%}
+#lvx-root .lvx-stage-docked .lvx-stage-edit-row:has([data-stage=item-type])>label:first-child{flex-basis:100%}
+#lvx-root .lvx-stage-docked .lvx-stage-edit-row:has([data-stage=item-type])>button{flex-basis:100%}
+#lvx-root .lvx-stage-docked input{max-width:100%}
+#lvx-root .lvx-stage-docked .lvx-stage-common{position:sticky;bottom:-18px;z-index:7;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:10px 0 12px;margin:12px 0 0;background:#101e25;border-top:1px solid #354b57}
+#lvx-root .lvx-stage-docked .lvx-stage-common button{padding:7px 4px;font-size:11px}
+#lvx-root .lvx-stage-docked [data-stage=item-apply]{background:#d9edc1;color:#182619}
+#lvx-root .lvx-stage-docked [data-stage=item-audio-status]{flex:1 1 100%;font-size:11px;white-space:normal}
+#lvx-root .lvx-sync-panel.lvx-effects-placing{max-height:150px!important;bottom:auto!important}
+#lvx-root .lvx-sync-panel.lvx-effects-placing>:not([data-workspace-page=effects]),#lvx-root .lvx-sync-panel.lvx-effects-placing .lvx-effects-tabs{display:none!important}
+#lvx-root .lvx-stage-docked.lvx-stage-placing>header{display:flex}
+#lvx-root .lvx-stage-docked.lvx-stage-placing>header strong{font-size:13px}
+#lvx-root .lvx-stage-docked.lvx-stage-placing>header [data-stage=done]{display:none}
+@media(max-width:600px){
+  #lvx-root .lvx-sync-panel[data-workspace=effects]{right:8px;top:8px;width:calc(100% - 16px);max-height:calc(100% - 16px);bottom:auto;padding:12px;border-radius:14px}
+  #lvx-root .lvx-sync-panel[data-workspace=effects] .lvx-effects-tabs{top:-12px}
+  #lvx-root .lvx-sync-panel[data-workspace=effects] .lvx-workspace-tabs{margin-bottom:8px}
+  #lvx-root .lvx-sync-panel[data-workspace=effects] h2{font-size:20px}
+}
+
+#lvx-root .lvx-sync-panel[data-workspace=effects]{background:#0e191f}
+#lvx-root.lvx-effects-drawing .lvx-sidebar{display:none!important}
+#lvx-root .lvx-stage-docked [data-stage=save]{background:#d9edc1;color:#17251a;border-color:#d9edc1}
+#lvx-root [data-effects-page=lyrics] .lvx-effect-track{margin:8px 0}
+#lvx-root [data-effects-page=lyrics] .lvx-effect-pads{margin:8px 0}
+
+#lvx-root .lvx-sync-panel[data-workspace=effects]{top:12px;bottom:auto;max-height:calc(100% - 24px)}
+#lvx-root .lvx-stage-docked :is([data-stage=save],[data-stage=item-apply]):hover:not(:disabled){background:#edf8de;color:#17251a}
+@media(max-width:600px){#lvx-root .lvx-sync-panel[data-workspace=effects]{top:8px;max-height:calc(100% - 16px)}}
+@media(max-height:500px){#lvx-root .lvx-sync-panel[data-workspace=effects] .lvx-sync-eyebrow{display:none}#lvx-root .lvx-sync-panel[data-workspace=effects] header{margin-bottom:8px}#lvx-root .lvx-sync-panel[data-workspace=effects] h2{font-size:18px}}
+
+#lvx-root .lvx-sync-panel[data-workspace=effects]{scroll-padding-top:72px;scroll-padding-bottom:160px}
+
+#lvx-root .lvx-lyric-beat-pulse{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:12px;color:#c8dbe0}
