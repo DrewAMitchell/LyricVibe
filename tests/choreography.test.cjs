@@ -2,6 +2,16 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {layout,arrival,compose,expressionAt}=require('../extension/choreography.js');
 const words='LET THE LIGHT FALL INTO PLACE AGAIN'.split(' ').map(text=>({text}));
 const measure=(text,font)=>text.length*font*.6;
+test('default word sets cover fire variants and longest phrases without crossing phrase boundaries',()=>{
+  const {defaultWordRules,validateWordRuleSets,wordRuleAt}=require('../extension/choreography.js');
+  const make=(texts,id)=>({id,words:texts.split(' ').map((text,i)=>({id:id+i,text,startMs:100+i*100,endMs:1100+i*100}))});
+  const cues=compose({phrases:[make('burn burning flame flames reignite','fire'),make('lay down falling fell','fall'),make('lay','a'),make('down','b'),make('money champagne','art')]});
+  for(let i=0;i<5;i++)assert.deepEqual(cues['fire'+i].rule.effects,['fire']);
+  for(let i=0;i<4;i++)assert.equal(cues['fall'+i].rule.motion,'tip');assert.equal(cues.a0.rule,undefined);assert.equal(cues.b0.rule,undefined);
+  assert.equal(wordRuleAt(cues.art0,600).bills.length,7);assert.ok(wordRuleAt(cues.art1,900).champagnePop>0);
+  const library={version:1,activeId:'one',sets:[{id:'one',name:'Default',rules:defaultWordRules},{id:'two',name:'Quiet',rules:[]}]};const normalized=validateWordRuleSets(library);normalized.sets[0].rules[0].effects.push('glow');assert.deepEqual(defaultWordRules[0].effects,[]);
+  assert.throws(()=>validateWordRuleSets({...library,activeId:'missing'}),/existing/);assert.throws(()=>validateWordRuleSets({...library,sets:[library.sets[0],{...library.sets[1],name:'DEFAULT'}]}),/unique/);
+});
 test('word rules match exact normalized words without mutating timing or overriding authored effects',()=>{
   const {validateWordRules,wordRuleAt,danceAt,defaultWordRules}=require('../extension/choreography.js');
   const score={phrases:[{words:['BABY!','bright','cool','cooler'].map((text,i)=>({id:String(i),text,startMs:100,endMs:2100}))}]},before=structuredClone(score),cues=compose(score);
@@ -9,7 +19,7 @@ test('word rules match exact normalized words without mutating timing or overrid
   assert.equal(expressionAt(cues[0],600).wave,0,'A matched rule replaces automatic held shaking');assert.equal(expressionAt(cues[0],600,{effects:[{type:'glow'}]}).reason,'authored');assert.equal(expressionAt(cues[0],600,{automatic:false}).reason,'');
   const rock=danceAt(cues[0],500,{kind:'rock'});assert.ok(rock.turn>0);assert.ok(danceAt(cues[0],1300,{kind:'rock'}).turn<0);assert.deepEqual(danceAt(cues[0],500,{kind:'rock'}),rock);assert.equal(danceAt(cues[0],500,{kind:'rock',reduced:true}).kind,'off');
   const frame=wordRuleAt(cues[2],600);assert.deepEqual(wordRuleAt(cues[2],600),frame);assert.equal(wordRuleAt(cues[2],2100),null);assert.equal(wordRuleAt(cues[2],99),null);assert.deepEqual(wordRuleAt(cues[2],600,{reduced:true}),wordRuleAt(cues[2],1600,{reduced:true}));
-  assert.throws(()=>validateWordRules([...defaultWordRules,{word:'COOL!',motion:'off',effects:[]}]),/already exists/);assert.throws(()=>validateWordRules([{word:'two words',motion:'off',effects:[]}]),/one word/);assert.throws(()=>validateWordRules([{word:'cool',motion:'unknown',effects:[]}]),/supported/);
+  assert.throws(()=>validateWordRules([...defaultWordRules,{word:'COOL!',motion:'off',effects:[]}]),/already exists/);assert.throws(()=>validateWordRules([{word:'one two three four five',motion:'off',effects:[]}]),/one word/);assert.throws(()=>validateWordRules([{word:'cool',motion:'unknown',effects:[]}]),/supported/);
   const combined=compose(score,[{word:'bright',motion:'rock',effects:['rays','glow','echo']}]);const expression=expressionAt(combined[1],600);assert.ok(expression.brightness>1);assert.ok(expression.shadow);assert.deepEqual(wordRuleAt(combined[1],600).effects,['rays','glow','echo']);
 });
 test('pixel fire reconstructs on seek, evolves beyond the old loop, and shares geometry across color palettes',()=>{

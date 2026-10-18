@@ -9,7 +9,8 @@
   const DISPLAY_CATALOG = Object.freeze({
     version: 'lyricvibe.display.v1',
     looks: Object.freeze(['samay','flow','fire','neon','glass','hype','soft','clean','retro','elegant','aurora','matrix','vinyl','cosmic']),
-    motions: Object.freeze(['off','mix','tip','flex','bounce','launch']),
+    motions: Object.freeze(['off','mix','tip','flex','bounce','launch','rock']),
+    wordArt: Object.freeze(['off','rays','sunglasses','fire','bills','champagne']),
     wordEffects: Object.freeze(['shake','tilt','pulse','bounce','glow','groove','echo','glitch']),
     beatEffects: Object.freeze(['pulse','breath','color','bounce','glow','groove','echo','glitch']),
     landings: Object.freeze(['settle','glide','drop','still']),
@@ -325,7 +326,7 @@
         if(word.displayMode!==undefined&&word.displayMode!=='whole')bad('invalid word displayMode');
         if(word.appearance!==undefined){
           const a=word.appearance;
-          if(!a||typeof a!=='object'||Array.isArray(a)||Object.keys(a).some(k=>!['look','motion'].includes(k))||!Object.keys(a).length||a.look!==undefined&&!DISPLAY_CATALOG.looks.includes(a.look)||a.motion!==undefined&&!DISPLAY_CATALOG.motions.includes(a.motion))bad('invalid word appearance');
+          if(!a||typeof a!=='object'||Array.isArray(a)||Object.keys(a).some(k=>!['look','motion','art'].includes(k))||!Object.keys(a).length||a.look!==undefined&&!DISPLAY_CATALOG.looks.includes(a.look)||a.motion!==undefined&&!DISPLAY_CATALOG.motions.includes(a.motion)||a.art!==undefined&&!DISPLAY_CATALOG.wordArt.includes(a.art))bad('invalid word appearance');
         }
         if (word.spokenText !== undefined && (typeof word.spokenText !== "string" || !word.spokenText.trim() || word.spokenText.length > 256 || word.spokenText.includes("|"))) bad("invalid spokenText");
         for (const effect of word.effects) if (!effect || !EFFECTS.has(effect.type) || typeof effect.strength !== "number" || !Number.isFinite(effect.strength) || effect.strength < 0 || effect.strength > 1 || effect.axis !== undefined && (effect.type !== "groove" || !["horizontal","vertical"].includes(effect.axis))) bad("invalid effect");

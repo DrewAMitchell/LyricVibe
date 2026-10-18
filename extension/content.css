@@ -3018,6 +3018,18 @@
 .lvx-word-art[hidden] { display:none; }
 .lvx-word-rays { position:absolute; left:50%; top:50%; width:calc(100% + 1.3em); height:2.5em; overflow:visible; z-index:-1; fill:none; stroke:#ffd967; stroke-width:2.5; stroke-linecap:round; filter:drop-shadow(0 0 3px #ffd96799); }
 .lvx-word-glasses { position:absolute; overflow:visible; filter:drop-shadow(0 2px 2px #0009); }
+.lvx-word-bill { position:absolute; left:50%; top:50%; width:.7em; height:.35em; overflow:visible; filter:drop-shadow(0 2px 2px #0007); }
+.lvx-word-champagne { position:absolute; line-height:inherit; transform-origin:50% 50%; color:var(--lvx-expression-color,#fff3c5); -webkit-text-fill-color:currentColor; text-shadow:none; }
+.lvx-word-champagne > span { position:absolute; inset:0; }
+.lvx-word-champagne > span::before { content:attr(data-glyph); }
+.lvx-champagne-body { clip-path:inset(0 0 24% 0); }
+.lvx-champagne-cap { clip-path:inset(76% 0 0 0); }
+#lvx-root .lvx-word-set-quick { display:flex; align-items:end; flex-wrap:wrap; gap:8px; margin-top:14px; padding:12px; border-radius:8px; background:#1a292f; }
+#lvx-root .lvx-word-set-quick label { display:grid; gap:5px; font-size:12px; flex:1; }
+#lvx-root .lvx-word-set-quick select,#lvx-root .lvx-word-set-control input[aria-label="New set name"] { min-width:0; padding:8px; border:1px solid #617079; border-radius:5px; color:#edf2e9; background:#182024; }
+#lvx-root .lvx-word-set-control input[aria-label="New set name"] { flex:1; }
+#lvx-root .lvx-word-set-quick button { border:1px solid #c7dfa1; border-radius:6px; padding:8px 12px; color:#1c2516; background:#c7dfa1; cursor:pointer; }
+#lvx-root [data-set-status] { flex-basis:100%; font-size:12px; color:#c7dfa1; }
 #lvx-root .lvx-word-rules { margin-top:14px; border-top:1px solid #ffffff30; padding-top:12px; }
 #lvx-root .lvx-word-rules summary { cursor:pointer; font-weight:700; padding:8px 0; }
 #lvx-root .lvx-word-rules summary span { font-weight:400; color:#b6c2c8; margin-left:10px; }
@@ -3026,7 +3038,7 @@
 #lvx-root .lvx-word-rules button:hover:not(:disabled) { background:#30434b; border-color:#9eada3; }
 #lvx-root .lvx-word-rules button:disabled { opacity:.45; cursor:default; }
 #lvx-root .lvx-word-rules button[type=submit] { color:#1c2516; background:#c7dfa1; border-color:#c7dfa1; }
-#lvx-root .lvx-rule-list { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0; }
+#lvx-root .lvx-rule-list { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0; max-height:170px; overflow:auto; padding-right:6px; }
 #lvx-root .lvx-rule-list button { display:grid; text-align:left; gap:3px; }
 #lvx-root .lvx-rule-list small { font-size:10px; color:#b6c2c8; }
 #lvx-root .lvx-rule-list [aria-pressed=true] { border-color:#c7dfa1; background:#31412b; }

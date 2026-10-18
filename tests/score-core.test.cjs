@@ -12,6 +12,13 @@ function makeScore(lrc = '[00:01.00]We rise, again!\n[00:04.00]') {
 }
 function allWords(s) { return s.phrases.flatMap(p => p.words.map(word => ({ phrase: p, word }))); }
 function errorCode(fn, code) { assert.throws(fn, error => error.code === code); }
+test('manual word illustrations and rocking persist without changing timing and reject unknown art',()=>{
+  const base=makeScore(),word=base.phrases[0].words[0],before=[word.startMs,word.endMs];
+  const next=score.applyOperation(base,{type:'setWordAppearance',wordId:word.id,appearance:{art:'bills',motion:'rock'}},base.revision);
+  assert.deepEqual(next.phrases[0].words[0].appearance,{art:'bills',motion:'rock'});assert.deepEqual([next.phrases[0].words[0].startMs,next.phrases[0].words[0].endMs],before);assert.equal(word.appearance,undefined);
+  score.validateScore(JSON.parse(JSON.stringify(next)));
+  assert.throws(()=>score.applyOperation(base,{type:'setWordAppearance',wordId:word.id,appearance:{art:'unknown'}},base.revision),/appearance/);
+});
 
 test('per-occurrence Unicode spoken syllables roundtrip independently of the display script', () => {
   const base=makeScore('[00:01.00]今夜\n[00:04.00]'),word=base.phrases[0].words[0];
