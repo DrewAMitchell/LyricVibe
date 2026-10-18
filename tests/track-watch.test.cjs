@@ -19,22 +19,38 @@ function harness(){
   mutation:()=>{for(const o of [...observed])o.fn()},focus:value=>{focused=value;window.fire(value?'focus':'blur')},status:()=>vm.runInContext('watcher.status()',context)};
 }
 test('track watching detaches observers and timers while unfocused and reconciles exactly one stable change on return',()=>{
- const h=harness();h.advance(1000);assert.equal(h.messages.filter(m=>m.type==='LV_TRACK_CHANGED').length,1);
+ const h=harness();h.advance(1800);assert.equal(h.messages.filter(m=>m.type==='LV_TRACK_CHANGED').length,1);
  h.messages.length=0;h.focus(false);const reads=h.reads();assert.equal(h.observers(),0);assert.equal(h.timers(),0);
  h.hints.url='https://www.youtube.com/watch?v=BBBBBBBBBBB';h.advance(20000);h.mutation();assert.equal(h.reads(),reads);
- h.focus(true);h.advance(1000);const changes=h.messages.filter(m=>m.type==='LV_TRACK_CHANGED');assert.equal(changes.length,1);assert.equal(changes[0].changed,true);assert.equal(changes[0].key,'youtube:BBBBBBBBBBB');
+ h.focus(true);h.advance(1800);const changes=h.messages.filter(m=>m.type==='LV_TRACK_CHANGED');assert.equal(changes.length,1);assert.equal(changes[0].changed,true);assert.equal(changes[0].key,'youtube:BBBBBBBBBBB');
  h.advance(10000);assert.equal(h.messages.filter(m=>m.type==='LV_TRACK_CHANGED').length,1);
 });
 test('loading, metadata bursts and transient identities do not flood detection or announce an unready track',()=>{
  const h=harness();h.document.readyState='loading';h.advance(10000);assert.equal(h.reads(),0);
- h.document.readyState='complete';h.document.fire('readystatechange');h.advance(1000);h.messages.length=0;const before=h.reads();
+ h.document.readyState='complete';h.document.fire('readystatechange');h.advance(1800);h.messages.length=0;const before=h.reads();
  for(let i=0;i<100;i++){h.mutation();h.advance(10)}assert.ok(h.reads()-before<=2);
  h.document.fire('yt-navigate-start');h.hints.url='https://www.youtube.com/watch?v=BBBBBBBBBBB';h.advance(1500);assert.equal(h.messages.filter(m=>m.type==='LV_TRACK_CHANGED').length,0);
- h.document.fire('yt-navigate-finish');h.hints.mediaReady=false;h.advance(1000);assert.equal(h.messages.filter(m=>m.type==='LV_TRACK_CHANGED').length,0);
- h.hints.mediaReady=true;h.document.fire('loadedmetadata');h.advance(500);h.hints.url='https://www.youtube.com/watch?v=CCCCCCCCCCC';h.advance(1000);
+ h.document.fire('yt-navigate-finish');h.hints.mediaReady=false;h.advance(1800);assert.equal(h.messages.filter(m=>m.type==='LV_TRACK_CHANGED').length,0);
+ h.hints.mediaReady=true;h.document.fire('loadedmetadata');h.advance(500);h.hints.url='https://www.youtube.com/watch?v=CCCCCCCCCCC';h.advance(2600);
  const changes=h.messages.filter(m=>m.type==='LV_TRACK_CHANGED');assert.equal(changes.length,1);assert.equal(changes[0].key,'youtube:CCCCCCCCCCC');
 });
 test('returning to the same track requests only resume, and a loaded score establishes the watcher baseline',()=>{
- const h=harness();vm.runInContext("watcher.accept('youtube:AAAAAAAAAAA')",h.context);h.advance(1000);h.messages.length=0;
- h.focus(false);h.focus(true);h.advance(1000);const change=h.messages.find(m=>m.type==='LV_TRACK_CHANGED');assert.equal(change.changed,false);assert.equal(change.resume,true);
+ const h=harness();vm.runInContext("watcher.accept('youtube:AAAAAAAAAAA')",h.context);h.advance(1800);h.messages.length=0;
+ h.focus(false);h.focus(true);h.advance(1800);const change=h.messages.find(m=>m.type==='LV_TRACK_CHANGED');assert.equal(change.changed,false);assert.equal(change.resume,true);
+});
+
+
+test('fallback polling never ends an unfinished SPA navigation and changed metadata must settle again',()=>{
+ const h=harness();h.advance(1800);h.messages.length=0;
+ h.document.fire('yt-navigate-start');h.hints.url='https://www.youtube.com/watch?v=BBBBBBBBBBB';h.advance(16000);
+ assert.equal(h.messages.filter(m=>m.type==='LV_TRACK_CHANGED').length,0);assert.equal(h.status().navigating,true);
+ h.document.fire('yt-navigate-finish');h.advance(500);h.hints.track='Real new title';h.mutation();h.advance(1200);
+ assert.equal(h.messages.filter(m=>m.type==='LV_TRACK_CHANGED').length,0);
+ h.advance(1200);assert.equal(h.messages.filter(m=>m.type==='LV_TRACK_CHANGED').length,1);
+});
+
+test('manual reset invalidates the old generation and produces one settled same-source detection',()=>{
+ const h=harness();h.advance(1800);const before=h.status().navigationToken;h.messages.length=0;
+ vm.runInContext('watcher.reset()',h.context);assert.notEqual(h.status().navigationToken,before);assert.equal(h.status().settled,false);
+ h.advance(1800);assert.equal(h.messages.filter(m=>m.type==='LV_NAVIGATION_RESET').length,1);assert.equal(h.messages.filter(m=>m.type==='LV_TRACK_CHANGED').length,1);
 });

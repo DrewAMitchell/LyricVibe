@@ -97,6 +97,7 @@
   };
   let overlayEnabled = true, resumeSyncPanel = false;
   var trackWatch = null;
+  let navigationEditorOpen=false;
   const observationFocused = () => overlayEnabled && !document.hidden && document.hasFocus();
   const timing = { draft: null, view: 'proposed', phraseIndex: 0, dirty: false, busy: false, auditioned: false, priorLoop: null };
   const tapping = { take: null, wordId: null, binding: null, clockMs: null, rate: 1, audio: null, splitDirty: false, heldInput: null, cancelledSpace: false, reviewId: null, correctionUndo: [], listening: false, backAnchorMs: null, backIndex: null, syllableStartKey: null };
@@ -154,13 +155,14 @@
   const hud = document.createElement('div');
   hud.className = 'lvx-hud';
   const errorPanel=document.createElement('section');errorPanel.className='lvx-error-panel';errorPanel.hidden=true;errorPanel.setAttribute('aria-label','LyricVibe errors');
-  errorPanel.innerHTML='<header><strong>LyricVibe · Error details</strong><button data-error="close" aria-label="Close error details">Close</button></header><div class="lvx-error-entries" role="log" aria-live="polite"></div><footer><button data-error="copy">Copy error details</button><button data-error="retry">Retry lyrics</button><span role="status"></span></footer>';
+  errorPanel.innerHTML='<header><strong>LyricVibe · Error details</strong><button data-error="close" aria-label="Close error details">Close</button></header><div class="lvx-error-entries" role="log" aria-live="polite"></div><footer><button data-error="copy">Copy error details</button><button data-error="retry">Reset video</button><span role="status"></span></footer>';
   const errorEntries=[],errorButton=document.createElement('button');errorButton.className='lvx-theme-btn';errorButton.textContent='Errors';errorButton.hidden=true;
   errorButton.onclick=()=>{errorPanel.hidden=!errorPanel.hidden;};
   errorPanel.querySelector('[data-error="close"]').onclick=()=>{errorPanel.hidden=true;errorButton.focus();};
   async function copyErrorText(text,output){try{await navigator.clipboard.writeText(text);output.textContent='Copied';}catch{output.textContent='Clipboard unavailable. Select the text and copy it manually.';}}
   errorPanel.querySelector('[data-error="copy"]').onclick=()=>copyErrorText(errorEntries.map(e=>e.node.textContent).join('\n\n'),errorPanel.querySelector('footer span'));
-  errorPanel.querySelector('[data-error="retry"]').onclick=async()=>{const button=errorPanel.querySelector('[data-error="retry"]');button.disabled=true;try{await chrome.runtime.sendMessage({type:'LV_RETRY'});errorPanel.querySelector('footer span').textContent='Retry requested. Previous errors remain here.';}catch(error){reportError(error.message,'Retry lyrics');}finally{button.disabled=false;}};
+  errorPanel.querySelector('[data-error="retry"]').onclick=()=>resetCurrentVideo();
+
   function reportError(text,operation='Lyric display'){
     const mediaKey=globalThis.LvScore?.mediaKey({url:location.href})||location.hostname;
     if(errorEntries[0]?.text===String(text)&&errorEntries[0]?.mediaKey===mediaKey){errorPanel.hidden=false;return;}
@@ -295,7 +297,8 @@
   const syncLabel = document.createElement('span'); syncLabel.className = 'lvx-sidebar-sync-heading'; syncLabel.textContent = 'SYNC';
   offsetGroup.append(syncLabel, syncEarlier, offsetControl, syncLater, autoSyncButton);
   const editGroup = document.createElement('span'); editGroup.className = 'lvx-hud-group'; editGroup.append(quickSyncButton, editButton);
-  const endGroup = document.createElement('span'); endGroup.className = 'lvx-hud-group'; endGroup.append(helpButton, stopButton);
+  const resetVideoButton=document.createElement('button');resetVideoButton.className='lvx-theme-btn';resetVideoButton.textContent='Reset video';resetVideoButton.setAttribute('aria-label','Reset video: reload lyrics and display, keep edits');resetVideoButton.onclick=()=>resetCurrentVideo();
+  const endGroup = document.createElement('span'); endGroup.className = 'lvx-hud-group'; endGroup.append(helpButton, resetVideoButton, stopButton);
   const sidebar = document.createElement('aside'); sidebar.className = 'lvx-sidebar lvx-sidebar-pinned'; sidebar.setAttribute('aria-label','LyricVibe controls');
   const sidebarNav = document.createElement('nav'); sidebarNav.className = 'lvx-sidebar-nav'; sidebarNav.setAttribute('aria-label','LyricVibe views');
   const sidebarItems = document.createElement('div'); sidebarItems.className = 'lvx-sidebar-items';
@@ -1754,6 +1757,7 @@
     refreshTimingPanel();await armTapTake();
   }
   async function armTapTake() {
+    if(trackWatch?.loading()&&trackWatch?.status().generation>0)return;
     const mode=syncButton('tap-mode').value;
     if (timing.busy || !timing.draft || timing.dirty || (mode!=='syllable'&&tapping.splitDirty) || effectPending() || tapping.take?.status === 'armed'&&!getMedia()?.paused || tapping.take?.status === 'complete'&&!rawTake(tapping.take)) return;
     if(typeof setTimingWorkspace==='function')setTimingWorkspace('record');
@@ -1928,6 +1932,7 @@
     setSyncNotice(restartOnly===true?'Replaying this phrase. Recorded timing stays until you press to re-record.':'Phrase start selected. Record from its first word or syllable; existing timing stays until your next press. Back again goes to the previous phrase.');
   }
   function markTapTime(event = {}) {
+    if(trackWatch?.loading()&&trackWatch?.status().generation>0)return;
     let take = tapping.take; const media = getMedia();
     observePlaybackRate(media);
     if (!take || take.status !== 'armed' || event.repeat) return;
@@ -2368,7 +2373,7 @@
   function effectSourceReady() {
     const media = getMedia();
     observePlaybackRate(media);
-    return media && !media.paused && !media.seeking && !isAdvertisement() && youtubeMediaState()?.clockUsable !== false && media.playbackRate === performanceTake.rate && performanceTake.binding === tapBinding() && LvScore.mediaKey({url:location.href}) === LvScore.mediaKey(state.score.source);
+    return !trackWatch?.loading() && media && !media.paused && !media.seeking && !isAdvertisement() && youtubeMediaState()?.clockUsable !== false && media.playbackRate === performanceTake.rate && performanceTake.binding === tapBinding() && LvScore.mediaKey({url:location.href}) === LvScore.mediaKey(state.score.source);
   }
   function activeEffectTarget() {
     if (!timing.draft) return null;
@@ -2546,6 +2551,7 @@
     if(active)stopEffectPreview();
   }
   async function startEffects() {
+    if(trackWatch?.loading()&&trackWatch?.status().generation>0)return;
     if (timing.busy || !timing.draft || timing.dirty || tapping.splitDirty || tapPending() || effectPending()) return;
     const media = getMedia(), phrase = timingPhrase();
     if (!media || isAdvertisement() || youtubeMediaState()?.clockUsable === false || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source)) return;
@@ -3100,8 +3106,15 @@
   if (typeof chrome === 'undefined' || !chrome.runtime?.onMessage) return; // extension context invalidated
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || !message.type) return;
-    if(message.type==='LV_WATCH_STATUS'){sendResponse({ok:true,version:1,enabled:overlayEnabled,active:observationFocused()&&document.readyState==='complete'&&!trackWatch?.loading()});return;}
+    if(message.type==='LV_WATCH_STATUS'){sendResponse({ok:true,version:1,enabled:overlayEnabled,active:observationFocused()&&document.readyState==='complete'&&trackWatch?.ready(),navigationToken:trackWatch?.token()});return;}
+    if(message.type==='LV_RESET_VIDEO'){resetCurrentVideo();sendResponse({ok:true});return;}
     if(message.type==='LV_OVERLAY_RESUME'){show();sendResponse({ok:true,version:1});return;}
+    if(['LV_STATUS','LV_STATUS_WARNING','LV_ERROR','LV_API_ERROR','LV_TRACK','LV_SCORE_UPDATED'].includes(message.type)){
+      if(trackWatch?.loading()&&(message.navigationToken||trackWatch?.status().generation>0))return;
+      if(message.navigationToken&&message.navigationToken!==trackWatch?.token())return;
+      const key=message.mediaKey||LvScore.mediaKey(message.payload?.hints||{});
+      if(key&&key!==LvScore.mediaKey({url:location.href}))return;
+    }
     // Late automatic lookup replies must not reopen an explicitly closed overlay.
     if(!overlayEnabled&&['LV_STATUS','LV_STATUS_WARNING','LV_ERROR','LV_API_ERROR','LV_TRACK','LV_SCORE_UPDATED'].includes(message.type))return;
     if(message.type==='LV_TIMING_EDIT_CHECK'){
@@ -3174,7 +3187,7 @@
         state.trackKey = message.mediaKey;
         state.syncOffsetMs = message.score.offsetMs;
         if (!syncPanel.hidden) refreshTimingPanel();
-        if (switched && !syncPanel.hidden) void openTimingReview();
+        if ((switched||navigationEditorOpen) && !syncPanel.hidden){navigationEditorOpen=false;void openTimingReview();}
         stage.style.setProperty('--lvx-score-scale', state.fontScale);
         preview.textContent = '';
         show();
@@ -3284,12 +3297,8 @@
       if (message.canRetry) {
         const retryBtn = document.createElement('button');
         retryBtn.className = 'lvx-retry-btn';
-        retryBtn.textContent = '↻ TRY AGAIN';
-        retryBtn.addEventListener('click', () => {
-          try { chrome.runtime?.sendMessage({ type: 'LV_RETRY' }).catch(() => {}); } catch (_) {}
-          stage.textContent = '';
-          setHud('Retrying...', false, false, true);
-        });
+        retryBtn.textContent = '↻ RESET VIDEO';
+        retryBtn.addEventListener('click',resetCurrentVideo);
         errorDiv.appendChild(retryBtn);
       }
 
@@ -3362,6 +3371,7 @@
       currentTime: media && Number.isFinite(media.currentTime) ? media.currentTime : null,
       duration: youtube?.lookupDurationMs ? youtube.lookupDurationMs / 1000 : !isAdvertisement() && media && Number.isFinite(media.duration) ? media.duration : null,
       isAd: isAdvertisement(),
+      navigationToken:trackWatch?.token(),
       mediaReady: youtube ? youtube.clockUsable : true
     };
 
@@ -3379,6 +3389,8 @@
       hints.track = textFrom('h1 yt-formatted-string') ||
         textFrom('h1.title') ||
         title.replace(/ - YouTube$/i, '');
+      const normalizeTitle=value=>String(value).replace(/^\(\d+\)\s*/, '').replace(/ - YouTube$/i,'').replace(/\s+/g,' ').trim();
+      if(normalizeTitle(title)&&normalizeTitle(hints.track)!==normalizeTitle(title))hints.mediaReady=false;
     } else if (host.includes('spotify.com')) {
       /* ── SPOTIFY RESILIENT SELECTORS (2026) ── */
       hints.track = spotifyGetTrack(title);
@@ -3778,69 +3790,112 @@
      UNIVERSAL TRACK CHANGE OBSERVER
      Works on Spotify, YouTube Music, SoundCloud, plain YouTube, etc.
      ══════════════════════════════════════ */
+  // Reset transient presentation, never storage, playback position, speed, or completed input.
+  function suspendForNavigation(){
+    const approval=navigationApproval;
+    cancelCountIn();listenToTake();
+    if(tapping.take?.status==='armed')tapping.take=eventTake(tapping.take)?LvTapTiming.stopEvents(tapping.take):wordTake(tapping.take)?LvTapTiming.stopWordHolds(tapping.take):LvTapTiming.stop(tapping.take);
+    finishEffectGesture(true);performanceTake.armed=false;
+    if(approval)approval.work=navigationWork();
+    errorPanel.hidden=true;
+    cancelLoop();clearRevealTimers();stopSpotifyPolling();cancelBeatClicks();
+    stopEffectPreview();setPreviewPlaying(false);state.auditionLoop=null;
+    stage.textContent='';preview.textContent='';progressFill.style.width='0%';
+    setHud('Waiting for the new video to finish loading…',false,true);
+  }
+  function prepareVideoIdentity(key){
+    const source=LvScore.mediaKey(timing.draft?.score.source||state.score?.source)||state.plainLyrics?.mediaKey;
+    if(source&&source!==key){
+      if((hasUnsavedWork()||timing.busy)&&!approvedNavigation(location.href)){
+        syncPanel.hidden=false;setSyncNotice('The video changed. Your take and edits are retained for the previous video. Return there to save, or explicitly discard them before loading this video.','warn');
+        return false;
+      }
+      navigationEditorOpen=!syncPanel.hidden;
+      discardTimingLocal();transcript.dirty=false;transcript.shownFor=null;
+      state.score=null;state.plainLyrics=null;state.lines=[];state.trackKey='';state.trackTitle='';
+      timing.phraseIndex=0;tapping.wordId=null;
+      tempo.mediaKey=null;tempo.map=null;
+    }
+    state.active=false;state.errorShown=false;state.currentIndex=-1;state.currentMoment=null;state.scoreSignature='';
+    state._flowLastIndex=-999;state.spotifyNullCount=0;state.spotifyLastGoodWall=0;
+    state.timingErrors=[];state.mediaDriftSamples=[];state.spotifyAutoCalibSamples=[];
+    state.autoCalibrated=false;flowTeardown();refreshTimingPanel();return true;
+  }
+  function resetCurrentVideo(){
+    // Same-video reset keeps the open preview, typed edits, and completed marks.
+    // Do not stop or advance a take by reloading the whole extension.
+    if(timing.busy){setSyncNotice('Finish the current preview operation before resetting the video.');return;}
+    cancelCountIn();listenToTake();
+    if(tapping.take?.status==='armed')tapping.take=eventTake(tapping.take)?LvTapTiming.stopEvents(tapping.take):wordTake(tapping.take)?LvTapTiming.stopWordHolds(tapping.take):LvTapTiming.stop(tapping.take);
+    finishEffectGesture(true);performanceTake.armed=false;
+    trackWatch?.reset();refreshTimingPanel();
+  }
   function setupTrackChangeObserver() {
-    let watching=false, navigating=false, timer=0, poll=0, pendingKey='', pendingSince=0;
-    let lastTrackKey='', resumed=false, observer=null;
-    const metadataSelector='title, ytmusic-player-bar .title, ytmusic-player-bar .byline, [data-testid="context-item-info-title"], [data-testid="context-item-info-artist"], .playbackSoundBadge__titleLink, .playbackSoundBadge__lightLink, h1.title, h1 yt-formatted-string';
+    let watching=false,navigating=false,settled=false,timer=0,poll=0,pendingKey='',pendingSignature='',pendingSince=0;
+    let lastTrackKey='',resumed=false,observer=null,generation=0;
+    const instance=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
+    const token=()=>instance+':'+generation;
+    const metadataSelector='title, link[rel="canonical"], meta[itemprop="duration"], ytmusic-player-bar .title, ytmusic-player-bar .byline, [data-testid="context-item-info-title"], [data-testid="context-item-info-artist"], .playbackSoundBadge__titleLink, .playbackSoundBadge__lightLink, h1.title, h1 yt-formatted-string';
     const send=message=>{try{chrome.runtime?.sendMessage(message).catch(()=>{});}catch(_){}};
-    const clear=()=>{clearTimeout(timer);clearInterval(poll);timer=poll=0;observer?.disconnect();observer=null;pendingKey='';pendingSince=0;};
+    const clear=()=>{clearTimeout(timer);clearInterval(poll);timer=poll=0;observer?.disconnect();observer=null;pendingKey='';pendingSignature='';pendingSince=0;};
     const observeMetadata=()=>{
-      observer?.disconnect();
-      observer=new MutationObserver(()=>schedule());
-      for(const node of document.querySelectorAll(metadataSelector))if(!root.contains(node))observer.observe(node,{childList:true,subtree:true,characterData:true});
+      observer?.disconnect();observer=new MutationObserver(()=>schedule());
+      for(const node of document.querySelectorAll(metadataSelector))if(!root.contains(node))observer.observe(node,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['href','content']});
     };
-    const schedule=(delay=500)=>{
-      if(!watching||timer)return;
-      timer=setTimeout(check,delay);
+    const schedule=(delay=500)=>{if(!watching||timer)return;timer=setTimeout(check,delay);};
+    const begin=()=>{
+      generation++;settled=false;pendingKey='';pendingSignature='';pendingSince=0;
+      clearTimeout(timer);timer=0;observer?.disconnect();
+      send({type:'LV_NAVIGATION_RESET',navigationToken:token()});
+      if(watching)send({type:'LV_WATCH_STATE',active:false});
+      if(typeof suspendForNavigation==='function')suspendForNavigation();else cancelLoop();
     };
     const check=()=>{
-      timer=0;
-      if(!observationFocused()){sync();return;}
+      timer=0;if(!observationFocused()){sync();return;}
       if(document.readyState!=='complete'||navigating)return;
       const hints=getPageHints(),exact=LvScore.mediaKey(hints);
-      if(hints.isAd||hints.mediaReady===false){pendingKey='';pendingSince=0;return;}
-      const title=(hints.track||hints.pageTitle||'').trim(),artist=(hints.artist||'').trim();
-      const key=exact||(title?title+'|||'+artist:'');
-      if(!key)return;
-      const now=performance.now();
-      if(key!==pendingKey){pendingKey=key;pendingSince=now;schedule(500);return;}
-      if(now-pendingSince<500){schedule(500);return;}
+      if(hints.isAd||hints.mediaReady===false){settled=false;pendingKey='';pendingSignature='';pendingSince=0;return;}
+      const title=(hints.track||hints.pageTitle||'').trim(),artist=(hints.artist||'').trim(),key=exact||(title?title+'|||'+artist:'');
+      if(!key||!title)return;
+      const signature=JSON.stringify([key,title,artist,Math.round(hints.duration||0)]),now=performance.now();
+      // A missing site navigation event still resets when exact identity changes.
+      if(settled&&lastTrackKey&&key!==lastTrackKey){begin();resumed=true;}
+      if(signature!==pendingSignature){pendingKey=key;pendingSignature=signature;pendingSince=now;schedule(1200);return;}
+      if(now-pendingSince<1200){schedule(1200-(now-pendingSince));return;}
       const prevKey=lastTrackKey,changed=Boolean(lastTrackKey&&key!==lastTrackKey);
-      if(resumed||changed){
+      if(!settled&&typeof prepareVideoIdentity==='function'&&!prepareVideoIdentity(key)){schedule(5000);return;}
+      settled=true;
+      if(resumed||changed||!lastTrackKey){
         lastTrackKey=key;resumed=false;
-        // Resume deferred work or announce a stable identity change, never discard timings.
-        send({type:'LV_TRACK_CHANGED',prevKey,key,resume:true,changed});
-      }else if(!lastTrackKey)lastTrackKey=key;
+        send({type:'LV_TRACK_CHANGED',prevKey,key,resume:true,changed,navigationToken:token()});
+      }
       observeMetadata();
     };
     const onPageEvent=event=>{if(watching&&(!event.target||!root.contains(event.target)))schedule();};
-    const navStart=()=>{navigating=true;clearTimeout(timer);timer=0;observer?.disconnect();if(watching)send({type:'LV_WATCH_STATE',active:false});cancelLoop();};
-    const navEnd=()=>{navigating=false;if(watching){observeMetadata();resumed=true;schedule();if(state.active)startLoop();}};
+    const navStart=()=>{navigating=true;begin();};
+    const navEnd=()=>{navigating=false;if(watching){observeMetadata();resumed=true;schedule();}};
+    const reset=()=>{navigating=false;begin();resumed=true;sync();schedule();};
     const sync=()=>{
-      const eligible=observationFocused();
-      if(!eligible){
+      if(!observationFocused()){
         if(watching){watching=false;clear();send({type:'LV_WATCH_STATE',active:false});}
-        cancelLoop();stopSpotifyPolling();cancelBeatClicks();
-        return;
+        cancelLoop();stopSpotifyPolling();cancelBeatClicks();return;
       }
-      if(watching)return;
-      watching=true;resumed=true;
+      if(watching)return;watching=true;resumed=true;
       if(document.readyState==='complete'&&!navigating)observeMetadata();
-      // One low-rate fallback covers replaced metadata nodes and missed SPA events.
-      poll=setInterval(()=>{if(document.readyState==='complete'){navigating=false;schedule();}},5000);
-      schedule();
-      if(state.active){if(state.isSpotify)startSpotifyPolling();startLoop();}
+      // A fallback may recheck readiness; it never fabricates navigation-finish.
+      poll=setInterval(()=>schedule(),5000);schedule();
+      if(state.active&&settled){if(state.isSpotify)startSpotifyPolling();startLoop();}
     };
     document.addEventListener('visibilitychange',sync);
-    window.addEventListener('focus',sync);window.addEventListener('blur',sync);
-    window.addEventListener('pageshow',sync);
-    window.addEventListener('pagehide',()=>{watching=false;clear();send({type:'LV_WATCH_STATE',active:false});});
+    window.addEventListener('focus',sync);window.addEventListener('blur',sync);window.addEventListener('pageshow',sync);
+    window.addEventListener('pagehide',()=>{watching=false;settled=false;clear();send({type:'LV_WATCH_STATE',active:false});});
     document.addEventListener('readystatechange',onPageEvent);window.addEventListener('load',onPageEvent);
     window.addEventListener('popstate',onPageEvent);window.addEventListener('hashchange',onPageEvent);
     document.addEventListener('yt-navigate-start',navStart);document.addEventListener('yt-navigate-finish',navEnd);
     for(const name of ['loadedmetadata','durationchange','play'])document.addEventListener(name,onPageEvent,true);
-    return {sync,loading:()=>navigating,accept:key=>{if(key){lastTrackKey=key;pendingKey=key;pendingSince=performance.now();}},
-      status:()=>({watching,loading:navigating,pending:Boolean(timer),polling:Boolean(poll)})};
+    return {sync,reset,token,ready:()=>settled&&!navigating,loading:()=>navigating||!settled,
+      accept:key=>{if(key){lastTrackKey=key;pendingKey=key;if(!navigating)settled=true;}},
+      status:()=>({watching,navigating,generation,loading:navigating||!settled,settled,navigationToken:token(),pending:Boolean(timer),polling:Boolean(poll)})};
   }
 
   /* ══════════════════════════════════════
@@ -4503,6 +4558,7 @@
     for(const node of beatStyledNodes){node.classList.remove('lvx-beat-target');paintAccent(node,'','beat');for(const prop of ['scale','bright','hue','y'])node.style.removeProperty('--lvx-beat-'+prop);}beatStyledNodes.clear();
   }
   function renderScore(mediaMs) {
+    if(trackWatch?.loading()&&trackWatch?.status().generation>0)return;
     refreshRecordingTransport();
     stage.classList.remove('lvx-vinyl-stage');
     if ((countIn.previewTake||tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete')) && timing.draft && !syncPanel.hidden) {renderCaptureScore();return;}
@@ -5029,6 +5085,7 @@
 
   function handleTapKeys(event) {
     if (!root.isConnected || syncPanel.hidden) return;
+    if(trackWatch?.loading()&&trackWatch?.status().generation>0)return;
     if(event.target===controlHandle&&event.key.startsWith('Arrow'))return;
     noteCaptureInput();
     if (event.type==='keydown' && event.altKey && !event.ctrlKey && !event.metaKey && ['ArrowLeft','ArrowRight'].includes(event.key) && tapping.take?.marks.length && tapping.take.status!=='armed' && !event.target?.matches?.('input,textarea,select') && !event.target?.isContentEditable) {

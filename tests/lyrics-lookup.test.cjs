@@ -11,7 +11,7 @@ function harness() {
   const data = {}, sessionData = {}, calls = [];
   const store = data => ({ get: async key => key == null ? structuredClone(data) : { [key]: structuredClone(data[key]) }, set: async value => Object.assign(data, structuredClone(value)), remove: async () => {} });
   const event = { addListener() {} };
-  const context = vm.createContext({ console, URL, URLSearchParams, AbortSignal, AbortController, setTimeout, clearTimeout, LvScore: core, importScripts() {}, chrome: { storage: { local: store(data), session: store(sessionData) }, action: { onClicked: event }, runtime: { onMessage: event }, tabs: { onRemoved: event, sendMessage: async()=>({ok:true,version:1,enabled:true,active:true}) } }, fetch: async url => {
+  const context = vm.createContext({ console, URL, URLSearchParams, AbortSignal, AbortController, setTimeout, clearTimeout, LvLookupPolicy:require('../extension/lookup-policy.js'), LvScore: core, importScripts() {}, chrome: { storage: { local: store(data), session: store(sessionData) }, action: { onClicked: event }, runtime: { onMessage: event }, tabs: { onRemoved: event, sendMessage: async()=>({ok:true,version:1,enabled:true,active:true}) } }, fetch: async url => {
     calls.push(url);
     const u = new URL(url);
     const result = u.pathname.endsWith('/get-cached') ? entry(111, 166, '00.26') : entry(222, 166, '23.19');
@@ -227,4 +227,29 @@ test('Spotify automatic retries never reinject or reopen the overlay',async()=>{
  const h=harness();h.context.setTimeout=f=>setImmediate(f);h.context.seed={host:'open.spotify.com',track:'Fixture title',artist:'Fixture artist'};
  h.run('var injected=0;getPageHints=async()=>seed;recognize=async()=>null;injectOverlay=async()=>injected++;sendToTab=()=>{};_sendSmartError=()=>{}');
  await h.run('_detectAndSyncInner(7,null,Date.now())');assert.equal(h.run('injected'),0);
+});
+
+
+test('navigation aborts the old lookup and only the latest settled source may publish',async()=>{
+ const h=harness(),messages=[];h.context.want=MUSIC;h.context.LvScoreHost={packageFor:async()=>null,ensure:async()=>null};
+ h.context.chrome.tabs.sendMessage=async(id,m)=>{messages.push(m);return m.type==='LV_WATCH_STATUS'?{ok:true,version:1,active:true,enabled:true}:{};};
+ h.run('getPageHints=async()=>({...want,navigationToken:want.videoId});sessions.set(7,{active:true})');
+ let started;const began=new Promise(r=>started=r);
+ h.context.fetch=async(url,{signal})=>{h.calls.push(url);if(h.calls.length===1){started();return new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(Object.assign(Error('aborted'),{name:'AbortError'})),{once:true}));}return {ok:true,status:200,json:async()=>entry(222,166,'23.19')};};
+ const old=h.run('detectAndSync(7)');await began;
+ h.run('invalidateDetection(7)');h.context.want=VIDEO;await h.run('detectAndSync(7)');await old;
+ for(let i=0;i<100&&h.run('detectionLocks.has(7)');i++)await new Promise(r=>setTimeout(r,40));
+ assert.equal(h.run('detectionLocks.has(7)'),false);assert.equal(h.calls.length,2);
+ const tracks=messages.filter(m=>m.type==='LV_TRACK');assert.equal(tracks.length,1);assert.equal(tracks[0].mediaKey,core.mediaKey(VIDEO));assert.equal(tracks[0].navigationToken,VIDEO.videoId);
+ assert.equal(h.run('negativeCache.size'),0);assert.equal(h.run('apiHealth.lrclib.failures'),0);
+});
+
+test('a delayed saved-score reply cannot publish after the video changes',async()=>{
+ const h=harness(),messages=[];h.context.want=MUSIC;
+ let release;h.context.LvScoreHost={packageFor:()=>new Promise(r=>release=r)};
+ h.context.chrome.tabs.sendMessage=async(id,m)=>{messages.push(m);return {ok:true,version:1,active:true,enabled:true};};
+ h.run('getPageHints=async()=>({...want,navigationToken:want.videoId})');
+ const lookup=h.run('_detectAndSyncLocked(7)');await new Promise(r=>setImmediate(r));h.context.want=VIDEO;
+ release({source:MUSIC});await lookup;
+ assert.equal(messages.filter(m=>m.type==='LV_SCORE_UPDATED'||m.type==='LV_ERROR').length,0);assert.equal(h.calls.length,0);
 });

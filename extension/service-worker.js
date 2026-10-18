@@ -1,4 +1,4 @@
-importScripts('score-core.js', 'timing-variant.js', 'pronunciation.js', 'analysis/controller.js', 'score-host.js');
+importScripts('lookup-policy.js', 'score-core.js', 'timing-variant.js', 'pronunciation.js', 'analysis/controller.js', 'score-host.js');
 const LRCLIB_BASE = 'https://lrclib.net/api';
 const sessions = new Map();
 const pausedTabs = new Set(), deferredDetections = new Set();
@@ -24,7 +24,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
    `sessions` Map. That made the extension "stop detecting songs": the overlay
    kept sending LV_TRACK_CHANGED, but the session lookup failed so the message
    was silently ignored. Persist active tab ids so sessions survive SW death. */
-(async () => {
+const sessionsReady=(async () => {
   try {
     const stored = await chrome.storage.session.get('lvxActiveTabs');
     (stored.lvxActiveTabs || []).forEach((id) => sessions.set(id, { active: true }));
@@ -38,7 +38,7 @@ function persistSessions() {
 /* ── API Health Tracking (Circuit Breaker) ── */
 const DEGRADED_THRESHOLD = 5;    // weighted failures → degraded (timeouts=0.5, server errors=1.5)
 const RECOVERY_WINDOW_MS = 30000; // auto-recover after 30s (was 60s — recover faster)
-const DETECT_TIMEOUT_MS = 28000;  // global detection timeout — must exceed the slowest single request
+const DETECT_TIMEOUT_MS = 45000;  // global detection timeout — must exceed the slowest single request
 
 /* Per-endpoint timeouts.
    LRCLIB /get without a warm server-side cache queries external sources and can
@@ -98,62 +98,12 @@ function isApiDegraded(apiName) {
  * Returns { ok, data, errorType } instead of throwing.
  * errorType: 'TIMEOUT' | 'NETWORK_ERROR' | 'RATE_LIMITED' | 'SERVER_ERROR' | 'UNAUTHORIZED' | 'NOT_FOUND' | null
  */
-const inflightRequests = new Map();
-
-async function apiFetch(url, apiName, timeoutMs) {
-  // De-duplicate identical concurrent requests. Retry loops used to fire the
-  // exact same URL several times in parallel — the request flood visible in DevTools.
-  if (inflightRequests.has(url)) return inflightRequests.get(url);
-  const promise = _apiFetchRaw(url, apiName, timeoutMs);
-  inflightRequests.set(url, promise);
-  try {
-    return await promise;
-  } finally {
-    inflightRequests.delete(url);
-  }
-}
-
-async function _apiFetchRaw(url, apiName, timeoutMs) {
-  const effectiveTimeout = timeoutMs; // No timeout reduction — degraded mode skips slow endpoints instead
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), effectiveTimeout);
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal
-    });
-    clearTimeout(timer);
-    if (response.ok) {
-      recordApiSuccess(apiName);
-      const data = await response.json();
-      return { ok: true, data, errorType: null };
-    }
-    // Classify HTTP errors
-    if (response.status === 429) {
-      recordApiFailure(apiName, 'RATE_LIMITED');
-      return { ok: false, data: null, errorType: 'RATE_LIMITED' };
-    }
-    if (response.status === 404) {
-      // 404 is "not found" — NOT an API failure, don't count against health
-      return { ok: false, data: null, errorType: 'NOT_FOUND' };
-    }
-    if (response.status === 401) {
-      // 401 is auth/token expired — not a server crash
-      return { ok: false, data: null, errorType: 'UNAUTHORIZED' };
-    }
-    if (response.status >= 500) {
-      recordApiFailure(apiName, 'SERVER_ERROR');
-      return { ok: false, data: null, errorType: 'SERVER_ERROR' };
-    }
-    return { ok: false, data: null, errorType: 'NOT_FOUND' };
-  } catch (err) {
-    clearTimeout(timer);
-    if (err.name === 'AbortError') {
-      recordApiFailure(apiName, 'TIMEOUT');
-      return { ok: false, data: null, errorType: 'TIMEOUT' };
-    }
-    recordApiFailure(apiName, 'NETWORK_ERROR');
-    return { ok: false, data: null, errorType: 'NETWORK_ERROR' };
-  }
+const lookupPolicy=LvLookupPolicy.create({fetch:(...args)=>fetch(...args),storage:chrome.storage.session});
+async function apiFetch(url,apiName,timeoutMs,job){
+  const result=await lookupPolicy.request(url,apiName,timeoutMs,job);
+  if(result.ok)recordApiSuccess(apiName);
+  else if(['TIMEOUT','SERVER_ERROR','NETWORK_ERROR','RATE_LIMITED'].includes(result.errorType))recordApiFailure(apiName,result.errorType);
+  return result;
 }
 
 /* ── Lyrics cache: 3-tier for maximum resilience ──
@@ -295,6 +245,7 @@ async function lookupDiagnostics(tabId) {
     exactRecordingCache:{timed:!!cached?.lyrics?.synced,plain:!!cached?.lyrics?.plain,provider:cached?.lyrics?.provider||null},
     matchingTextCache:text?.textCache||null,
     providers:Object.fromEntries(Object.entries(apiHealth).map(([name,h])=>[name,{lastErrorType:h.lastErrorType,lastFailure:h.lastFailure,lastSuccess:h.lastSuccess,degraded:h.degraded}])),
+    pacing:lookupPolicy.status(),lookup:(()=>{const j=lookupTraces.get(tabId);return j?{id:j.id,mediaKey:j.mediaKey,state:j.state,startedAt:j.startedAt,counts:j.counts,trace:j.trace}:null;})(),
     providerStatusScope:'Latest provider observations across tabs; not a per-request trace. Different recordings may supply text only.'};
 }
 
@@ -358,6 +309,7 @@ async function evictOldPersistentCache() {
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab || !tab.id) return;
 
+  await sessionsReady;
   const existing = sessions.get(tab.id);
   if (existing && existing.active) {
     await stopSession(tab.id, 'Stopped');
@@ -373,10 +325,12 @@ chrome.action.onClicked.addListener(async (tab) => {
 chrome.runtime.onMessage.addListener((message, sender) => {
   if (!message || !message.type) return;
 
+  if(message.type==='LV_NAVIGATION_RESET'&&sender.tab?.id){invalidateDetection(sender.tab.id);retryAttempts.delete(sender.tab.id);deferredDetections.add(sender.tab.id);return;}
   if(message.type==='LV_WATCH_STATE'&&sender.tab?.id){
     const tabId=sender.tab.id;
     if(message.active===false){
       pausedTabs.add(tabId);
+      invalidateDetection(tabId);
       if(autoRetryTimers.has(tabId)||detectionLocks.has(tabId))deferredDetections.add(tabId);
       clearTimeout(autoRetryTimers.get(tabId));autoRetryTimers.delete(tabId);
     }
@@ -390,10 +344,11 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   // Retry button pressed in content script — clear negative cache so the
   // user's explicit retry always performs a genuinely fresh lookup.
   if (message.type === 'LV_RETRY' && sender.tab && sender.tab.id) {
+    invalidateDetection(sender.tab.id);retryAttempts.delete(sender.tab.id);
     negativeCache.clear();
     clearTimeout(autoRetryTimers.get(sender.tab.id));
     autoRetryTimers.delete(sender.tab.id);
-    startSession(sender.tab);
+    chrome.tabs.sendMessage(sender.tab.id,{type:'LV_RESET_VIDEO'}).catch(()=>startSession(sender.tab));
   }
 
   // Spotify track change: full restart (proven flow)
@@ -404,6 +359,8 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   // Non-Spotify track change (YT Music, SoundCloud, plain YouTube):
   // Re-detect lyrics WITHOUT tearing down the overlay — just swap to the new track.
   if (message.type === 'LV_TRACK_CHANGED' && sender.tab && sender.tab.id) {
+    if(message.changed)invalidateDetection(sender.tab.id);
+    if(message.changed)retryAttempts.delete(sender.tab.id);
     pausedTabs.delete(sender.tab.id);
     // FIX: if the MV3 service worker was killed and restarted, `sessions` is
     // empty even though the overlay is clearly alive (it just messaged us!).
@@ -424,6 +381,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  invalidateDetection(tabId);retryAttempts.delete(tabId);lookupTraces.delete(tabId);
   pausedTabs.delete(tabId);deferredDetections.delete(tabId);
   sessions.delete(tabId);
   persistSessions();
@@ -431,10 +389,23 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   autoRetryTimers.delete(tabId);
 });
 
+chrome.tabs.onUpdated?.addListener((tabId,change,tab)=>{
+  if(!change.status)return;
+  void sessionsReady.then(async()=>{
+    if(!sessions.has(tabId))return;
+    if(change.status==='loading'){invalidateDetection(tabId);retryAttempts.delete(tabId);pausedTabs.add(tabId);return;}
+    if(change.status==='complete'&&/^https?:/.test(tab.url||'')){
+      await injectOverlay(tabId); // New documents only; SPA uses the existing overlay reset.
+      await detectAndSync(tabId);
+    }
+  }).catch(()=>{});
+});
+
 /* ══════════════════════════════════════
    SESSION MANAGEMENT
    ══════════════════════════════════════ */
 async function startSession(tab) {
+  await sessionsReady;
   const tabId = tab.id;
   pausedTabs.delete(tabId);deferredDetections.delete(tabId);
   sessions.set(tabId, { active: true });
@@ -462,283 +433,64 @@ function getHintsTrackKey(h) {
 /* Per-tab detection lock: LV_TRACK_CHANGED, LV_RETRY and periodic observer
    ticks could all start detectAndSync concurrently for the same tab, racing
    each other and multiplying identical API requests. Serialize them. */
-const detectionLocks = new Map();
-
-async function detectAndSync(tabId, prevKey) {
-  if (detectionLocks.get(tabId)) {
-    // A detection is already running for this tab — remember the latest
-    // request so we run ONE follow-up when the current one finishes.
-    detectionLocks.set(tabId, { pending: true, prevKey });
-    return;
-  }
-  detectionLocks.set(tabId, { pending: false, prevKey });
-  try {
-    await _detectAndSyncLocked(tabId, prevKey);
-  } finally {
-    const lock = detectionLocks.get(tabId);
-    detectionLocks.delete(tabId);
-    if (lock && lock.pending) {
-      // A newer track-change arrived mid-detection — handle it now.
-      detectAndSync(tabId, lock.prevKey);
-    }
-  }
+const detectionLocks = new Map(),detectionJobs=new Map(),lookupTraces=new Map();
+let lookupSequence=0;
+function invalidateDetection(tabId){
+  detectionJobs.get(tabId)?.controller.abort();
+  const lock=detectionLocks.get(tabId);if(lock)lock.pending=false;
+  clearTimeout(autoRetryTimers.get(tabId));autoRetryTimers.delete(tabId);
 }
-
-async function _detectAndSyncLocked(tabId, prevKey) {
+async function detectAndSync(tabId,prevKey){
+  const existing=detectionLocks.get(tabId);
+  if(existing){existing.pending=true;existing.prevKey=prevKey;return;}
+  const lock={pending:false,prevKey};detectionLocks.set(tabId,lock);
+  try{await _detectAndSyncLocked(tabId,prevKey);}
+  finally{detectionLocks.delete(tabId);if(lock.pending&&sessions.has(tabId))void detectAndSync(tabId,lock.prevKey);}
+}
+async function _detectAndSyncLocked(tabId,prevKey){
   if(!await automaticDetectionAllowed(tabId))return;
-  // Show degraded-aware status
-  if (isApiDegraded('lrclib')) {
-    sendToTab(tabId, { type: 'LV_STATUS_WARNING', text: 'Lyrics service is busy — trying anyway...' });
-  } else {
-    sendToTab(tabId, { type: 'LV_STATUS', text: 'Detecting song...' });
+  const controller=new AbortController(),job={id:++lookupSequence,controller,signal:controller.signal,trace:[],counts:{},startedAt:Date.now(),state:'detecting'};
+  detectionJobs.set(tabId,job);lookupTraces.set(tabId,job);
+  const timer=setTimeout(()=>{job.timedOut=true;controller.abort();},DETECT_TIMEOUT_MS);
+  try{await _detectAndSyncInner(tabId,prevKey,job.startedAt,job);if(!job.signal.aborted)job.state='complete';}
+  catch(error){
+    job.state=job.timedOut?'timed-out':job.signal.aborted||error.code==='LOOKUP_CANCELLED'?'cancelled':'failed';
+    if(job.state==='cancelled')return;
+    // Only the current settled source may receive a failure from this attempt.
+    const hints=await getPageHints(tabId);
+    if(!hints.watchPaused&&getHintsTrackKey(hints)===job.mediaKey&&hints.navigationToken===job.navigationToken)
+      sendToTab(tabId,{type:'LV_API_ERROR',text:job.timedOut?'Lyrics lookup stopped after 45 seconds. Reset video to try again; saved work is retained.':'Lyrics lookup could not finish. Reset video to try again.',canRetry:true,mediaKey:job.mediaKey,navigationToken:job.navigationToken});
+  }finally{clearTimeout(timer);if(detectionJobs.get(tabId)===job)detectionJobs.delete(tabId);}
+}
+async function lookupStillCurrent(tabId,job){
+  LvLookupPolicy.check(job);
+  const hints=await getPageHints(tabId);LvLookupPolicy.check(job);
+  if(hints.watchPaused||hints.isAd||hints.mediaReady===false||getHintsTrackKey(hints)!==job.mediaKey||hints.navigationToken!==job.navigationToken)
+    throw Object.assign(Error('The source video changed or is loading.'),{code:'LOOKUP_CANCELLED'});
+  return hints;
+}
+async function _detectAndSyncInner(tabId,prevKey,detectStart,job={trace:[],counts:{}}){
+  const hints=await getPageHints(tabId);LvLookupPolicy.check(job);
+  if(hints.watchPaused||hints.isAd||hints.mediaReady===false)return;
+  job.mediaKey=getHintsTrackKey(hints);job.navigationToken=hints.navigationToken;
+  if(!job.mediaKey)return;
+  sendToTab(tabId,{type:'LV_STATUS',text:'Loading lyrics for this video…'},job);
+  if(LvScore.mediaKey(hints)){
+    try{
+      const score=await LvScoreHost.packageFor(tabId,hints);await lookupStillCurrent(tabId,job);
+      if(score){sendToTab(tabId,{type:'LV_SCORE_UPDATED',score,mediaKey:LvScore.mediaKey(score.source),tabId},job);retryAttempts.delete(tabId);return;}
+    }catch(error){LvLookupPolicy.check(job);if(error.code==='LOOKUP_CANCELLED')throw error;}
   }
-
-  // Wrap entire detection in a hard timeout to prevent infinite "Detecting..."
-  const detectStart = Date.now();
-  let timedOut = false;
-  let detectionTimer;
-  const timeoutPromise = new Promise((_, reject) => {
-    detectionTimer=setTimeout(() => {
-      timedOut = true;
-      reject(new Error('DETECT_TIMEOUT'));
-    }, DETECT_TIMEOUT_MS);
-  });
-
-  try {
-    await Promise.race([_detectAndSyncInner(tabId, prevKey, detectStart), timeoutPromise]);
-  } catch (err) {
-    if (err.message === 'DETECT_TIMEOUT') {
-      const h = apiHealth.lrclib;
-      const lastErr = h ? h.lastErrorType : null;
-      const isServerDown = (lastErr === 'SERVER_ERROR' || lastErr === 'NETWORK_ERROR') &&
-                           h.lastFailure > h.lastSuccess;
-      // Only blame the server for "slowness" if it ACTUALLY timed out recently.
-      // A detection timeout can also happen from DOM-retry loops on a song that
-      // simply has no lyrics — that's not the server's fault.
-      const isServerSlow = lastErr === 'TIMEOUT' && h.lastFailure > h.lastSuccess;
-      if (isServerDown || isServerSlow) {
-        // OUTAGE RESCUE: fuzzy-match the persistent cache before erroring
-        if (await _tryOfflineRescue(tabId)) return;
-        sendToTab(tabId, {
-          type: 'LV_API_ERROR',
-          text: isServerDown
-            ? 'Lyrics server is temporarily unavailable. Songs you\'ve played before still load from cache!'
-            : 'Lyrics server is responding slowly — this usually clears up quickly. Tap retry!',
-          canRetry: true
-        });
-        scheduleAutoRetry(tabId); // silently recover in the background
-      } else {
-        sendToTab(tabId, {
-          type: 'LV_ERROR',
-          text: 'Couldn\'t find lyrics for this track in time. It may not be in the lyrics database yet.'
-        });
-      }
-    }
-    // Other unexpected errors — show generic message
-    else {
-      sendToTab(tabId, {
-        type: 'LV_ERROR',
-        text: 'Something went wrong while searching for lyrics. Please try again.'
-      });
-    }
-  } finally { clearTimeout(detectionTimer); }
+  // One settled metadata snapshot, one bounded search. DOM events never fan out retries.
+  const result=await recognize({mode:'metadata',hints,job});await lookupStillCurrent(tabId,job);
+  if(result?.ok&&hasUsableLyrics(result)){await handleRecognitionResult(tabId,result,job);return;}
+  if(result?.apiError){
+    const cooldown=lookupPolicy.status().cooldowns.lrclib||0;
+    sendToTab(tabId,{type:'LV_API_ERROR',text:cooldown>Date.now()?'Lyrics service asked us to wait. Saved lyrics remain available; retry will respect its cooldown.':'Lyrics service is unavailable or this lookup reached its request budget. Saved work is retained.',canRetry:true},job);
+    scheduleAutoRetry(tabId);
+  }else sendToTab(tabId,{type:'LV_ERROR',text:result?.message||'No lyrics found for this video.'},job);
 }
 
-/** Inner detection logic — separated so the outer function can race it against a timeout. */
-async function _detectAndSyncInner(tabId, prevKey, detectStart) {
-  const hints = await getPageHints(tabId);
-  if(hints.watchPaused)return;
-  if (hints.isAd || hints.mediaReady === false) {
-    sendToTab(tabId, { type: 'LV_STATUS', text: hints.isAd ? 'Waiting for the advertisement to finish…' : 'Waiting for the main video clock…' });
-    clearTimeout(autoRetryTimers.get(tabId));
-    autoRetryTimers.set(tabId, setTimeout(() => detectAndSync(tabId), 1500));
-    return;
-  }
-  if (LvScore.mediaKey(hints)) {
-    try {
-      const score = await LvScoreHost.packageFor(tabId, hints);
-      if(!await automaticDetectionAllowed(tabId))return;
-      if (score) {
-        sendToTab(tabId, { type: 'LV_SCORE_UPDATED', score, mediaKey: LvScore.mediaKey(score.source), tabId });
-        return;
-      }
-    } catch (error) {
-      sendToTab(tabId, { type: 'LV_STATUS_WARNING', text: `Package unavailable: ${error.message}. Trying lyric lookup.` });
-    }
-  }
-  const isSpotify = (hints.host || '').includes('spotify.com');
-  const isYouTubeMusic = (hints.host || '').includes('music.youtube.com');
-
-  // STEP 0: Cache hit — instant, no network needed
-  // But ONLY if we've confirmed the track actually changed (prevKey validation).
-  // Without this check, a stale DOM read would serve the previous song's cached lyrics.
-  if (hints.track) {
-    const currentKey = getHintsTrackKey(hints);
-    const cacheStale = prevKey && currentKey === prevKey;
-    if (!cacheStale) {
-      const cached = await getCachedLyrics(hints.track, hints.artist, hints);
-      if (canUseCachedLyrics(cached)) {
-        if (cached.track && hints.currentTime != null) {
-          cached.track.playOffsetMs = Math.round((hints.currentTime || 0) * 1000);
-        }
-        await handleRecognitionResult(tabId, { ...cached, hints });
-        return;
-      }
-    }
-  }
-
-  // STEP 1: Try immediately — YouTube Music always has metadata ready on first attempt
-  const metadataResult = await recognize({ mode: 'metadata', hints });
-  if(!await automaticDetectionAllowed(tabId))return;
-  if (metadataResult && metadataResult.ok && hasUsableLyrics(metadataResult)) {
-    await handleRecognitionResult(tabId, metadataResult);
-    return;
-  }
-
-  // If recognize returned an API error, warn the user while retrying
-  if (metadataResult && metadataResult.apiError) {
-    sendToTab(tabId, { type: 'LV_STATUS_WARNING', text: 'Lyrics server is slow — still trying...' });
-  }
-
-  // Track which hint-keys we've already run a FULL lookup for. Re-running
-  // recognize() with identical metadata just re-fires the same API queries
-  // (the request flood in DevTools) and can never produce a different answer
-  // unless the API errored. Only retry when the DOM gave us something NEW.
-  const attemptedKeys = new Set();
-  const firstKey = getHintsTrackKey(hints);
-  if (firstKey && metadataResult && !metadataResult.apiError) attemptedKeys.add(firstKey);
-
-  // YouTube Music: if first attempt failed, retry with fresh hints.
-  // YTM DOM may still be settling — give it multiple chances on initial startup.
-  if (isYouTubeMusic) {
-    const ytmRetryDelays = [200, 500, 1000, 1500, 2500];
-    for (const delay of ytmRetryDelays) {
-      await new Promise((r) => setTimeout(r, delay));
-      const retryHints = await getPageHints(tabId);
-    if(retryHints.watchPaused)return;
-      const retryKey = getHintsTrackKey(retryHints);
-      if (prevKey && retryKey === prevKey) continue;
-      if (retryKey && attemptedKeys.has(retryKey)) continue; // identical metadata → identical result, skip
-      if (retryHints.track) {
-        const retryResult = await recognize({ mode: 'metadata', hints: retryHints });
-        if(!await automaticDetectionAllowed(tabId))return;
-        if (retryResult && retryResult.ok && hasUsableLyrics(retryResult)) {
-          await handleRecognitionResult(tabId, retryResult);
-          return;
-        }
-        if (retryKey && !(retryResult && retryResult.apiError)) attemptedKeys.add(retryKey);
-      }
-    }
-    const finalHints = await getPageHints(tabId);
-    if(finalHints.watchPaused)return;
-    _sendSmartError(tabId, finalHints.track || hints.track || 'this song');
-    return;
-  }
-
-  // SoundCloud: page title always has track info, retry quickly
-  const isSoundCloud = (hints.host || '').includes('soundcloud.com');
-  if (isSoundCloud) {
-    const scRetryDelays = [200, 500];
-    let scTrack = hints.track || '';
-    for (const delay of scRetryDelays) {
-      await new Promise((r) => setTimeout(r, delay));
-      const retryHints = await getPageHints(tabId);
-      if(retryHints.watchPaused)return;
-      scTrack = retryHints.track || retryHints.pageTitle || scTrack;
-      const scKey = getHintsTrackKey(retryHints);
-      if (scKey && attemptedKeys.has(scKey)) continue; // same metadata — don't re-query
-      if (scTrack) {
-        sendToTab(tabId, { type: 'LV_STATUS', text: `Searching lyrics for: ${scTrack}` });
-        const retryResult = await recognize({ mode: 'metadata', hints: retryHints });
-        if(!await automaticDetectionAllowed(tabId))return;
-        if (retryResult && retryResult.ok && hasUsableLyrics(retryResult)) {
-          await handleRecognitionResult(tabId, retryResult);
-          return;
-        }
-        if (scKey && !(retryResult && retryResult.apiError)) attemptedKeys.add(scKey);
-      }
-    }
-    if (scTrack) {
-      _sendSmartError(tabId, scTrack);
-    } else {
-      sendToTab(tabId, {
-        type: 'LV_ERROR',
-        text: 'Could not detect a song. Make sure a track is playing on SoundCloud.'
-      });
-    }
-    return;
-  }
-
-  // STEP 2: Spotify — SPA needs DOM to settle; retry with tighter delays
-  if (isSpotify) {
-    const retryDelays = [100, 300, 700, 1500];
-    let lastDetectedTrack = hints.track || '';
-    for (let attempt = 0; attempt < retryDelays.length; attempt++) {
-      await new Promise((r) => setTimeout(r, retryDelays[attempt]));
-      const retryHints = await getPageHints(tabId);
-      if(retryHints.watchPaused)return;
-      if (retryHints.track || retryHints.pageTitle) {
-        lastDetectedTrack = retryHints.track || retryHints.pageTitle || '';
-        const spKey = getHintsTrackKey(retryHints);
-        if (spKey && attemptedKeys.has(spKey)) continue; // same metadata — don't re-query
-        sendToTab(tabId, { type: 'LV_STATUS', text: `Searching lyrics for: ${lastDetectedTrack}` });
-        const retryResult = await recognize({ mode: 'metadata', hints: retryHints });
-        if(!await automaticDetectionAllowed(tabId))return;
-        if (retryResult && retryResult.ok && hasUsableLyrics(retryResult)) {
-          await handleRecognitionResult(tabId, retryResult);
-          return;
-        }
-        if (spKey && !(retryResult && retryResult.apiError)) attemptedKeys.add(spKey);
-      }
-    }
-    if (lastDetectedTrack) {
-      _sendSmartError(tabId, lastDetectedTrack);
-    } else {
-      sendToTab(tabId, {
-        type: 'LV_ERROR',
-        text: 'Could not find lyrics for this Spotify track. Make sure a song is playing and try again.'
-      });
-    }
-    return;
-  }
-
-  // STEP 3: Generic sites — shorter retry window
-  const genericDelays = [250, 700, 1500];  // was [400, 1000, 2200]
-  let lastTrack = hints.track || hints.pageTitle || '';
-  for (const delay of genericDelays) {
-    await new Promise((r) => setTimeout(r, delay));
-    const retryHints = await getPageHints(tabId);
-      if(retryHints.watchPaused)return;
-    lastTrack = retryHints.track || retryHints.pageTitle || lastTrack;
-    const genKey = getHintsTrackKey(retryHints);
-    if (genKey && attemptedKeys.has(genKey)) continue; // same metadata — don't re-query
-    if (lastTrack) {
-      sendToTab(tabId, { type: 'LV_STATUS', text: `Searching lyrics for: ${lastTrack}` });
-    }
-    const retryResult = await recognize({ mode: 'metadata', hints: retryHints });
-    if(!await automaticDetectionAllowed(tabId))return;
-    if (retryResult && retryResult.ok && hasUsableLyrics(retryResult)) {
-      await handleRecognitionResult(tabId, retryResult);
-      return;
-    }
-    if (genKey && !(retryResult && retryResult.apiError)) attemptedKeys.add(genKey);
-  }
-
-  if (lastTrack) {
-    _sendSmartError(tabId, lastTrack);
-  } else {
-    sendToTab(tabId, {
-      type: 'LV_ERROR',
-      text: 'Could not detect a song on this page. Works best on YouTube Music, Spotify, and SoundCloud.'
-    });
-  }
-}
-
-/**
- * OUTAGE RESCUE: when the API is genuinely down, try to serve the song from
- * the persistent cache with fuzzy matching before showing any error.
- * Returns true if lyrics were served.
- */
 async function _tryOfflineRescue(tabId) {
   try {
     const hints = await getPageHints(tabId);
@@ -758,32 +510,20 @@ async function _tryOfflineRescue(tabId) {
 
 /**
  * AUTO-RETRY: during a genuine outage, silently retry in the background with
- * backoff (10s → 20s → 40s). If the API recovers, lyrics appear automatically
+ * bounded backoff (60s, then 120s, or the server cooldown if longer). If the API recovers, lyrics appear automatically
  * without the user having to press TRY AGAIN.
  */
-const autoRetryTimers = new Map();
-function scheduleAutoRetry(tabId, attempt = 0) {
-  if(pausedTabs.has(tabId)){if(sessions.has(tabId))deferredDetections.add(tabId);return;}
-  if (attempt >= 3) return;
-  clearTimeout(autoRetryTimers.get(tabId));
-  const delay = 10000 * Math.pow(2, attempt);
-  autoRetryTimers.set(tabId, setTimeout(async () => {
-    const session = sessions.get(tabId);
-    if (!session || !session.active) return;
-    if(!await automaticDetectionAllowed(tabId))return;
-    try {
-      // Cheap health probe before a full re-detect
-      const probe = await apiFetch(`${LRCLIB_BASE}/search?q=test`, 'lrclib', 5000);
-      if (probe.ok) {
-        recordApiSuccess('lrclib');
-        detectAndSync(tabId);
-      } else {
-        scheduleAutoRetry(tabId, attempt + 1);
-      }
-    } catch (_) {
-      scheduleAutoRetry(tabId, attempt + 1);
-    }
-  }, delay));
+const autoRetryTimers=new Map(),retryAttempts=new Map();
+function scheduleAutoRetry(tabId){
+  if(pausedTabs.has(tabId)||!sessions.has(tabId)||autoRetryTimers.has(tabId))return;
+  const attempt=retryAttempts.get(tabId)||0;if(attempt>=2)return;
+  retryAttempts.set(tabId,attempt+1);
+  const cooldown=Math.max(0,...Object.values(lookupPolicy.status().cooldowns))-Date.now();
+  const delay=Math.max(60000*2**attempt,cooldown);
+  autoRetryTimers.set(tabId,setTimeout(async()=>{
+    autoRetryTimers.delete(tabId);if(!sessions.has(tabId)||!await automaticDetectionAllowed(tabId))return;
+    void detectAndSync(tabId);
+  },Math.min(delay,2147483647)));
 }
 
 /**
@@ -823,6 +563,7 @@ async function _sendSmartError(tabId, trackName) {
 }
 
 async function stopSession(tabId, reason) {
+  invalidateDetection(tabId);retryAttempts.delete(tabId);
   pausedTabs.add(tabId);deferredDetections.delete(tabId);
   sessions.delete(tabId);
   persistSessions();
@@ -870,7 +611,9 @@ async function recognize(body) {
     };
   }
 
-  let lyricResult = await findLyrics(detected, hints);
+  const job=body?.job||{trace:[],counts:{}};LvLookupPolicy.check(job);
+  let lyricResult = await findLyrics(detected, hints,job);
+  LvLookupPolicy.check(job);
   if(!lyricResult){
     const scoped=await getFuzzyCachedLyrics(detected.title,detected.artist,hints);
     lyricResult=scoped?.ok&&hasUsableLyrics(scoped)?{lyrics:{...scoped.lyrics},match:scoped.match||{}}:await getCachedLyricText(detected.title,detected.artist);
@@ -883,7 +626,7 @@ async function recognize(body) {
       return retained;
     }
     const h = apiHealth.lrclib;
-    const apiTrouble = isApiDegraded('lrclib') ||
+    const apiTrouble = job.trace?.some(e=>['REQUEST_BUDGET','COOLDOWN'].includes(e.reason)) || isApiDegraded('lrclib') ||
       (h.lastErrorType && h.lastErrorType !== 'NOT_FOUND' && h.lastFailure > h.lastSuccess);
     // Only cache as a definitive miss if the API was healthy — a failure during
     // an outage must stay retryable once the server recovers.
@@ -897,6 +640,7 @@ async function recognize(body) {
     };
   }
 
+  LvLookupPolicy.check(job);
   const matched = lyricResult.match || {};
   // A duration-free provider fallback may supply useful words, but its timing
   // must not be presented as matching this recording.
@@ -928,6 +672,7 @@ async function recognize(body) {
   };
 
   // Cache for future use
+  LvLookupPolicy.check(job);
   setCachedLyrics(track.title, track.artist, result);
 
   return result;
@@ -991,7 +736,8 @@ function trackFromHints(hints) {
   return null;
 }
 
-async function findLyrics(track, hints) {
+async function findLyrics(track, hints,job={trace:[],counts:{}}) {
+  LvLookupPolicy.check(job);
   const lrclibDown = isApiDegraded('lrclib');
 
   // FIX: lastErrorType is shared/global state that used to leak across songs.
@@ -1005,13 +751,13 @@ async function findLyrics(track, hints) {
   // Prefer the duration-specific result without firing three provider requests
   // at once. The remote cache is a rescue after a miss, not parallel traffic.
   if (track.title && track.artist) {
-    const direct = !lrclibDown ? await getLrclibByMetadata(track) : null;
+    const direct = !lrclibDown ? await getLrclibByMetadata(track,job) : null;
     if (direct && (direct.syncedLyrics || direct.plainLyrics) &&
         !(direct.syncedLyrics && isFakeLRC(direct.syncedLyrics))) {
       return { lyrics: { synced: direct.syncedLyrics || '',
         plain: cleanPlainLyrics(direct.plainLyrics || ''), provider: 'LRCLIB' }, match: direct };
     }
-    const cached = apiHealth.lrclib.lastErrorType==='RATE_LIMITED'?null:await getLrclibCached(track);
+    const cached = apiHealth.lrclib.lastErrorType==='RATE_LIMITED'?null:await getLrclibCached(track,job);
     if (cached && (cached.syncedLyrics || cached.plainLyrics)) {
       const isFake = cached.syncedLyrics && isFakeLRC(cached.syncedLyrics);
       if (!isFake) {
@@ -1037,7 +783,7 @@ async function findLyrics(track, hints) {
       // PRIORITY 1b: Try with raw (uncleaned) metadata if cleaned version failed
       if (track.rawTitle && track.rawArtist && (track.rawTitle !== track.title || track.rawArtist !== track.artist)) {
         const rawTrack = { title: track.rawTitle, artist: track.rawArtist, album: track.album, durationMs: track.durationMs };
-        const directRaw = await getLrclibByMetadata(rawTrack);
+        const directRaw = await getLrclibByMetadata(rawTrack,job);
         if (directRaw && (directRaw.syncedLyrics || directRaw.plainLyrics)) {
           const isFake = directRaw.syncedLyrics && isFakeLRC(directRaw.syncedLyrics);
           if (!isFake) {
@@ -1059,14 +805,14 @@ async function findLyrics(track, hints) {
       const queries = buildLyricQueries(track, hints);
 
       for (const query of queries) {
-        const results = await searchLrclib(query);
+        const results = await searchLrclib(query,job);
         if (apiHealth.lrclib.lastErrorType && apiHealth.lrclib.lastErrorType !== 'NOT_FOUND') {
           break; // stop searching if LRCLIB starts timing out
         }
         const best = chooseBestLyricResult(results, track, hints);
         if (!best) continue;
 
-        const full = await hydrateLrclibResult(best);
+        const full = await hydrateLrclibResult(best,job);
         const lyrics = {
           synced: full.syncedLyrics || '',
           plain: cleanPlainLyrics(full.plainLyrics || ''),
@@ -1082,7 +828,7 @@ async function findLyrics(track, hints) {
     if (!apiHealth.lrclib.lastErrorType || apiHealth.lrclib.lastErrorType === 'NOT_FOUND') {
       // PRIORITY 3: If search failed but direct had plain lyrics, use those
       if (track.title && track.artist) {
-        const direct = await getLrclibByMetadata(track);
+        const direct = await getLrclibByMetadata(track,job);
         if (direct && direct.plainLyrics) {
           return {
             lyrics: {
@@ -1111,7 +857,7 @@ async function findLyrics(track, hints) {
   for (const artist of artistsToTry) {
     for (const title of titlesToTry) {
       const fallbackUrl = `https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`;
-      const result = await apiFetch(fallbackUrl, 'lyricsOvh', TIMEOUT_OVH_MS);
+      const result = await apiFetch(fallbackUrl, 'lyricsOvh', TIMEOUT_OVH_MS,job);
       if (result.ok && result.data && result.data.lyrics && result.data.lyrics.trim().length > 30) {
         return {
           lyrics: {
@@ -1131,7 +877,7 @@ async function findLyrics(track, hints) {
   return null;
 }
 
-async function getLrclibByMetadata(track) {
+async function getLrclibByMetadata(track,job) {
   try {
     const DUR = track.durationMs > 0 ? String(Math.round(track.durationMs / 1000)) : null;
     const firstArtist = (track.artist || '').split(/[,&]|\bfeat\.?\b|\bft\.?\b/i)[0].trim();
@@ -1144,11 +890,11 @@ async function getLrclibByMetadata(track) {
     // Build secondary query (no album, no duration)
     const p2 = new URLSearchParams({ track_name: track.title, artist_name: track.artist });
 
-    const primary=await apiFetch(`${LRCLIB_BASE}/get?${p1.toString()}`, 'lrclib', TIMEOUT_GET_MS);
+    const primary=await apiFetch(`${LRCLIB_BASE}/get?${p1.toString()}`, 'lrclib', TIMEOUT_GET_MS,job);
     if(primary.ok&&primary.data?.id)return primary.data;
     if(primary.errorType&&primary.errorType!=='NOT_FOUND')return null;
     if(p1.toString()!==p2.toString()){
-      const secondary=await apiFetch(`${LRCLIB_BASE}/get?${p2.toString()}`, 'lrclib', TIMEOUT_GET_MS);
+      const secondary=await apiFetch(`${LRCLIB_BASE}/get?${p2.toString()}`, 'lrclib', TIMEOUT_GET_MS,job);
       if(secondary.ok&&secondary.data?.id)return secondary.data;
       if(secondary.errorType&&secondary.errorType!=='NOT_FOUND')return null;
     }
@@ -1159,7 +905,7 @@ async function getLrclibByMetadata(track) {
     // Fallback: first artist only (handles "Artist1, Artist2 feat. X" style)
     if (firstArtist && firstArtist !== track.artist) {
       const p4 = new URLSearchParams({ track_name: track.title, artist_name: firstArtist });
-      const r4 = await apiFetch(`${LRCLIB_BASE}/get?${p4.toString()}`, 'lrclib', TIMEOUT_GET_MS);
+      const r4 = await apiFetch(`${LRCLIB_BASE}/get?${p4.toString()}`, 'lrclib', TIMEOUT_GET_MS,job);
       if (r4.ok && r4.data && r4.data.id) return r4.data;
     }
 
@@ -1176,7 +922,7 @@ async function getLrclibByMetadata(track) {
  * Always safe to call even when API is degraded.
  * Requires exact track_name, artist_name, album_name, and duration.
  */
-async function getLrclibCached(track) {
+async function getLrclibCached(track,job) {
   if (!track.title || !track.artist) return null;
   const duration = track.durationMs > 0 ? String(Math.round(track.durationMs / 1000)) : null;
   if (!duration) return null; // duration is REQUIRED for /api/get-cached
@@ -1186,7 +932,7 @@ async function getLrclibCached(track) {
     album_name: track.album || '',
     duration: duration
   });
-  const result = await apiFetch(`${LRCLIB_BASE}/get-cached?${params.toString()}`, 'lrclib', TIMEOUT_CACHED_MS);
+  const result = await apiFetch(`${LRCLIB_BASE}/get-cached?${params.toString()}`, 'lrclib', TIMEOUT_CACHED_MS,job);
   if (result.ok && result.data && result.data.id) return result.data;
   return null;
 }
@@ -1211,17 +957,17 @@ function buildLyricQueries(track, hints) {
   return queries;
 }
 
-async function searchLrclib(query) {
+async function searchLrclib(query,job) {
   if (!query) return [];
   const url = `${LRCLIB_BASE}/search?q=${encodeURIComponent(query)}`;
-  const result = await apiFetch(url, 'lrclib', TIMEOUT_SEARCH_MS);
+  const result = await apiFetch(url, 'lrclib', TIMEOUT_SEARCH_MS,job);
   if (result.ok && Array.isArray(result.data)) return result.data;
   return [];
 }
 
-async function hydrateLrclibResult(result) {
+async function hydrateLrclibResult(result,job) {
   if ((result.syncedLyrics || result.plainLyrics) || !result.id) return result;
-  const response = await apiFetch(`${LRCLIB_BASE}/get/${result.id}`, 'lrclib', TIMEOUT_SEARCH_MS);
+  const response = await apiFetch(`${LRCLIB_BASE}/get/${result.id}`, 'lrclib', TIMEOUT_SEARCH_MS,job);
   if (response.ok && response.data) return response.data;
   return result;
 }
@@ -1535,7 +1281,8 @@ async function getPageHints(tabId, automatic = true) {
 /* ══════════════════════════════════════
    RECOGNITION RESULT HANDLER
    ══════════════════════════════════════ */
-async function handleRecognitionResult(tabId, payload) {
+async function handleRecognitionResult(tabId, payload,job) {
+  if(job)await lookupStillCurrent(tabId,job);
   const currentHints = await getPageHints(tabId);
   if(currentHints.watchPaused)return;
   if (currentHints.isAd || currentHints.mediaReady === false) {
@@ -1564,6 +1311,7 @@ async function handleRecognitionResult(tabId, payload) {
   const session = sessions.get(tabId);
   if (session) session.active = true;
 
+  retryAttempts.delete(tabId);
   // Success — cancel any pending background auto-retry for this tab
   clearTimeout(autoRetryTimers.get(tabId));
   autoRetryTimers.delete(tabId);
@@ -1572,22 +1320,27 @@ async function handleRecognitionResult(tabId, payload) {
     try {
       const score = await LvScoreHost.ensure(tabId, { ...payload, hints: currentHints });
       if (score) {
-        sendToTab(tabId, { type: 'LV_SCORE_UPDATED', score, mediaKey: LvScore.mediaKey(score.source), tabId });
+        if(job)await lookupStillCurrent(tabId,job);
+        sendToTab(tabId, { type: 'LV_SCORE_UPDATED', score, mediaKey: LvScore.mediaKey(score.source), tabId },job);
         return;
       }
     } catch (error) {
-      sendToTab(tabId, { type: 'LV_ERROR', text: `Score could not load: ${error.message}` });
+      if(job){LvLookupPolicy.check(job);if(error.code==='LOOKUP_CANCELLED')throw error;}
+      sendToTab(tabId, { type: 'LV_ERROR', text: `Score could not load: ${error.message}` },job);
       return;
     }
   }
-  sendToTab(tabId, { type: 'LV_TRACK', payload });
+  if(job)await lookupStillCurrent(tabId,job);
+  sendToTab(tabId, { type: 'LV_TRACK', payload },job);
 }
 
 function hasUsableLyrics(payload) {
   return Boolean(payload && payload.lyrics && (payload.lyrics.synced || payload.lyrics.plain));
 }
 
-function sendToTab(tabId, message) {
+function sendToTab(tabId, message,job) {
+  if(job?.signal?.aborted)return;
+  if(job)message={...message,mediaKey:job.mediaKey,navigationToken:job.navigationToken};
   if (!tabId) return;
   if(pausedTabs.has(tabId)&&message.type!=='LV_STOP'){if(sessions.has(tabId))deferredDetections.add(tabId);return;}
   chrome.tabs.sendMessage(tabId, message).catch(() => {});
