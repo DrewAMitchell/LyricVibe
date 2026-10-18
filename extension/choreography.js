@@ -110,6 +110,15 @@
     }
     return out;
   }
+  const landingStyles=Object.freeze({settle:'Soft settle',glide:'Glide',drop:'Drop',still:'Still'});
+  function landingAt(now,start,{style='settle',reduced=false}={}){
+    if(!Object.hasOwn(landingStyles,style))style='settle';
+    if(reduced||style==='still'||now>=start)return {x:0,y:0,opacity:1};
+    const lead=style==='glide'?650:style==='drop'?500:520,p=clamp((now-start+lead)/lead);
+    // Soft settle has zero velocity and acceleration at both ends, with no bounce.
+    const progress=style==='settle'?p*p*p*(p*(p*6-15)+10):1-Math.pow(1-p,3),left=1-progress;
+    return {x:style==='glide'?-left*.65:0,y:style==='settle'?-left*.18:style==='drop'?-left*2.5:0,opacity:.15+.85*progress};
+  }
   function arrival(now,start,lead=500,reduced=false){return reduced?1:1-Math.pow(1-clamp((now-start+lead)/lead),3);}
   function puzzle(words,width,height,measure,{upsideDown,maxFont,minFont=0,weights}){
     const weight=word=>Math.max(.65,Math.min(1.8,weights[word.id]?.weight??1));
@@ -282,5 +291,5 @@
     const particles=(count,smoke)=>Array.from({length:count},(_,i)=>{const seed=i+(smoke?47:11),period=(smoke?3100:1700)+hash(seed,3)*1900,age=((time+hash(seed,9)*period)%period)/period;return {x:(hash(seed,4)-.5)*2.5+Math.sin(age*4+seed)*.13,y:(smoke?.15:.55)-age*(smoke?.65:.95),alpha:(smoke?.12:.8)*Math.sin(Math.PI*age),size:smoke?.06+.07*age:.025};});
     return {width,height,time,palette:firePalettes[color]||firePalettes.ember,pixels,embers:reduced?[]:particles(4,false),smoke:reduced?[]:particles(3,true)};
   }
-  const api={accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
+  const api={landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

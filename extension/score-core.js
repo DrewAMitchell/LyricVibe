@@ -12,6 +12,7 @@
     motions: Object.freeze(['off','mix','tip','flex','bounce','launch']),
     wordEffects: Object.freeze(['shake','tilt','pulse','bounce','glow','groove','echo','glitch']),
     beatEffects: Object.freeze(['pulse','breath','color','bounce','glow','groove','echo','glitch']),
+    landings: Object.freeze(['settle','glide','drop','still']),
     layouts: Object.freeze(['classic','fall','puzzle','vinyl'])
   });
   const EFFECTS = new Set(["shake", "tilt", "pulse", "bounce", "glow", "groove", "echo", "glitch"]);
@@ -284,6 +285,7 @@
         ids.add(word.id);
         if (typeof word.startMs !== "number" || !Number.isFinite(word.startMs) || word.startMs < 0 || typeof word.endMs !== "number" || !Number.isFinite(word.endMs) || word.endMs < 0 || word.endMs < word.startMs || word.startMs < phrase.startMs || word.endMs > phrase.endMs || !["estimated", "manual", "aligned"].includes(word.provenance) || typeof word.locked !== "boolean" || !Array.isArray(word.effects)) bad("invalid word timing or fields");
         if (word.excluded !== undefined && typeof word.excluded !== "boolean") bad("word excluded must be boolean when present");
+        if(word.landing!==undefined&&!DISPLAY_CATALOG.landings.includes(word.landing))bad('invalid word landing');
         if(word.displayMode!==undefined&&word.displayMode!=='whole')bad('invalid word displayMode');
         if(word.appearance!==undefined){
           const a=word.appearance;
@@ -300,6 +302,7 @@
             ids.add(syllable.id);
             if (typeof syllable.startMs !== "number" || !Number.isFinite(syllable.startMs) || syllable.startMs < word.startMs || typeof syllable.endMs !== "number" || !Number.isFinite(syllable.endMs) || syllable.endMs < syllable.startMs || syllable.endMs > word.endMs || !["estimated", "manual", "aligned"].includes(syllable.provenance) || typeof syllable.locked !== "boolean" || !Array.isArray(syllable.effects)) bad("invalid syllable timing or fields");
             if (syllable.effects.some(effect => !effect || !EFFECTS.has(effect.type) || typeof effect.strength !== "number" || !Number.isFinite(effect.strength) || effect.strength < 0 || effect.strength > 1 || effect.axis !== undefined && (effect.type !== "groove" || !["horizontal","vertical"].includes(effect.axis)))) bad("invalid syllable effect");
+            if(syllable.landing!==undefined&&!DISPLAY_CATALOG.landings.includes(syllable.landing))bad('invalid syllable landing');
             if (syllable.reveal !== undefined && !validReveal(syllable.reveal)) bad("invalid syllable reveal");
           }
         }
@@ -492,6 +495,10 @@
     } else if (op.type === "setOffset") {
       if (!Number.isSafeInteger(op.offsetMs)) fail("INVALID_TIME", "offsetMs must be an integer");
       next.offsetMs = op.offsetMs;
+    } else if (op.type === 'setWordLanding' || op.type === 'setSyllableLanding') {
+      if(op.style!==null&&!DISPLAY_CATALOG.landings.includes(op.style))fail('INVALID_LANDING','Choose a supported landing style or use the default.');
+      const unit=op.type==='setWordLanding'?locateWord(next,op.wordId).word:locateSyllable(next,op.syllableId).syllable;
+      if(op.style===null)delete unit.landing;else unit.landing=op.style;
     } else if (op.type === "setWordEffect") {
       const { word } = locateWord(next, op.wordId);
       if (op.effect === null) word.effects = [];

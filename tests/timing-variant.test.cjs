@@ -366,3 +366,16 @@ test('copying a saved synchronization rebinds only the destination, offset and e
   assert.throws(()=>variant.operate(copied,{type:'setOffset',offsetMs:2000}),{code:'MANUAL_PROTECTED'});
   const offset=variant.operate(copied,{type:'setOffset',offsetMs:2000},true);assert.deepEqual(offset.score.phrases,saved.phrases);assert.equal(offset.score.offsetMs,2000);
 });
+
+test('word and syllable landing overrides preserve locked timing and other effects; default removes only that override',()=>{
+  let base=make('[00:01.00]hello\n[00:04.00]');const w=base.phrases[0].words[0];
+  base=core.applyOperation(base,{type:'setWordSyllables',wordId:w.id,syllables:[{id:'part1',text:'hel',startMs:1000,endMs:2000},{id:'part2',text:'lo',startMs:2000,endMs:w.endMs}]},base.revision);
+  base=core.applyOperation(base,{type:'setWordEffect',wordId:w.id,effect:{type:'echo',strength:.6}},base.revision);
+  const draft=variant.merge(base,base),before=JSON.stringify(draft);
+  const edited=variant.operate(draft,[{type:'setWordLanding',wordId:w.id,style:'glide'},{type:'setSyllableLanding',syllableId:'part1',style:'still'}]);
+  assert.equal(edited.score.phrases[0].words[0].landing,'glide');assert.equal(edited.score.phrases[0].words[0].syllables[0].landing,'still');
+  const cleared=variant.operate(edited,[{type:'setWordLanding',wordId:w.id,style:null},{type:'setSyllableLanding',syllableId:'part1',style:null}]);
+  assert.deepEqual(cleared.score.phrases,base.phrases);
+  assert.throws(()=>variant.operate(draft,[{type:'setWordLanding',wordId:w.id,style:'unknown'}]));
+  assert.equal(JSON.stringify(draft),before);
+});

@@ -371,9 +371,9 @@
   function backingLabelMode(){return backingLabels[backingLabelKey()]||'hidden';}
   function setBackingLabel(value){const key=backingLabelKey();if(!key)return;backingLabels={...backingLabels,[key]:['header','prefix'].includes(value)?value:'hidden'};state.scoreSignature='';chrome.storage.local.set({lvxBackingLabels:backingLabels}).catch(error=>setHud('Backing names changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
   function setBackingDisplay(value){backingDisplay=LvChoreography.backingSettings(value);state.scoreSignature='';chrome.storage.local.set({lvxBackingDisplay:backingDisplay}).catch(error=>setHud('Backing display changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
-  let choreography={dance:'off',mode:'classic',upsideDown:false,automatic:false,autoFire:false,fireColor:'ember',fireSmoke:true,fillStage:true,arrangement:'chaotic',origin:'top-left'},previewPlaying=false,previewFrame=0,previewTime=1600,previewLast=0,previewTheme=state.theme;
+  let choreography={landing:'settle',dance:'off',mode:'classic',upsideDown:false,automatic:false,autoFire:false,fireColor:'ember',fireSmoke:true,fillStage:true,arrangement:'chaotic',origin:'top-left'},previewPlaying=false,previewFrame=0,previewTime=1600,previewLast=0,previewTheme=state.theme;
   const choreographyPlans=new WeakMap(),choreographyMeasure=document.createElement('canvas').getContext('2d');
-  function setChoreography(value){choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(value.dance)?value.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic===true,autoFire:value.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,value.fireColor)?value.fireColor:'ember',fireSmoke:value.fireSmoke!==false,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
+  function setChoreography(value){choreography={landing:Object.hasOwn(LvChoreography.landingStyles,value.landing)?value.landing:'settle',dance:['off','mix','tip','flex','bounce','launch'].includes(value.dance)?value.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic===true,autoFire:value.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,value.fireColor)?value.fireColor:'ember',fireSmoke:value.fireSmoke!==false,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
   function previewTick(now){
     if(themePicker.hidden||!previewPlaying||document.hidden){previewFrame=0;previewLast=0;return;}
     if(previewLast)previewTime+=Math.min(now-previewLast,100);previewLast=now;renderStylePreview(true);previewFrame=requestAnimationFrame(previewTick);
@@ -507,6 +507,9 @@
     const layout=motionControls.querySelector('label'),upside=motionControls.querySelectorAll('label')[1],expression=motionControls.querySelector('[aria-label="Automatic lyric expression"]').closest('label'),play=motionControls.querySelector('[data-preview-play]');
     const puzzleOptions=[...motionControls.querySelectorAll('label')].filter(label=>label.querySelector('[aria-label="Puzzle arrangement"],[aria-label="Puzzle home corner"]'));
     const layoutRow=document.createElement('div');layoutRow.className='lvx-studio-layout';layoutRow.append(layout);if(choreography.mode==='puzzle')layoutRow.append(...puzzleOptions,upside);
+    const landingLabel=document.createElement('label');landingLabel.textContent='Landing ';const landingSelect=document.createElement('select');landingSelect.setAttribute('aria-label','Default landing style');
+    for(const [value,label]of Object.entries(LvChoreography.landingStyles)){const option=document.createElement('option');option.value=value;option.textContent=label;landingSelect.append(option);}landingSelect.value=choreography.landing;
+    landingSelect.onchange=()=>{setChoreography({...choreography,landing:landingSelect.value});renderStylePreview(true);};landingLabel.append(landingSelect);layoutRow.append(landingLabel);
     const effects=document.createElement('details');effects.className='lvx-word-effects';effects.open=studio.effectsOpen;effects.innerHTML='<summary>Word effects <span>Accents · sustains · moves</span></summary><div class="lvx-effects-settings"></div><dl class="lvx-effect-vocabulary"><div><dt>Accents</dt><dd>Pulse · Tilt · Shake</dd></div><div><dt>Sustains</dt><dd>Breathe · Color · Wobble</dd></div><div><dt>Moves</dt><dd>Topple · Flex · Bounce · Launch</dd></div></dl><p class="lvx-studio-note">Record accents in Timing → Effects. Sustains follow held notes when Expression is Automatic.</p>';
     effects.querySelector('.lvx-effects-settings').append(expression,danceLabel);effects.ontoggle=()=>{if(effects.isConnected)studio.effectsOpen=effects.open;};
     const tip=danceLabel.querySelector('option[value=tip]');if(tip)tip.textContent='Topple · backward fall';
@@ -659,7 +662,7 @@
       <label class="lvx-sync-loop"><input type="checkbox" data-sync="tap-click"> Audible marks · words only</label>
       </details>
     </details>
-    <details class="lvx-effect-panel"><summary>Perform effects <span>second pass</span></summary><p class="lvx-sync-hint">Hold Space to overwrite. Space alone clears; press 1–8 while holding to apply an effect. Release to listen.</p><div class="lvx-beat-settings"><label>Clock <select data-sync="effect-clock"><option value="interval">Sung intervals</option><option value="beat">Beats · through gaps</option></select></label><label>Target <select data-sync="beat-target"><option value="active">Visible lyrics</option><option value="screen">Screen glow</option><option value="lane">Current vocal lane</option><option value="phrase">This phrase</option><option value="word">Selected word</option><option value="syllable">Selected syllable</option></select></label><label>Length · beats <input data-sync="beat-duration" type="number" min="0.25" max="64" step="0.25" value="4"></label><label class="lvx-sync-loop"><input data-sync="beat-snap" type="checkbox" checked> Snap effect to ¼ beat</label></div><label class="lvx-sync-loop lvx-interval-target">Target <select data-sync="effect-scope"><option value="phrase">Phrase</option><option value="word" selected>Word</option><option value="syllable">Authored syllable</option></select></label><div class="lvx-tap-actions"><button data-sync="effect-start">▶ Start effects pass · Enter</button><button data-sync="effect-stop">■ Stop · Enter</button></div><label class="lvx-groove-direction">Groove direction <select data-sync="groove-axis" aria-label="Groove direction"><option value="vertical">Vertical ↕</option><option value="horizontal">Horizontal ↔</option></select></label><div class="lvx-effect-pads"><button data-effect="pulse">1 · Pulse</button><button data-effect="tilt">2 · Tilt</button><button data-effect="shake">3 · Shake</button><button data-effect="bounce">4 · Bounce</button><button data-effect="glow">5 · Glow</button><button data-effect="groove">6 · Groove</button><button data-effect="echo">7 · Echo</button><button data-effect="glitch">8 · Glitch</button></div><p class="lvx-effect-status" role="status">Effects are buffered until you use the pass.</p><div class="lvx-beat-cue-list"></div><label class="lvx-gap-setting">Phrase linger override · beats<input data-sync="gap-beats" type="number" min="0" max="64" step="0.25" value="0"></label><button data-sync="gap-use">Use phrase override</button><button data-sync="gap-default">Use display default</button><p class="lvx-sync-hint">0 disables linger for this phrase. A beat override ends at the next lyric in this lane. Use display default removes the override; sung timings stay fixed.</p><div class="lvx-tap-actions"><button data-sync="effect-use">Use effects in preview</button><button data-sync="effect-undo">↶ Undo effect</button><button data-sync="effect-discard">Discard effects</button></div></details>
+    <details class="lvx-effect-panel"><summary>Perform effects <span>second pass</span></summary><p class="lvx-sync-hint">Hold Space to overwrite. Space alone clears; press 1–8 while holding to apply an effect. Release to listen.</p><div class="lvx-beat-settings"><label>Clock <select data-sync="effect-clock"><option value="interval">Sung intervals</option><option value="beat">Beats · through gaps</option></select></label><label>Target <select data-sync="beat-target"><option value="active">Visible lyrics</option><option value="screen">Screen glow</option><option value="lane">Current vocal lane</option><option value="phrase">This phrase</option><option value="word">Selected word</option><option value="syllable">Selected syllable</option></select></label><label>Length · beats <input data-sync="beat-duration" type="number" min="0.25" max="64" step="0.25" value="4"></label><label class="lvx-sync-loop"><input data-sync="beat-snap" type="checkbox" checked> Snap effect to ¼ beat</label></div><label class="lvx-sync-loop lvx-interval-target">Target <select data-sync="effect-scope"><option value="phrase">Phrase</option><option value="word" selected>Word</option><option value="syllable">Authored syllable</option></select></label><div class="lvx-tap-actions"><button data-sync="effect-start">▶ Start effects pass · Enter</button><button data-sync="effect-stop">■ Stop · Enter</button></div><details class="lvx-landing-editor"><summary>Landing override · word or syllable</summary><label>Target <select data-sync="landing-target" aria-label="Landing target"></select></label><label>Style <select data-sync="landing-style" aria-label="Landing style"><option value="">Use display default</option><option value="settle">Soft settle</option><option value="glide">Glide</option><option value="drop">Drop</option><option value="still">Still</option></select></label><button data-sync="landing-apply">Apply landing to preview</button><p class="lvx-sync-hint">Syllable overrides take priority over their word. Other effects and timings stay unchanged.</p></details><label class="lvx-groove-direction">Groove direction <select data-sync="groove-axis" aria-label="Groove direction"><option value="vertical">Vertical ↕</option><option value="horizontal">Horizontal ↔</option></select></label><div class="lvx-effect-pads"><button data-effect="pulse">1 · Pulse</button><button data-effect="tilt">2 · Tilt</button><button data-effect="shake">3 · Shake</button><button data-effect="bounce">4 · Bounce</button><button data-effect="glow">5 · Glow</button><button data-effect="groove">6 · Groove</button><button data-effect="echo">7 · Echo</button><button data-effect="glitch">8 · Glitch</button></div><p class="lvx-effect-status" role="status">Effects are buffered until you use the pass.</p><div class="lvx-beat-cue-list"></div><label class="lvx-gap-setting">Phrase linger override · beats<input data-sync="gap-beats" type="number" min="0" max="64" step="0.25" value="0"></label><button data-sync="gap-use">Use phrase override</button><button data-sync="gap-default">Use display default</button><p class="lvx-sync-hint">0 disables linger for this phrase. A beat override ends at the next lyric in this lane. Use display default removes the override; sung timings stay fixed.</p><div class="lvx-tap-actions"><button data-sync="effect-use">Use effects in preview</button><button data-sync="effect-undo">↶ Undo effect</button><button data-sync="effect-discard">Discard effects</button></div></details>
     <details><summary>Exact word timings <span>milliseconds</span></summary><p class="lvx-sync-hint">One word per line: word, start, end. These changes affect the preview until you apply.</p><label class="lvx-sync-protected"><input type="checkbox" data-sync="protected"> Edit saved timings in this phrase</label><textarea aria-label="Exact word timings in milliseconds" spellcheck="false" rows="5"></textarea><div class="lvx-sync-text-actions"><button data-sync="tune">Use these times</button><button data-sync="reset">Reset text</button></div></details>
     <div class="lvx-sync-text-actions"><button data-sync="export">↓ Export preview JSON</button><button data-sync="discard-all" class="lvx-danger">Discard all changes</button></div>
     <footer><button data-sync="undo">↶ Undo saved change</button><span class="lvx-save-wrap" tabindex="-1"><span class="lvx-save-tooltip" role="tooltip" id="lvx-save-reason"></span><button data-sync="apply" class="lvx-sync-primary" aria-describedby="lvx-save-reason"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/></svg> Save timings</button></span></footer>`;
@@ -2502,6 +2505,8 @@
   function effectClearOperations(score) {
     const operations=[];
     for(const phrase of score?.phrases||[])for(const word of phrase.words){
+      if(word.landing)operations.push({type:'setWordLanding',wordId:word.id,style:null});
+      for(const part of word.syllables||[])if(part.landing)operations.push({type:'setSyllableLanding',syllableId:part.id,style:null});
       if(word.effects?.length)operations.push({type:'setWordEffect',wordId:word.id,effect:null});
       for(const part of word.syllables||[])if(part.effects?.length)operations.push({type:'setSyllableEffect',syllableId:part.id,effect:null});
     }
@@ -2519,7 +2524,7 @@
     const prior=new Map((effectGesture.input?effectGesture.base:[]).map(m=>[m.targetId,m.operation]));
     const name=effects=>effects?.length?effects.map(e=>e.type[0].toUpperCase()+e.type.slice(1)+(e.type==='groove'&&e.axis?' '+(e.axis==='horizontal'?'↔':'↕'):'')).join(' + '):'Blank';
     const rows=[{label:'Phrase',items:[{id:phrase.id,text:phrase.words.filter(w=>!w.excluded).map(w=>w.text).join(' '),startMs:phrase.startMs,endMs:phrase.endMs,kind:'lyric'}]},{label:'Words',items:phrase.words.filter(w=>!w.excluded).map(w=>({id:w.id,text:w.text,startMs:w.startMs,endMs:w.endMs,kind:'lyric'}))}];
-    const item=(unit,lyric)=>{const op=latest.get(unit.id),beforeOp=prior.get(unit.id),before=beforeOp?beforeOp.effect?[beforeOp.effect]:[]:unit.effects||[],after=op?op.effect?[op.effect]:[]:unit.effects||[];return {id:unit.id,startMs:unit.startMs,endMs:unit.endMs,text:(lyric?unit.text+' · ':'')+(op?name(before)+' → '+name(after):name(after)),kind:after[0]?.type||'blank',beforeKind:before[0]?.type||'blank',pending:Boolean(op),effect:true};};
+    const item=(unit,lyric)=>{const op=latest.get(unit.id),beforeOp=prior.get(unit.id),before=beforeOp?beforeOp.effect?[beforeOp.effect]:[]:unit.effects||[],after=op?op.effect?[op.effect]:[]:unit.effects||[];return {id:unit.id,startMs:unit.startMs,endMs:unit.endMs,text:(lyric?unit.text+' · ':'')+(op?name(before)+' → '+name(after):name(after))+(unit.landing?' · '+LvChoreography.landingStyles[unit.landing]:''),kind:after[0]?.type||'blank',beforeKind:before[0]?.type||'blank',pending:Boolean(op),effect:true};};
     rows.push({label:'Effects',items:phrase.words.filter(w=>!w.excluded).map(w=>item(w,false))});
     const parts=phrase.words.filter(w=>!w.excluded).flatMap(w=>w.syllables||[]);
     if(parts.length)rows.push({label:'Syllables',items:parts.map(s=>item(s,true))});
@@ -2596,7 +2601,32 @@
     catch(error){setSyncNotice(error.message,'error');}
     finally{timing.busy=false;refreshTimingPanel();}
   }
+  function landingEditorTarget(){
+    const [kind,id]=syncButton('landing-target').value.split(':');
+    const word=timingPhrase()?.words.find(w=>kind==='word'?w.id===id:w.syllables?.some(s=>s.id===id));
+    return word?{kind,word,unit:kind==='word'?word:word.syllables.find(s=>s.id===id)}:null;
+  }
+  function refreshLandingEditor(){
+    const select=syncButton('landing-target'),value=select.value,phrase=timingPhrase();
+    const options=(phrase?.words||[]).filter(w=>!w.excluded).flatMap(w=>[{value:'word:'+w.id,label:'Word · '+w.text},...(w.syllables||[]).map(s=>({value:'syllable:'+s.id,label:'Syllable · '+w.text+' / '+s.text}))]);
+    const key=options.map(o=>o.value+o.label).join('|');
+    if(select.dataset.options!==key){select.replaceChildren(...options.map(o=>{const node=document.createElement('option');node.value=o.value;node.textContent=o.label;return node;}));select.dataset.options=key;select.value=options.some(o=>o.value===value)?value:options[0]?.value||'';}
+    const target=landingEditorTarget(),style=syncButton('landing-style'),binding=target?.unit.id+':'+timing.draft?.previewRevision;
+    if(style.dataset.binding!==binding){style.value=target?.unit.landing||'';style.dataset.binding=binding;}
+    for(const name of ['landing-target','landing-style','landing-apply'])syncButton(name).disabled=timing.busy||!target||tapping.take?.status==='armed'||performanceTake.armed||countIn.active||countIn.preparing;
+    style.options[0].textContent=target?.kind==='syllable'&&target.word.landing?'Use word default · '+LvChoreography.landingStyles[target.word.landing]:'Use display default';
+  }
+  async function applyLandingOverride(){
+    const target=landingEditorTarget();if(!target||syncButton('landing-apply').disabled)return;
+    const operation={type:target.kind==='word'?'setWordLanding':'setSyllableLanding',[target.kind==='word'?'wordId':'syllableId']:target.unit.id,style:syncButton('landing-style').value||null};
+    timing.busy=true;refreshTimingPanel();
+    try{timing.draft=(await timingRequest('LV_TIMING_TUNE',{operation})).preview;timing.auditioned=false;state.scoreSignature='';setSyncNotice('Landing updated in preview. Save timings keeps it; Undo preview restores it.');if(state.score)renderScore(getMediaTimeMs());}
+    catch(error){setSyncNotice(error.message,'error');}finally{timing.busy=false;refreshTimingPanel();}
+  }
+  syncButton('landing-target').addEventListener('change',refreshLandingEditor);
+  syncButton('landing-apply').addEventListener('click',applyLandingOverride);
   function refreshEffectPanel() {
+    refreshLandingEditor();
     const active = performanceTake.armed;
     const beats=syncButton('effect-clock').value==='beat';
     for(const button of syncPanel.querySelectorAll('[data-effect-target]')){button.setAttribute('aria-pressed',String(button.dataset.effectTarget===syncButton(beats?'beat-target':'effect-scope').value));button.disabled=active||performanceTake.marks.length>0||timing.busy;}
@@ -3146,7 +3176,7 @@
       backingLabels=Object.fromEntries(Object.entries(result?.lvxBackingLabels||{}).filter(([key,value])=>['hidden','header','prefix'].includes(value)));
       syncButton('record-other-parts').checked=result?.lvxRecordOtherParts===true;
       linger=LvBeatTrack.lingerSettings(result?.lvxLinger);
-      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic===true,autoFire:c.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,c.fireColor)?c.fireColor:'ember',fireSmoke:c.fireSmoke!==false,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(c.origin)?c.origin:'top-left'};}
+      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={landing:Object.hasOwn(LvChoreography.landingStyles,c.landing)?c.landing:'settle',dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic===true,autoFire:c.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,c.fireColor)?c.fireColor:'ember',fireSmoke:c.fireSmoke!==false,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:['top-left','top-right','bottom-left','bottom-right'].includes(c.origin)?c.origin:'top-left'};}
       bloomEnabled=result?.lvxBloomEnabled!==false;
       if(result?.lvxPlacement)try{applyPlacement(result.lvxPlacement);}catch(error){setHud(error.message,true,true);}
       if (result && result.lvxTheme && THEMES.includes(result.lvxTheme)) {
@@ -4588,8 +4618,16 @@
       }
     });
   }
+  function landLine(line,words,clock,settings=choreography){
+    const paint=(node,unit,fallback)=>{const style=unit.landing||fallback||'settle',value=LvChoreography.landingAt(clock,unit.startMs,{style,reduced:bloomMotion.matches});node.dataset.landing=style;node.style.translate=`${value.x.toFixed(4)}em ${value.y.toFixed(4)}em`;node.style.opacity=clock<unit.startMs?String(value.opacity):'';};
+    words.forEach((word,i)=>{const node=line.children[i];if(!node)return;const parts=[...node.querySelectorAll('[data-syllable]')];
+      if(parts.length){node.style.translate='0 0';node.style.opacity='';for(const part of parts){const unit=word.syllables?.find(s=>s.id===part.dataset.syllable);if(unit)paint(part,unit,word.landing||settings.landing);}}
+      else paint(node,word,settings.landing);
+    });
+  }
   function choreographLine(line,words,clock,width,height,maxFont,weights={},minFont=0,settings=choreography){
-    if(typeof LvChoreography==='undefined'||settings.mode==='classic'&&!minFont)return;
+    if(typeof LvChoreography==='undefined')return;
+    if(settings.mode==='classic'&&!minFont){landLine(line,words,clock,settings);return;}
     const style=getComputedStyle(line),key=[width,height,maxFont,minFont,style.fontFamily,style.fontWeight,style.letterSpacing,style.textTransform,settings.mode,settings.upsideDown,settings.arrangement,settings.origin,words.map(w=>w.text+':'+(weights[w.id]?.weight??1)+':'+(w.appearance?.look||'')).join('|')].join(':');
     let plan=choreographyPlans.get(line);
     if(plan?.key!==key){
@@ -4604,14 +4642,7 @@
       [...line.children].forEach((node,i)=>node.style.display=i>=page.start&&i<page.end?'':'none');
       for(const slot of page.slots){plan.slots[slot.index]=slot;const node=line.children[slot.index];if(!node)continue;node.classList.toggle('lvx-wrapped-word',!!slot.wrapped);Object.assign(node.style,{position:'absolute',left:(slot.x-slot.width/2)+'px',top:(slot.y-slot.height/2)+'px',width:slot.width+'px',height:slot.height+'px',fontSize:slot.font+'px',lineHeight:'1.3',rotate:slot.angle+'deg'});}
     }
-    const reduced=bloomMotion.matches;
-    words.forEach((word,i)=>{const node=line.children[i],slot=plan.slots[i];if(!node||!slot)return;const arrival=LvChoreography.arrival(clock,word.startMs,500,reduced),dy=settings.mode==='fall'?(1-arrival)*-Math.min(height*.42,slot.font*3):0;node.style.translate=`0 ${dy.toFixed(2)}px`;node.style.opacity=settings.mode!=='classic'&&clock<word.startMs?String(.15*arrival):'';
-      if(settings.mode==='puzzle'){
-        const parts=[...node.querySelectorAll('[data-syllable]')];
-        if(!parts.length)node.style.translate=`0 ${(-(1-arrival)*slot.font).toFixed(2)}px`;
-        for(const part of parts){const syllable=word.syllables?.find(s=>s.id===part.dataset.syllable);if(!syllable)continue;const start=Math.max(word.startMs,syllable.startMs),lead=Math.min(350,Math.max(1,start-word.startMs)),a=LvChoreography.arrival(clock,start,lead,reduced);part.style.translate=`0 ${(-(1-a)*slot.font*.85).toFixed(2)}px`;part.style.rotate='0deg';part.style.opacity=clock<start?String(.12*a):'';}
-      }
-    });
+    landLine(line,words,clock,settings);
   }
 
   function renderVinylScore(score,mediaMs,area){

@@ -191,3 +191,16 @@ test('Echo and Glitch reconstruct painted copies on seek and suppress them for r
     assert.equal(B.cueAt(beat,null,0,true,1).accent,undefined);
   }
 });
+
+test('landing styles settle smoothly at the sung entrance and reconstruct exactly on seek',()=>{
+  const {landingAt,landingStyles}=require('../extension/choreography.js');
+  for(const style of Object.keys(landingStyles)){
+    assert.deepEqual(landingAt(1000,1000,{style}),{x:0,y:0,opacity:1});
+    assert.deepEqual(landingAt(800,1000,{style}),landingAt(800,1000,{style}));
+    assert.deepEqual(landingAt(800,1000,{style,reduced:true}),{x:0,y:0,opacity:1});
+  }
+  assert(Math.abs(landingAt(600,1000).y)<.18);
+  assert(Math.abs(landingAt(600,1000,{style:'drop'}).y)>.18);
+  assert(landingAt(600,1000,{style:'glide'}).x<0);
+  assert(Math.abs(landingAt(999,1000).y)<.000001,'No sudden terminal jump in soft landing');
+});

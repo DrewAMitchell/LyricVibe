@@ -99,10 +99,10 @@
     // Apply against a private copy so a failed batch cannot leave a partial preview.
     let score = clone(draft.score);
     for (const submitted of operations) {
-      if (!submitted || !['setStageRegion','deleteStageRegion','setWordAppearance','setOffset', 'shiftPhrases', 'setWordDisplayMode', 'setBeatCue', 'deleteBeatCue', 'setPhrasePersistence', 'setPhraseTiming', 'setPhraseLane', 'insertPhrase', 'setWordText', 'setWordSyllables', 'setSyllableTiming', 'setSyllableLock', 'setWordEffect', 'setSyllableEffect', 'setWordExcluded', 'replaceWords', 'setPhraseSyllableTimings', 'setPhraseSyllablePerformance'].includes(submitted.type)) fail('INVALID_OPERATION', 'This operation is not supported in the timing preview.');
+      if (!submitted || !['setWordLanding','setSyllableLanding','setStageRegion','deleteStageRegion','setWordAppearance','setOffset', 'shiftPhrases', 'setWordDisplayMode', 'setBeatCue', 'deleteBeatCue', 'setPhrasePersistence', 'setPhraseTiming', 'setPhraseLane', 'insertPhrase', 'setWordText', 'setWordSyllables', 'setSyllableTiming', 'setSyllableLock', 'setWordEffect', 'setSyllableEffect', 'setWordExcluded', 'replaceWords', 'setPhraseSyllableTimings', 'setPhraseSyllablePerformance'].includes(submitted.type)) fail('INVALID_OPERATION', 'This operation is not supported in the timing preview.');
       const op = clone(submitted);
       let wordId = op.wordId;
-      const effectOnly = ['setStageRegion','deleteStageRegion','setWordAppearance','setWordDisplayMode','setBeatCue','deleteBeatCue','setPhrasePersistence'].includes(op.type) || op.type === 'setWordEffect' || op.type === 'setSyllableEffect' || op.type === 'setPhraseLane';
+      const effectOnly = ['setWordLanding','setSyllableLanding','setStageRegion','deleteStageRegion','setWordAppearance','setWordDisplayMode','setBeatCue','deleteBeatCue','setPhrasePersistence'].includes(op.type) || op.type === 'setWordEffect' || op.type === 'setSyllableEffect' || op.type === 'setPhraseLane';
       if (!allowProtected && (op.type === 'setOffset' || op.type === 'shiftPhrases') && score.phrases.some(p => (op.type === 'setOffset' || op.phraseIds?.includes(p.id)) && p.words.some(w => draft.protectedIds.includes(w.id)))) fail('MANUAL_PROTECTED', 'Enable editing saved timings before moving protected phrases.');
       if (op.type === 'replaceWords' && !allowProtected && Array.isArray(op.wordIds) && op.wordIds.some(id => draft.protectedIds.includes(id))) fail('MANUAL_PROTECTED', 'Enable editing saved timings before replacing words in this protected phrase.');
       if (op.type === 'setPhraseSyllableTimings' && !allowProtected && Array.isArray(op.marks)) {
@@ -117,7 +117,7 @@
         if (!Number.isSafeInteger(op.startMs)||!Number.isSafeInteger(op.endMs)||op.endMs<=op.startMs) fail('INVALID_TIME','Use whole milliseconds with a positive phrase interval.');
         if (!allowProtected && phrase.words.some(w=>draft.protectedIds.includes(w.id))) fail('MANUAL_PROTECTED','Enable editing saved timings before changing this protected phrase.');
       }
-      if (op.type === 'setSyllableTiming' || op.type === 'setSyllableLock' || op.type === 'setSyllableEffect') {
+      if (op.type === 'setSyllableTiming' || op.type === 'setSyllableLock' || op.type === 'setSyllableEffect' || op.type === 'setSyllableLanding') {
         wordId = score.phrases.flatMap(p => p.words).find(w => (w.syllables || []).some(s => s.id === op.syllableId))?.id;
         if (!wordId) fail('UNKNOWN_ID', 'Choose a syllable from this preview.');
         if (op.type === 'setSyllableTiming' && (!Number.isSafeInteger(op.startMs) || !Number.isSafeInteger(op.endMs) || op.endMs <= op.startMs)) fail('INVALID_TIME', 'Use whole milliseconds with a positive syllable interval.');

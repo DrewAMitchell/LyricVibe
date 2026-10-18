@@ -2988,3 +2988,6 @@
 #lvx-root dialog.lvx-backing-placement button{padding:9px 12px;border:1px solid #6a7981;border-radius:7px;background:#2a3b42;color:#eef3f0;font:600 13px system-ui,sans-serif;cursor:pointer}
 #lvx-root dialog.lvx-backing-placement button[value=apply]{background:#d6eabb;color:#19271e;border-color:#d6eabb}
 #lvx-root dialog.lvx-backing-placement button:focus-visible{outline:2px solid #00dbc4;outline-offset:3px}
+
+#lvx-root .lvx-landing-editor label{display:grid;gap:6px;margin:10px 0}
+#lvx-root .lvx-landing-editor select{width:100%;min-width:0}
