@@ -2975,3 +2975,13 @@
 
 /* Echo/Glitch own bounded paint only while their source-clock cue is active. */
 #lvx-root .lvx-accent-shadow{ text-shadow:var(--lvx-beat-shadow,var(--lvx-expression-shadow))!important }
+
+#lvx-root dialog.lvx-backing-placement{box-sizing:border-box;width:min(440px,calc(100vw - 24px));padding:22px;font:14px/1.5 system-ui,sans-serif;pointer-events:auto}
+#lvx-root dialog.lvx-backing-placement h3{font-size:19px;margin-bottom:12px}
+#lvx-root dialog.lvx-backing-placement label{display:flex;gap:10px;align-items:center;padding:12px 8px;border:1px solid #58606a;border-radius:7px;margin:10px 0;cursor:pointer}
+#lvx-root dialog.lvx-backing-placement input{accent-color:#baddac}
+#lvx-root dialog.lvx-backing-placement .lvx-tap-actions{margin-top:18px}
+
+#lvx-root dialog.lvx-backing-placement button{padding:9px 12px;border:1px solid #6a7981;border-radius:7px;background:#2a3b42;color:#eef3f0;font:600 13px system-ui,sans-serif;cursor:pointer}
+#lvx-root dialog.lvx-backing-placement button[value=apply]{background:#d6eabb;color:#19271e;border-color:#d6eabb}
+#lvx-root dialog.lvx-backing-placement button:focus-visible{outline:2px solid #00dbc4;outline-offset:3px}

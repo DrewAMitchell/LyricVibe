@@ -167,7 +167,8 @@
     }
   }
 
-  function diff(score, text) {
+  function diff(score, text, {backingStart='beginning'} = {}) {
+    if(!['beginning','near-end'].includes(backingStart))fail('INVALID_BACKING_START','Choose beginning or near-end backing placement.');
     if (typeof text !== 'string' || text.length > 200000) fail('INVALID_TEXT', 'Transcript text must be a string under 200,000 characters.');
     // Phrases whose words are all hidden are deleted from the transcript's point of view.
     const phrases = score.phrases.filter(phrase => visible(phrase).length);
@@ -196,7 +197,7 @@
       let ordinaryIndex = 0;
       const planned = pendingNew.map(entry => {
         const anchor = timings.get(entry.anchorIndex);
-        const startMs = anchor ? anchor.endMs : gapStart + ordinaryIndex++ * each;
+        const startMs = anchor ? backingStart==='near-end'?(anchor.words?visible(anchor).at(-1)?.startMs??anchor.startMs:Math.max(anchor.startMs,anchor.endMs-800)):anchor.startMs : gapStart + ordinaryIndex++ * each;
         const duration = anchor ? Math.max(1500, Math.min(8000, entry.tokens.length * 650)) : each;
         const result = { ...entry, startMs, endMs: startMs + duration };
         timings.set(entry.index, result); return result;

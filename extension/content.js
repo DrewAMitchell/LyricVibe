@@ -648,7 +648,7 @@
       <div class="lvx-tap-status" role="status" aria-live="polite">Choose a word to begin.</div>
       <div class="lvx-tap-actions"><button data-sync="tap-use">Use take in preview</button><button data-sync="tap-undo">↶ Undo mark</button><button data-sync="tap-discard">Discard take</button><button data-sync="take-export" disabled>Export take</button></div>
       <button data-sync="events-restore" title="Reopen the latest syllable or word-hold recording for this video. Changed phrases remain separate for review.">Review last recording ↗</button>
-      <button data-sync="transcript-open" class="lvx-transcript-open">✎ Lyrics text</button><dialog class="lvx-transcript-editor" aria-label="Lyrics text"><h3>Lyrics</h3><p class="lvx-sync-hint">Paste or edit the lyrics, one phrase per line. Prefix a word with = to show it all at once (e.g. =NoOoOoOo); remove = to follow syllables. Parentheses, like <code>Stay with me (with me)</code>, add estimated backing at the end of that main phrase. <code>[backing]</code> puts a whole line on the backing lane. Fixed words keep their timing; new lines get estimated timing to retime; deleted words and lines are hidden. Undo preview reverts.</p><textarea data-sync="transcript-text" rows="18" spellcheck="true" aria-label="Lyrics, one phrase per line"></textarea><ul class="lvx-transcript-changes" aria-live="polite"></ul><div class="lvx-tap-actions"><button data-sync="transcript-apply">Apply to preview</button><button data-sync="transcript-close">Close</button></div></dialog><section class="lvx-event-review" hidden aria-label="Assign recorded events"><p class="lvx-event-summary" role="status"></p><div class="lvx-event-phrases"></div><div class="lvx-tap-actions"><button data-sync="events-review">Use reviewed assignments</button><button data-sync="events-export">Export events</button></div><p class="lvx-sync-hint">Counts group your recorded entrances into words. Amber means uncertain or changed. Raw timestamps never move. A word starts at its first entrance; its end stays provisional until word-boundary cleanup. Long gaps are flagged because a held syllable can look like the next word. Unresolved phrases stay in the take.</p></section>
+      <button data-sync="transcript-open" class="lvx-transcript-open">✎ Lyrics text</button><dialog class="lvx-transcript-editor" aria-label="Lyrics text"><h3>Lyrics</h3><p class="lvx-sync-hint">Paste or edit the lyrics, one phrase per line. Prefix a word with = to show it all at once (e.g. =NoOoOoOo); remove = to follow syllables. Parentheses, like <code>Stay with me (with me)</code>, add backing lyrics. Apply asks whether they begin with the main phrase or near its end. <code>[backing]</code> puts a whole line on the backing lane. Fixed words keep their timing; new lines get estimated timing to retime; deleted words and lines are hidden. Undo preview reverts.</p><textarea data-sync="transcript-text" rows="18" spellcheck="true" aria-label="Lyrics, one phrase per line"></textarea><ul class="lvx-transcript-changes" aria-live="polite"></ul><div class="lvx-tap-actions"><button data-sync="transcript-apply">Apply to preview</button><button data-sync="transcript-close">Close</button></div></dialog><section class="lvx-event-review" hidden aria-label="Assign recorded events"><p class="lvx-event-summary" role="status"></p><div class="lvx-event-phrases"></div><div class="lvx-tap-actions"><button data-sync="events-review">Use reviewed assignments</button><button data-sync="events-export">Export events</button></div><p class="lvx-sync-hint">Counts group your recorded entrances into words. Amber means uncertain or changed. Raw timestamps never move. A word starts at its first entrance; its end stays provisional until word-boundary cleanup. Long gaps are flagged because a held syllable can look like the next word. Unresolved phrases stay in the take.</p></section>
       <section class="lvx-mark-correction" hidden aria-label="Correct recorded timing"><label>Recorded <select data-sync="correct-mark" aria-label="Recorded mark to correct"></select></label><div class="lvx-correction-times"><label>Start ms <input data-sync="correct-start" type="number" min="0" step="10"></label><label>End ms <input data-sync="correct-end" type="number" min="0" step="10"></label></div><div class="lvx-tap-actions"><button data-sync="correct-hear">▶ Hear this mark</button><button data-sync="correct-save">Use exact times</button></div><label>Adjust <select data-sync="correct-edge"><option value="move">Whole mark</option><option value="start">Start only</option><option value="end">End only</option></select></label><div class="lvx-tap-actions"><button data-sync="correct-earlier">← Earlier 10 ms</button><button data-sync="correct-later">Later 10 ms →</button><button data-sync="correct-undo">↶ Undo correction</button></div><p class="lvx-sync-hint">Alt + ← / → adjusts the selected edge by 10 ms; add Shift for 50 ms. Corrections use original song time. Hear this mark plays a short loop at practice speed.</p></section>
       <details class="lvx-perform-options"><summary>Performance options <span>units · grid · clicks</span></summary>
       <div class="lvx-tap-settings"><label>Word gesture <select data-sync="tap-cadence"><option value="hold">Hold for word duration</option><option value="flow">Space → next lyric</option><option value="pairs">Separate start / end</option></select></label><label>Word pass <select data-sync="tap-scope"><option value="lane">Continue through vocal track</option><option value="phrase">This phrase only</option></select></label></div>
@@ -905,7 +905,7 @@
     if(!timing.draft)return null;
     try{
       const result=LvTranscriptText.diff(timing.draft.score,area.value);
-      const labels={display:'display',respell:'fix',replace:'replace (re-estimated)',insert:'insert (re-estimated)',hide:'hide words','delete-line':'hide line','add-line':'new line (estimated)','add-backing':'backing at phrase end (estimated)',lane:'lane'};
+      const labels={display:'display',respell:'fix',replace:'replace (re-estimated)',insert:'insert (re-estimated)',hide:'hide words','delete-line':'hide line','add-line':'new line (estimated)','add-backing':'new backing (choose placement on Apply)',lane:'lane'};
       for(const c of result.changes){const li=document.createElement('li');li.textContent=`${c.line?`Line ${c.line}`:'Removed'} · ${labels[c.kind]}: ${c.from||'∅'} → ${c.to||'(hidden)'}`;if(c.kind!=='respell')li.dataset.review='true';list.append(li);}
       if(!result.changes.length){const li=document.createElement('li');li.textContent='No changes.';list.append(li);}
       return result;
@@ -933,13 +933,25 @@
     }
     return {extra,notes};
   }
+  function chooseBackingStart(){
+    const dialog=document.createElement('dialog');dialog.className='lvx-transcript-editor lvx-backing-placement';dialog.setAttribute('aria-label','Place new backing lyrics');
+    dialog.innerHTML=`<form method="dialog"><h3>Where should the backing begin?</h3><p>Choose the initial placement for the new backing lyrics. You can refine their timing while recording.</p><label><input type="radio" name="backing-start" value="beginning" checked> Beginning of the main phrase</label><label><input type="radio" name="backing-start" value="near-end"> Near the end, at its last word</label><div class="lvx-tap-actions"><button value="apply">Apply backing placement</button><button value="cancel">Cancel</button></div></form>`;
+    root.append(dialog);
+    return new Promise(resolve=>{dialog.addEventListener('close',()=>{const choice=dialog.returnValue==='apply'?dialog.querySelector('input:checked').value:null;dialog.remove();resolve(choice);},{once:true});dialog.showModal();dialog.querySelector('input').focus();});
+  }
   async function applyTranscript(){
     if(!timing.draft||timing.busy||!transcript.dirty)return;
     if(tapPending()||countIn.active||countIn.preparing){setSyncNotice('Stop or keep the current take before applying lyric changes. Your text is retained.','warn');return;}
-    const result=transcriptReview();if(!result)return;
+    let result=transcriptReview();if(!result)return;
     if(!result.operations.length){transcript.dirty=false;transcript.shownFor=null;refreshTimingPanel();return;}
+    const binding=tapBinding(),text=syncButton('transcript-text').value;
     timing.busy=true;refreshTimingPanel();
     try{
+      if(result.changes.some(c=>c.kind==='add-backing')){
+        const backingStart=await chooseBackingStart();if(!backingStart)return;
+        if(tapBinding()!==binding||syncButton('transcript-text').value!==text||LvScore.mediaKey({url:location.href})!==LvScore.mediaKey(timing.draft?.score.source))throw Error('The preview changed while choosing backing placement. Your text is retained; review it again.');
+        result=LvTranscriptText.diff(timing.draft.score,text,{backingStart});
+      }
       setSyncNotice(`Applying ${result.changes.length} lyric changes…`);
       const {extra,notes}=await respellSyllables(result.operations);
       const response=await timingRequest('LV_TIMING_TUNE',{operations:[...result.operations,...extra],allowProtected:true});
@@ -1891,7 +1903,7 @@
     const take=tapping.take;if(!take||take.status!=='armed')return;
     // A lost key-up must not leave a word held forever; completed marks stay.
     if(take.pendingStartMs!==null&&(syllableHold(take)||wordTake(take)||take.mode==='word'||take.mode==='phrase'))tapping.take=syllableHold(take)?LvTapTiming.undoEvent(take):wordTake(take)?LvTapTiming.undoWordHold(take):LvTapTiming.undo(take);
-    tapping.heldInput=null;tapping.cancelledSpace=false;tapping.listening=unplacedWords().length===0||tapping.backIndex!=null&&tapping.backAnchorMs!=null;tapping.followSeek=false;
+    tapping.heldInput=null;tapping.cancelledSpace=false;tapping.listening=true;tapping.followSeek=false;
   }
   function recordingRepeatRange(take,phrase){
     const index=take.units.findIndex(u=>u.phraseId===phrase.id||phrase.words.some(w=>w.id===u.wordId));
@@ -1965,7 +1977,8 @@
     try {
       const clock=Math.max(0,Math.round(media.currentTime*1000-(rawTake(take)?0:timingOffsetMs())));
       const early=eventTake(take)&&take.units.some(u=>u.phraseId===timingPhrase()?.id&&clock<u.minMs);
-      const punching=!event.release&&(tapping.listening||early);
+      const rewound=take.pendingStartMs==null&&clock<(take.lastMs??-1);
+      const punching=!event.release&&(tapping.listening||early||rewound);
       if(punching)take=LvTapTiming.punchIn(take,clock,{phraseId:timingPhrase()?.id});
       if (event.release) tapping.heldInput = null;
       tapping.take = (wordTake(take)?(event.release?LvTapTiming.releaseWord:LvTapTiming.pressWord):eventTake(take)?(syllableHold(take)?(event.release?LvTapTiming.releaseEventHold:LvTapTiming.pressEventHold):LvTapTiming.markEvent):event.release ? LvTapTiming.release : LvTapTiming.mark)(take, Math.round(media.currentTime * 1000 - (rawTake(take)?0:timingOffsetMs())));
