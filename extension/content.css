@@ -3071,3 +3071,20 @@
 .lvx-disco-facets { border-radius:50%; overflow:hidden; }
 
 #lvx-root .lvx-perimeter-hint { flex-basis:100%; color:#b6c2c8; font:12px/1.5 system-ui; }
+
+/* Performance items have an independent source-clock layer, including lyric gaps. */
+#lvx-root .lvx-stage-performance { position:absolute; inset:0; pointer-events:none; overflow:hidden; z-index:2; }
+#lvx-root .lvx-stage-performance[hidden] { display:none; }
+#lvx-root .lvx-stage-performance-item { position:absolute; pointer-events:none; }
+#lvx-root .lvx-stage-performance-item[data-type=pulse] { box-shadow:inset 0 0 8vmin calc(1vmin + var(--lvx-item-energy)*3vmin) rgb(94 182 213 / calc(.06 + var(--lvx-item-energy)*.24)); border-radius:2vmin; }
+#lvx-root .lvx-stage-performance-item svg { width:100%; height:100%; overflow:visible; filter:drop-shadow(0 5px 12px #0009); }
+#lvx-root .lvx-speaker-cone { transform-box:fill-box; transform-origin:center; transform:scale(var(--lvx-item-cone)); }
+#lvx-root .lvx-speaker-led { opacity:var(--lvx-item-glow); }
+#lvx-root .lvx-stage-subject { display:flex; align-items:center; gap:10px; margin:8px 0 12px; font-weight:650; }
+#lvx-root .lvx-stage-performance-editor > p { margin:8px 0; color:#b5c9d2; font:12px/1.5 system-ui; }
+#lvx-root .lvx-stage-common { margin-top:12px; padding-top:10px; border-top:1px solid #ffffff24; }
+#lvx-root .lvx-stage-performance-editor [data-stage=item-apply] { border-color:#b8d98c; background:#304524; }
+
+#lvx-root .lvx-stage-edit-panel.lvx-performance-editing { max-height:74vh; }
+#lvx-root .lvx-stage-edit-panel.lvx-stage-placing > :not(header) { display:none!important; }
+#lvx-root .lvx-stage-edit-panel.lvx-stage-placing header { margin:0; }

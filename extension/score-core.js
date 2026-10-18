@@ -351,6 +351,15 @@
         }
       }
     }
+    if(score.stageItems!==undefined){
+      if(!Array.isArray(score.stageItems)||score.stageItems.length>128)bad('stage items must be a bounded list');
+      const ids=new Set();for(const item of score.stageItems){const r=item?.rect;
+        if(!item||typeof item.id!=='string'||!item.id||item.id.length>128||ids.has(item.id)||!['pulse','speakers'].includes(item.type)||item.provenance!=='manual')bad('invalid performance item');ids.add(item.id);
+        if(!Number.isSafeInteger(item.startMs)||item.startMs<0||!Number.isSafeInteger(item.endMs)||item.endMs<=item.startMs)bad('performance interval must use increasing source milliseconds');
+        if(typeof item.strength!=='number'||!Number.isFinite(item.strength)||item.strength<0||item.strength>1||![1,2,4].includes(item.beatsPerPulse))bad('invalid performance intensity or beat spacing');
+        if(!r||['x','y','width','height'].some(k=>typeof r[k]!=='number'||!Number.isFinite(r[k]))||r.x<0||r.y<0||r.width<.02||r.height<.02||r.x+r.width>1.000001||r.y+r.height>1.000001)bad('performance area must fit inside the normalized video surface');
+      }
+    }
     if(score.stageRegions!==undefined){
       if(!Array.isArray(score.stageRegions)||score.stageRegions.length>512)bad('stage regions must be a bounded list');
       const seen=new Set();
@@ -433,6 +442,12 @@
         return {...phrase,id,laneId:part.laneId,words,startMs:Math.min(...words.map(w=>w.startMs)),endMs:Math.max(...words.map(w=>w.endMs))};
       });
       next.phrases.splice(index,1,...parts);
+    }else if(op.type==='setStageItem'){
+      if(!op.item||typeof op.item.id!=='string')fail('INVALID_OPERATION','Provide a timed performance item');
+      next.stageItems=[...(next.stageItems||[]).filter(item=>item.id!==op.item.id),clone(op.item)];
+    }else if(op.type==='deleteStageItem'){
+      if(!(next.stageItems||[]).some(item=>item.id===op.itemId))fail('UNKNOWN_ID','Unknown performance item');
+      next.stageItems=next.stageItems.filter(item=>item.id!==op.itemId);
     }else if(op.type==='setStageRegion'){
       if(!op.region||typeof op.region.id!=='string')fail('INVALID_OPERATION','Provide a timed stage region');
       next.stageRegions=[...(next.stageRegions||[]).filter(r=>r.id!==op.region.id),clone(op.region)];

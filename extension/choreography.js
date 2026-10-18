@@ -235,6 +235,14 @@
     }
     return best?.slots;
   }
+  function stagePerformanceAt(items,sourceMs,{beat=sourceMs/500,reduced=false}={}){
+    const smooth=x=>{x=clamp(x);return x*x*(3-2*x);};
+    return (items||[]).filter(item=>sourceMs>=item.startMs&&sourceMs<item.endMs).map(item=>{
+      const envelope=smooth((sourceMs-item.startMs)/Math.min(250,(item.endMs-item.startMs)*.2))*smooth((item.endMs-sourceMs)/Math.min(250,(item.endMs-item.startMs)*.2));
+      const pulse=reduced?.35:Math.pow((1+Math.cos(2*Math.PI*beat/item.beatsPerPulse))/2,3),energy=pulse*item.strength;
+      return {id:item.id,type:item.type,rect:item.rect,opacity:envelope,energy,scale:1+.13*energy,cone:1+.16*energy,glow:.16+.42*energy};
+    });
+  }
   const layoutOrigins=Object.freeze({'top-left':'Top left','top-right':'Top right','bottom-left':'Bottom left','bottom-right':'Bottom right','center-out-cw':'Center outward · CW','center-out-ccw':'Center outward · CCW','center-in-cw':'Center inward · CW','center-in-ccw':'Center inward · CCW'});
   function perimeter(words,width,height,measure,{origin,upsideDown,maxFont,weights}){
     const short=Math.min(width,height),clockwise=origin.endsWith('-cw'),outward=origin.startsWith('center-out-'),edges=clockwise?['top','right','bottom','left']:['top','left','bottom','right'];
@@ -389,5 +397,5 @@
     const particles=(count,smoke)=>Array.from({length:count},(_,i)=>{const seed=i+(smoke?47:11),period=(smoke?3100:1700)+hash(seed,3)*1900,age=((time+hash(seed,9)*period)%period)/period;return {x:(hash(seed,4)-.5)*2.5+Math.sin(age*4+seed)*.13,y:(smoke?.15:.55)-age*(smoke?.65:.95),alpha:(smoke?.12:.8)*Math.sin(Math.PI*age),size:smoke?.06+.07*age:.025};});
     return {width,height,time,palette:firePalettes[color]||firePalettes.ember,pixels,embers:reduced?[]:particles(4,false),smoke:reduced?[]:particles(3,true)};
   }
-  const api={layoutOrigins,landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,validateWordRuleSets,wordRuleAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
+  const api={stagePerformanceAt,layoutOrigins,landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,validateWordRuleSets,wordRuleAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);
