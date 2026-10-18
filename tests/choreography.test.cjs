@@ -246,3 +246,12 @@ test('doubled vocal annotations project to exact word and vinyl backing glyph sc
  const cues=c.compose(score,[]);assert.equal(cues[score.phrases[0].words[0].id].doubled,true);assert.equal(cues[score.phrases[0].words[1].id].doubled,false);assert.ok(score.phrases[1].words.every(w=>cues[w.id].doubled));
  const track=c.vinylTrack(score,()=>.5),backing=track.tokens.find(t=>t.backing);assert.equal(backing.chars.filter(c=>c.doubled).map(c=>c.text).join(''),'BACKING');assert.ok(track.tokens.filter(t=>t.phraseId===score.phrases[1].id).every(t=>t.chars.every(c=>c.doubled)));
 });
+
+test('air and flow levitate gently from source time and remain editable with manual priority',()=>{
+ const c=require('../extension/choreography.js'),core=require('../extension/score-core.js');const score=core.createPlainScore({videoId:'TESTVIDEO01',durationMs:10000},'Air, FLOW! airflow',{contentHash:'f'.repeat(64)}),words=score.phrases[0].words;words.forEach(w=>{w.startMs=1000;w.endMs=5000});score.phrases[0].endMs=5000;
+ const cues=c.compose(score);assert.equal(cues[words[0].id].rule.motion,'float');assert.equal(cues[words[1].id].rule.motion,'float');assert.equal(cues[words[2].id].rule,undefined);
+ const cue=cues[words[0].id],sample=c.danceAt(cue,2300,{kind:'float'});assert.ok(sample.y<-.18&&sample.y>-.34);assert.ok(Math.abs(sample.x)<=.16&&Math.abs(sample.turn)<=1.4);assert.deepEqual(c.danceAt(cue,2300,{kind:'float'}),sample);assert.notEqual(c.danceAt(cue,3300,{kind:'float'}).x,sample.x);
+ for(const time of [1000,5000,5001]){const value=c.danceAt(cue,time,{kind:'float'});assert.equal(Math.abs(value.y),0);assert.equal(Math.abs(value.x),0);}
+ assert.equal(c.danceAt(cue,2000,{kind:'float',reduced:true}).kind,'off');assert.equal(c.danceAt(cue,2000,{kind:'float',authored:true}).kind,'off');
+ const edited=core.applyOperation(score,{type:'setWordAppearance',wordId:words[2].id,appearance:{motion:'float'}},score.revision);assert.equal(edited.phrases[0].words[2].appearance.motion,'float');assert.deepEqual(score.phrases[0].words[2],words[2]);
+});

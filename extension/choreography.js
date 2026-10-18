@@ -4,11 +4,11 @@
   const median=values=>{const sorted=values.filter(n=>n>0&&Number.isFinite(n)).sort((a,b)=>a-b);return sorted.length?sorted[Math.floor(sorted.length/2)]:0;};
   const token=text=>String(text).toLowerCase().replace(/[^a-z']/g,'');
   const lightWords=new Set(['a','an','the','and','or','of','to','in','it','is','as','at','on','for']);
-  const wordRuleMotions=Object.freeze({off:'Still',rock:'Rock in an arc',tip:'Backward fall',flex:'Flex',bounce:'Bounce',launch:'Launch'});
+  const wordRuleMotions=Object.freeze({off:'Still',rock:'Rock in an arc',float:'Levitate',tip:'Backward fall',flex:'Flex',bounce:'Bounce',launch:'Launch'});
   const wordRuleEffects=Object.freeze({rays:'Sun rays',sunglasses:'Lifting sunglasses',fire:'Fire texture',bills:'Flying dollar bills',champagne:'Champagne pop',glow:'Glow',echo:'Echo',glitch:'Glitch',groove:'Groove',shake:'Shake',pulse:'Pulse'});
   const starter=(words,motion,...effects)=>words.split('|').map(word=>({word,motion,effects}));
   const defaultWordRules=Object.freeze([
-    ...starter('baby','rock'),...starter('bright|shine|sunshine','off','rays'),...starter('cool','off','sunglasses'),
+    ...starter('baby','rock'),...starter('air|flow','float'),...starter('bright|shine|sunshine','off','rays'),...starter('cool','off','sunglasses'),
     ...starter('fire|burn|burning|flame|flames|reignite','off','fire'),...starter('lay down|fall|falling|fell','tip'),
     ...starter('money|cash','off','bills'),...starter('champagne','off','champagne'),
     ...starter('glow|glowing','off','glow'),...starter('echo|echoes','off','echo'),...starter('dance|dancing','flex'),...starter('jump|bounce','bounce')
@@ -134,10 +134,13 @@
     const out={kind:'off',x:0,y:0,turn:0,tip:0,flex:0,phase:0,scaleX:1,scaleY:1};
     if(!cue||now<cue.startMs||reduced||authored||kind==='off')return out;
     if(kind==='mix'){let hash=0;for(const ch of cue.wordId)hash=(hash*31+ch.charCodeAt(0))>>>0;kind=dances[hash%4];}
-    if(!dances.includes(kind)&&kind!=='rock')return out;
+    if(!dances.includes(kind)&&!['rock','float'].includes(kind))return out;
     const u=clamp((now-cue.startMs)/Math.max(1,cue.endMs-cue.startMs)),t=u*4.2;
     const smooth=x=>{x=clamp(x);return x*x*(3-2*x);};out.kind=kind;
-    if(kind==='rock'){
+    if(kind==='float'){
+      const elapsed=now-cue.startMs,duration=Math.max(1,cue.endMs-cue.startMs),edge=Math.min(280,duration*.22),envelope=smooth(Math.min(elapsed,cue.endMs-now)/edge),phase=elapsed/2400*Math.PI*2;
+      out.x=.16*Math.sin(phase*.75)*envelope;out.y=-(.26+.07*Math.sin(phase))*envelope;out.turn=1.4*Math.sin(phase*.65)*envelope;
+    }else if(kind==='rock'){
       const elapsed=now-cue.startMs,envelope=smooth(Math.min(elapsed,cue.endMs-now)/180),angle=Math.sin(elapsed/1600*Math.PI*2)*18*envelope;
       out.turn=angle;out.x=.9*Math.sin(angle*Math.PI/180);out.y=.9*(Math.cos(angle*Math.PI/180)-1);
     }else if(kind==='tip'){

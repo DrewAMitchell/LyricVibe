@@ -9,7 +9,7 @@
   const DISPLAY_CATALOG = Object.freeze({
     version: 'lyricvibe.display.v1',
     looks: Object.freeze(['samay','flow','fire','neon','glass','hype','soft','clean','retro','elegant','aurora','matrix','vinyl','cosmic']),
-    motions: Object.freeze(['off','mix','tip','flex','bounce','launch','rock']),
+    motions: Object.freeze(['off','mix','tip','flex','bounce','launch','rock','float']),
     wordArt: Object.freeze(['off','rays','sunglasses','fire','bills','champagne']),
     wordEffects: Object.freeze(['shake','tilt','pulse','bounce','glow','groove','echo','glitch']),
     beatEffects: Object.freeze(['pulse','breath','color','bounce','glow','groove','echo','glitch']),
