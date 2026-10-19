@@ -358,7 +358,6 @@
     button.onclick=async()=>{try{const result=await chrome.runtime.sendMessage({type:'LV_SONG_LIBRARY_OPEN'});if(!result?.ok)throw Error(result?.error?.message||'Songs could not open.');}catch(error){setHud(error.message,true,true);}};
     root.querySelector('.lvx-sidebar-items').append(button);
   }
-  installSongLibrary();
   function applyBackgroundStage(value){
     if(!value||typeof value.enabled!=='boolean'||!Number.isInteger(value.revision)||value.revision<backgroundStage.revision)return;
     backgroundStage.enabled=value.enabled;backgroundStage.revision=value.revision;
@@ -3670,6 +3669,7 @@
   });
   stage.addEventListener('click',event=>{if(!stageEdit.active||stageEditBusy()||stageEdit.fieldsDirty)return;const word=event.target.closest('[data-word]'),phrase=event.target.closest('[data-phrase]');if(!word||!phrase)return;stageEdit.phraseId=phrase.dataset.phrase;refreshStageEdit(true);stageEdit.wordId=word.dataset.word;refreshStageEdit();stageControl('look').closest('details').open=true;});
   root.append(viewport, preview, progress, sidebar, themePicker, shortcutsPanel, syncPanel, errorPanel,controlsNotice,stagePanel,transcriptDialog);
+  installSongLibrary();
   buildEffectsWorkspace();
   function mountRoot() {
     const surface = document.fullscreenElement;
