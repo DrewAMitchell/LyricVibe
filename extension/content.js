@@ -353,9 +353,10 @@
   const timingBeatView=sidebarView('timing-beat','Beat','Timing · set tempo and sections',()=>void openTimingView('beat'));
   const stageEditView=sidebarView('stage-edit','Stage Edit','Open Stage Edit for this video',()=>void openStageEdit().then(syncSidebarState));
   function installSongLibrary(){
-    if(exportHost||root.querySelector('[data-sidebar-view=songs]'))return;
-    const button=sidebarView('songs','Songs ↗','Open your song library · search, sort and see timing completeness',async()=>{try{const result=await chrome.runtime.sendMessage({type:'LV_SONG_LIBRARY_OPEN'});if(!result?.ok)throw Error(result?.error?.message||'Songs could not open.');}catch(error){setHud(error.message,true,true);}});
-    button.setAttribute('aria-label','Open song library');
+    if(globalThis.__lyricVibeExportHost?.version===1||root.querySelector('[data-sidebar-view=songs]'))return;
+    const button=document.createElement('button');button.type='button';button.dataset.sidebarView='songs';button.textContent='Songs ↗';button.title='Open your song library · search, sort and see timing completeness';button.setAttribute('aria-label','Open song library');
+    button.onclick=async()=>{try{const result=await chrome.runtime.sendMessage({type:'LV_SONG_LIBRARY_OPEN'});if(!result?.ok)throw Error(result?.error?.message||'Songs could not open.');}catch(error){setHud(error.message,true,true);}};
+    root.querySelector('.lvx-sidebar-items').append(button);
   }
   installSongLibrary();
   function applyBackgroundStage(value){
