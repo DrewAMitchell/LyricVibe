@@ -1,4 +1,5 @@
 (function initLyricVibeOverlay() {
+  const exportHost=globalThis.__lyricVibeExportHost?.version===1?globalThis.__lyricVibeExportHost:null;
   /* ══════════════════════════════════════
      CONSTANTS & CONFIG
      ══════════════════════════════════════ */
@@ -678,11 +679,25 @@
     const labels=document.createElement('label');labels.innerHTML='Part names · this song <select aria-label="Backing part names"><option value="hidden">Hidden</option><option value="header">Header</option><option value="prefix">Prefix</option></select>';const labelSelect=labels.querySelector('select');labelSelect.value=backingLabelMode();labelSelect.disabled=!backingLabelKey();labelSelect.onchange=()=>setBackingLabel(labelSelect.value);backing.insertBefore(labels,backing.querySelector('p'));
     backingSpace.onchange=()=>setBackingDisplay({...backingDisplay,space:backingSpace.value});backingArea.oninput=()=>{backingValue.textContent=backingArea.value+'%';setBackingDisplay({...backingDisplay,area:Number(backingArea.value)/100});};
     if(choreography.mode==='vinyl'){for(const input of backing.querySelectorAll('input,select'))input.disabled=true;backing.querySelector('p').textContent='Vinyl drops each backing phrase as one (parenthesized block) onto the same record.';}
-    panels.stage.append(performanceControls,backing,settings,exits);
+    panels.stage.append(performanceControls,backing,settings,exits,buildOverlayExportControls());
     const footer=document.createElement('footer');footer.className='lvx-studio-footer';const current=document.createElement('span');current.className='lvx-studio-current';current.textContent=THEME_LABELS[state.theme]+' · applied';footer.append(current,play,bloomLabel);
     themePicker.replaceChildren(heading,tabs,sample,...Object.values(panels),footer);
     function show(){for(const [id,panel]of Object.entries(panels)){panel.hidden=id!==studio.view;const tab=tabs.querySelector(`[data-studio-tab="${id}"]`);tab.setAttribute('aria-selected',String(!panel.hidden));tab.tabIndex=panel.hidden?-1:0;}sample.hidden=studio.view==='stage';previewTheme=studio.view==='motion'?state.theme:previewTheme;renderStylePreview();}
     show();
+  }
+  function buildOverlayPackage(clip){
+    if(timing.busy||timing.dirty||transcript.dirty||tapping.splitDirty||stageEdit.fieldsDirty||tapPending()||effectPending()||countIn.active||countIn.preparing)throw Error('Apply or finish the current edit or recording before exporting.');
+    const score=timing.draft?.score||state.score;if(!score)throw Error('Load this song’s lyrics before exporting.');
+    if(!exportHost&&LvScore.mediaKey(score.source)!==LvScore.mediaKey({url:location.href}))throw Error('Return to this score’s song before exporting.');
+    const key=LvScore.mediaKey(score.source),display={theme:state.theme,fontScale:state.fontScale||1,liteMode:!!state.liteMode,choreography:{...choreography},placement:{...placement},wordSet:LvChoreography.wordSetFor(wordRuleSets,score.source),backingDisplay:{...backingDisplay},backingLabel:backingLabelMode(),linger:{...linger},bloom:bloomEnabled,tempoMap:tempo.mediaKey===key?tempo.map:null};
+    return LvOverlayExport.create(score,display,clip,{view:timing.draft?'preview':'saved'});
+  }
+  function buildOverlayExportControls(){
+    const panel=document.createElement('details');panel.className='lvx-overlay-export';panel.innerHTML='<summary>Transparent export <span>Take the performance elsewhere</span></summary><p>Save this score and its current look as an overlay package. The local exporter turns it into a transparent movie, without recording this tab. Source video and audio are not included.</p><div class="lvx-overlay-export-fields"><label>From · seconds<input data-overlay-export="start" type="number" min="0" step="0.001"></label><label>To · seconds<input data-overlay-export="end" type="number" min="0" step="0.001"></label><label>Frame size<select data-overlay-export="size"><option value="1280x720">1280 × 720</option><option value="1920x1080">1920 × 1080</option><option value="1080x1920">1080 × 1920 · portrait</option></select></label><label>Frames / second<select data-overlay-export="fps"><option>30</option><option>60</option><option>24</option><option>25</option><option>50</option></select></label></div><button type="button" data-overlay-export-download>Download overlay package</button><p data-overlay-export-status role="status">Render it with the “LyricVibe: render transparent overlay” launch command.</p>';
+    const score=timing.draft?.score||state.score,now=getMediaTimeMs(),phrase=score?.phrases.find(p=>now>=p.startMs+score.offsetMs&&now<p.endMs+score.offsetMs)||score?.phrases.find(p=>p.endMs+score.offsetMs>now)||score?.phrases[0],from=Math.max(0,phrase?phrase.startMs+score.offsetMs:now),to=Math.max(from+1,phrase?phrase.endMs+score.offsetMs:from+1000);
+    const field=name=>panel.querySelector('[data-overlay-export="'+name+'"]');field('start').value=String(from/1000);field('end').value=String(to/1000);
+    panel.querySelector('button').disabled=!score;panel.querySelector('button').onclick=()=>{const status=panel.querySelector('[data-overlay-export-status]');try{if(!field('start').value.trim()||!field('end').value.trim())throw Error('Enter both clip times.');const [width,height]=field('size').value.split('x').map(Number),packet=buildOverlayPackage({startMs:Math.round(Number(field('start').value)*1000),endMs:Math.round(Number(field('end').value)*1000),width,height,fps:Number(field('fps').value)}),url=URL.createObjectURL(new Blob([JSON.stringify(packet,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='lyricvibe-'+(packet.score.source.videoId||'song')+'-overlay.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status.textContent='Overlay package downloaded · includes '+packet.view+' score and this look. Use the local transparent-overlay launch command to render.';}catch(error){status.textContent=error.message;}};
+    return panel;
   }
   function toggleThemePicker(force) {
     const open = force ?? themePicker.hidden;
@@ -1177,7 +1192,7 @@
   }
 
   const tempo={mediaKey:null,taps:[],estimate:null,map:null,history:[],revision:0,sessionStartMs:null,write:Promise.resolve(),openAfterSetup:false};
-  const tempoSourceKey=()=>LvScore.mediaKey({url:location.href});
+  const tempoSourceKey=()=>exportHost?LvScore.mediaKey(exportHost.packet.score.source):LvScore.mediaKey({url:location.href});
   const hasBaselineTempo=()=>Boolean(tempo.map&&tempo.mediaKey===tempoSourceKey());
   function refreshTempoGate(){
     const required=Boolean(!stageEdit?.active&&tempoSourceKey()&&tempo.mediaKey===tempoSourceKey()&&!tempo.map);
@@ -3636,6 +3651,7 @@
     hide: teardown,
     observation: Object.freeze({status:()=>trackWatch?.status()}),
     hints: getPageHints,
+    overlayExport:Object.freeze({create:buildOverlayPackage}),
     placement:Object.freeze({getState:()=>({...placement}),getSettings:()=>({mediaKey:placementMediaKey,custom:!!songPlacement,global:{...globalPlacement},area:{...placement}}),set:value=>applyPlacement(value,true),useGlobal:useGlobalPlacement,makeGlobal:makeGlobalPlacement,load:loadPlacement,saved:()=>placementWrites}),
     choreography:Object.freeze({getState:()=>({...choreography}),set:value=>setChoreography({...choreography,...value}),inspect:()=>{const score=timing.draft&&timing.view==='proposed'?timing.draft.score:state.score;return score&&typeof LvChoreography!=='undefined'?expressionCues(score):{};}}),
     wordRules:Object.freeze({getState:()=>structuredClone(wordRules),set:setWordRules}),
@@ -3655,7 +3671,7 @@
   setHud('Ready. Play music, then click LyricVibe.', false, true);
 
   /* Load saved preferences (theme, font scale, lite mode) */
-  try {
+  if(!exportHost)try {
     chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement','lvxBloomEnabled','lvxChoreography','lvxLinger','lvxRecordOtherParts','lvxBackingDisplay','lvxBackingLabels','lvxControlPlacement','lvxCaptureLeadInMs','lvxWordRules','lvxWordRuleSets'], (result) => {
       try{if(result?.lvxWordRuleSets){wordRuleSets=LvChoreography.validateWordRuleSets(result.lvxWordRuleSets);wordRules=wordRuleSets.sets.find(s=>s.id===wordRuleSets.activeId).rules;}else if(Array.isArray(result?.lvxWordRules)){wordRules=LvChoreography.validateWordRules(result.lvxWordRules);wordRuleSets={version:1,activeId:'default',sets:[{id:'default',name:'Default',rules:wordRules}]};}}catch(error){setHud('Saved word sets need review: '+error.message,true,true);}
       if(!captureLeadInEdited&&Number.isFinite(result?.lvxCaptureLeadInMs)){captureLeadInMs=clamp(result.lvxCaptureLeadInMs,0,30000);refreshLeadInControls();}
@@ -3688,9 +3704,7 @@
 
   /* Universal track-change observer: auto-refresh when song changes
      on ANY supported platform (YouTube Music, SoundCloud, Spotify, etc.) */
-  trackWatch = setupTrackChangeObserver();
-  trackWatch.sync();
-  installBackgroundStage();
+  if(!exportHost){trackWatch = setupTrackChangeObserver();trackWatch.sync();installBackgroundStage();}
 
   /* ══════════════════════════════════════
      MESSAGE LISTENER
@@ -6510,6 +6524,17 @@
 
   function words(text) {
     return cleanText(text).split(/\s+/).filter(Boolean);
+  }
+
+  if(exportHost){
+    const packet=LvOverlayExport.validate(exportHost.packet),d=packet.display;
+    state.score=structuredClone(packet.score);state.active=true;state.isSpotify=false;state.fontScale=d.fontScale;state.liteMode=d.liteMode;timing.view='saved';timing.draft=null;syncPanel.hidden=true;themePicker.hidden=true;stageEdit.active=false;
+    root.classList.add('lvx-active','lvx-export');root.classList.toggle('lvx-lite',d.liteMode);root.classList.remove('lvx-sync-open','lvx-stage-editing');
+    wordRuleSets=LvChoreography.validateWordRuleSets({version:1,activeId:d.wordSet.id,sets:[d.wordSet]});wordRules=wordRuleSets.sets[0].rules;backingDisplay=LvChoreography.backingSettings(d.backingDisplay);backingLabels={[packet.mediaKey]:d.backingLabel};linger=LvBeatTrack.lingerSettings(d.linger);bloomEnabled=d.bloom;tempo.mediaKey=packet.mediaKey;tempo.map=d.tempoMap;
+    choreography={...d.choreography};applyTheme(d.theme);applyPlacement(d.placement);stage.style.setProperty('--lvx-font-scale',String(d.fontScale));
+    const starts=new Map();for(const p of state.score.phrases){starts.set(p.id,p.startMs+state.score.offsetMs);for(const w of p.words){starts.set(w.id,w.startMs+state.score.offsetMs);for(const s of w.syllables||[])starts.set(s.id,s.startMs+state.score.offsetMs);}}
+    exportHost.renderAt=sourceMs=>{if(!Number.isFinite(sourceMs)||sourceMs<0)throw Error('Invalid export frame time');exportHost.sourceMs=sourceMs;refreshBeatPulse(sourceMs);renderScore(sourceMs);for(const animation of document.getAnimations()){const node=animation.effect?.target,unit=node?.closest?.('[data-syllable],[data-word],[data-phrase]'),id=unit?.dataset.syllable||unit?.dataset.word||unit?.dataset.phrase;animation.pause();animation.currentTime=sourceMs-(starts.get(id)||0);}return {sourceMs,phrases:[...stage.querySelectorAll('[data-phrase]')].map(n=>n.dataset.phrase),layout:choreography.mode};};
+    exportHost.ready=true;
   }
 
   function clamp(value, min, max) {

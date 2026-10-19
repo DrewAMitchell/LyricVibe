@@ -1,0 +1,9 @@
+/* Transparent output: retain lyric artwork, remove host surfaces and authoring UI. */
+html,body{margin:0!important;width:100%;height:100%;overflow:hidden!important;background:transparent!important}
+body>*,#lvx-root>:not(.lvx-viewport){display:none!important}
+#lvx-root{display:block!important;background:transparent!important}
+#lvx-root .lvx-viewport{inset:0!important;background:transparent!important}
+#lvx-root.lvx-export .lvx-stage{background:transparent!important;backdrop-filter:none!important;opacity:1!important;transition:none!important}
+#lvx-root.lvx-export .lvx-stage::before,#lvx-root.lvx-export .lvx-stage::after{display:none!important}
+#lvx-root .lvx-placement-bounds,#lvx-root .lvx-stage-edit-surface,#lvx-root .lvx-count-in-stage{display:none!important}
+#lvx-root *,#lvx-root *::before,#lvx-root *::after{transition:none!important;caret-color:transparent!important}
