@@ -255,3 +255,19 @@ test('air and flow levitate gently from source time and remain editable with man
  assert.equal(c.danceAt(cue,2000,{kind:'float',reduced:true}).kind,'off');assert.equal(c.danceAt(cue,2000,{kind:'float',authored:true}).kind,'off');
  const edited=core.applyOperation(score,{type:'setWordAppearance',wordId:words[2].id,appearance:{motion:'float'}},score.revision);assert.equal(edited.phrases[0].words[2].appearance.motion,'float');assert.deepEqual(score.phrases[0].words[2],words[2]);
 });
+
+
+test('Coin spin completes one eased turn on the source interval and replay, with still reduced motion',()=>{
+ const C=require('../extension/choreography.js'),B=require('../extension/beat-track.js');
+ const cue={startMs:1000,endMs:3000,sustained:[]},options={effects:[{type:'spin',strength:.6}]};
+ assert.equal(C.expressionAt(cue,1100,options).spin,0);
+ assert.equal(C.expressionAt(cue,2000,options).spin,180);
+ assert.equal(C.expressionAt(cue,2900,options).spin,360);
+ assert.equal(C.expressionAt(cue,3000,options).spin,0);
+ assert.equal(C.expressionAt(cue,2000,{...options,reduced:true}).spin,0);
+ assert.equal(C.expressionAt(cue,2000,{effects:[{type:'spin',strength:0}]}).spin,0);
+ const a=C.expressionAt(cue,1600,options);C.expressionAt(cue,2800,options);assert.deepEqual(C.expressionAt(cue,1600,options),a);
+ const beat={beat:3,durationBeats:4,effect:'spin',strength:.6};
+ assert.equal(B.cueAt(beat,null,0,false,5).spin,180);assert.equal(B.cueAt(beat,null,0,true,5).spin,undefined);assert.equal(B.cueAt(beat,null,0,false,7),null);
+ assert.equal(C.expressionAt({...cue,rule:{word:'coin',effects:['spin']}},2000).spin,180);
+});

@@ -7,7 +7,7 @@
   const token=text=>String(text).toLowerCase().replace(/[^a-z']/g,'');
   const lightWords=new Set(['a','an','the','and','or','of','to','in','it','is','as','at','on','for']);
   const wordRuleMotions=Object.freeze({off:'Still',rock:'Rock in an arc',float:'Levitate',tip:'Backward fall',flex:'Flex',bounce:'Bounce',launch:'Launch'});
-  const wordRuleEffects=Object.freeze({rays:'Sun rays',sunglasses:'Lifting sunglasses',fire:'Fire texture',bills:'Flying dollar bills',champagne:'Champagne pop',disco:'Disco ball & lights',glow:'Glow',echo:'Echo',glitch:'Glitch',groove:'Groove',shake:'Shake',pulse:'Pulse'});
+  const wordRuleEffects=Object.freeze({rays:'Sun rays',sunglasses:'Lifting sunglasses',fire:'Fire texture',bills:'Flying dollar bills',champagne:'Champagne pop',disco:'Disco ball & lights',glow:'Glow',echo:'Echo',glitch:'Glitch',spin:'Coin spin',groove:'Groove',shake:'Shake',pulse:'Pulse'});
   const starter=(words,motion,...effects)=>words.split('|').map(word=>({word,motion,effects}));
   const defaultWordRules=Object.freeze([
     ...starter('baby','rock'),...starter('air|flow|levitate','float'),...starter('bright|shine|sunshine','off','rays'),...starter('cool','off','sunglasses'),
@@ -95,15 +95,18 @@
     }
     return '';
   }
+  // One eased full turn, held face-on at either end; source clock owns replay.
+  function coinSpin(progress){const u=clamp((progress-.1)/.8);return 360*u*u*(3-2*u);}
   // Geometry, expression, and authored beat accents use separate transform layers.
   function expressionAt(cue,now,{mode='classic',reduced=false,effects=[],automatic=true}={}){
-    const out={x:0,y:0,turn:0,scale:1,color:null,brightness:1,wave:0,wavePhase:0,reason:''};
+    const out={x:0,y:0,turn:0,scale:1,color:null,brightness:1,wave:0,wavePhase:0,spin:0,reason:''};
     if(!cue||now<cue.startMs||now>=cue.endMs)return out;
     const elapsed=now-cue.startMs,t=elapsed/1000,duration=cue.endMs-cue.startMs;
     const envelope=Math.min(1,elapsed/90,(cue.endMs-now)/100),intensity=mode==='puzzle'?1:mode==='fall'?.72:.55;
     if(effects.length){
       out.reason='authored';
       for(const effect of effects){const strength=Math.max(0,Math.min(1,effect.strength??.3));
+        if(!reduced&&effect.type==='spin'&&strength>0)out.spin=coinSpin(elapsed/Math.max(1,duration));
         if(!reduced&&effect.type==='groove'){out.wave=.16*strength*envelope;out.wavePhase=t*Math.PI*2/1.2;out.waveAxis=effect.axis||'vertical';}
         if(['echo','glitch'].includes(effect.type))out.shadow=accentShadow(effect.type,t,strength*envelope,reduced);
         if(effect.type==='glow')out.brightness=1+strength*(reduced?.2:.5*envelope);
@@ -397,5 +400,5 @@
     const particles=(count,smoke)=>Array.from({length:count},(_,i)=>{const seed=i+(smoke?47:11),period=(smoke?3100:1700)+hash(seed,3)*1900,age=((time+hash(seed,9)*period)%period)/period;return {x:(hash(seed,4)-.5)*2.5+Math.sin(age*4+seed)*.13,y:(smoke?.15:.55)-age*(smoke?.65:.95),alpha:(smoke?.12:.8)*Math.sin(Math.PI*age),size:smoke?.06+.07*age:.025};});
     return {width,height,time,palette:firePalettes[color]||firePalettes.ember,pixels,embers:reduced?[]:particles(4,false),smoke:reduced?[]:particles(3,true)};
   }
-  const api={stagePerformanceAt,layoutOrigins,landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,validateWordRuleSets,wordRuleAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
+  const api={coinSpin,stagePerformanceAt,layoutOrigins,landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,validateWordRuleSets,wordRuleAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

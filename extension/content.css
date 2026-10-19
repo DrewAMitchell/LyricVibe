@@ -2512,7 +2512,7 @@
 #lvx-root .lvx-choreography-stage{padding:16px;gap:12px;overflow:hidden}
 #lvx-root .lvx-choreography-stage .lvx-score-phrase{flex-shrink:0;text-wrap:nowrap}
 #lvx-root .lvx-choreography-stage .lvx-score-word{white-space:nowrap;transform-origin:center;transition:none}
-#lvx-root .lvx-expression{animation:none!important;transform-origin:center;filter:brightness(calc(var(--lvx-beat-bright,1) * var(--lvx-expression-bright,1))) hue-rotate(var(--lvx-beat-hue,0deg))}
+#lvx-root .lvx-expression{--lvx-beat-spin:0deg;animation:none!important;transform-origin:center;filter:brightness(calc(var(--lvx-beat-bright,1) * var(--lvx-expression-bright,1))) hue-rotate(var(--lvx-beat-hue,0deg))}
 #lvx-root .lvx-expression[data-expression-color]{color:var(--lvx-expression-color)}
 #lvx-root .lvx-expression[data-expression-color]>.lvx-score-syllable:not([data-authored-expression="true"]):not([data-expression-color]):not(.lvx-beat-target){color:inherit}
 #lvx-root .lvx-motion-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px;font:12px system-ui,sans-serif;color:#e1e9ee}
