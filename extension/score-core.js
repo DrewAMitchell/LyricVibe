@@ -873,9 +873,24 @@
       const phrases=score.phrases.filter(p=>p.laneId===lane.id&&p.words.some(w=>!w.excluded)).map(p=>({id:p.id,startMs:p.startMs,...phraseTimingCoverage(p)})).sort((a,b)=>a.startMs-b.startMs);
       return {...lane,phrases,modes:Object.fromEntries(['phrase','word','syllable'].map(mode=>{
         const done=phrases.filter(p=>p[mode].status==='complete').length,total=phrases.length;
-        return [mode,{done,total,status:!total?'empty':done===total?'complete':phrases.some(p=>p[mode].done>0)?'partial':'unstarted'}];
+        const unitDone=phrases.reduce((n,p)=>n+p[mode].done,0),unitTotal=phrases.reduce((n,p)=>n+p[mode].total,0);
+        const words=score.phrases.filter(p=>p.laneId===lane.id).flatMap(p=>p.words).filter(w=>!w.excluded);
+        // Syllable counts are unknown until a word is split. Give each listed word
+        // equal weight, with fractional credit for its explicitly timed children.
+        const credit=mode==='phrase'?phrases.reduce((n,p)=>n+p.phrase.done/p.phrase.total,0):mode==='word'?unitDone:words.reduce((n,w)=>n+(w.syllables?.length?w.syllables.filter(s=>s.provenance==='manual'&&s.locked&&s.endMs>s.startMs).length/w.syllables.length:0),0);
+        const possible=mode==='phrase'?total:words.length,ratio=possible?credit/possible:0;
+        const missingSplits=mode==='syllable'?words.filter(w=>!w.syllables?.length).length:0;
+        return [mode,{done,total,unitDone,unitTotal,credit,possible,missingSplits,percent:!total?null:done===total?100:Math.min(99,Math.round(ratio*100)),status:!total?'empty':done===total?'complete':unitDone?'partial':'unstarted'}];
       }))};
     });
   }
-  return { VERSION, DISPLAY_CATALOG, validEmoji, stageRegionAt, resolveStageRegionRect, ScoreError, mediaKey, parseLrc, parseVocalText, doubledText, displayToken, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, phraseTimingCoverage, timingCoverage };
+  function timingCompleteness(score) {
+    const lanes=timingCoverage(score),modes=['phrase','word','syllable'].map(mode=>{
+      const credit=lanes.reduce((n,l)=>n+l.modes[mode].credit,0),possible=lanes.reduce((n,l)=>n+l.modes[mode].possible,0);
+      return {credit,possible,ratio:possible?credit/possible:0};
+    });
+    const hasLyrics=modes.some(m=>m.possible),complete=hasLyrics&&lanes.every(l=>Object.values(l.modes).every(m=>m.status==='complete'||m.status==='empty'));
+    return {lanes,percent:!hasLyrics?null:complete?100:Math.min(99,Math.round(modes.reduce((n,m)=>n+m.ratio,0)/3*100))};
+  }
+  return { VERSION, DISPLAY_CATALOG, validEmoji, stageRegionAt, resolveStageRegionRect, ScoreError, mediaKey, parseLrc, parseVocalText, doubledText, displayToken, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, phraseTimingCoverage, timingCoverage, timingCompleteness };
 });

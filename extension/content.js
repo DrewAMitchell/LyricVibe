@@ -5092,23 +5092,33 @@
   function refreshCompletion(){
     const panel=syncPanel.querySelector('.lvx-completion');if(!panel)return;
     const score=timing.draft?.score||state.score;panel.hidden=!score;if(!score)return;
-    const allLanes=LvScore.timingCoverage(score),lanes=allLanes.filter(l=>l.phrases.length||!allLanes.some(other=>other.role===l.role&&other.phrases.length)),saved=state.score?LvScore.timingCoverage(state.score):[],mode=syncButton('tap-mode').value,blocked=completionBlockReason(),buffered=takePhraseIds().size;
+    const completeness=LvScore.timingCompleteness(score),allLanes=completeness.lanes,lanes=allLanes.filter(l=>l.phrases.length||!allLanes.some(other=>other.role===l.role&&other.phrases.length)),saved=state.score?LvScore.timingCoverage(state.score):[],mode=syncButton('tap-mode').value,blocked=completionBlockReason(),buffered=takePhraseIds().size;
     if(!lanes.some(l=>l.role==='backing'))lanes.push({id:'',role:'backing',label:'Backing',modes:Object.fromEntries(['phrase','word','syllable'].map(m=>[m,{done:0,total:0,status:'empty'}]))});
     const signature=JSON.stringify([lanes.map(l=>[l.id,l.label,l.modes]),saved.map(l=>l.modes),mode,blocked,buffered,Boolean(timing.draft)]);if(panel.dataset.signature===signature)return;panel.dataset.signature=signature;
     panel.replaceChildren();const heading=document.createElement('div');heading.className='lvx-completion-heading';
-    const title=document.createElement('strong');title.textContent='Track completion';const basis=document.createElement('small');basis.textContent=timing.draft?'Preview · unsaved':'Saved';heading.append(title,basis);panel.append(heading);
+    const title=document.createElement('strong');title.textContent='Timing completeness';const basis=document.createElement('small');basis.textContent=timing.draft?'Preview · unsaved':'Saved';heading.append(title,basis);panel.append(heading);
+    const summary=document.createElement('div');summary.className='lvx-completion-summary';
+    const value=document.createElement('strong');value.textContent=completeness.percent===null?'No lyrics':completeness.percent+'%';value.dataset.completenessPercent=String(completeness.percent);
+    const meter=document.createElement('progress');meter.max=100;meter.value=completeness.percent||0;meter.setAttribute('aria-label','Overall timing completeness');
+    summary.dataset.level=completeness.percent===100?'complete':completeness.percent>=67?'advanced':completeness.percent>0?'partial':'empty';
+    summary.title='Equal weight for phrase, word and syllable coverage across listed lyrics. Partial phrases and partially timed syllables earn proportional credit. Missing lyrics cannot be measured; this is not an accuracy or review score.';summary.append(value,meter);panel.append(summary);
     const grid=document.createElement('div');grid.className='lvx-completion-grid';const blank=document.createElement('span');grid.append(blank);
     for(const label of ['Phrases','Words','Syllables']){const h=document.createElement('small');h.textContent=label;grid.append(h);}
     for(const lane of lanes){
       const label=document.createElement('strong');label.textContent=lane.label||(lane.role==='lead'?'Main':'Backing');label.title=lane.label||label.textContent;grid.append(label);
       for(const unit of ['phrase','word','syllable']){const c=lane.modes[unit],button=document.createElement('button'),status={empty:'No lyrics',unstarted:'Not started',partial:'Partial',complete:'Complete'}[c.status];
         button.type='button';button.dataset.completionLane=lane.id;button.dataset.completionMode=unit;button.dataset.status=c.status;button.dataset.current=String(unit===mode);
-        const stateText=document.createElement('span');stateText.textContent=status;const count=document.createElement('small');count.textContent=c.total?`${c.done}/${c.total}${c.status==='complete'?' ✓':' →'}`:'—';button.append(stateText,count);
-        const s=saved.find(l=>l.id===lane.id)?.modes[unit];button.title=`${label.textContent} ${unit} timing: ${c.done} of ${c.total} phrases complete.${s?` Saved: ${s.done}/${s.total}.`:''} ${blocked|| (c.status==='complete'?'All phrases complete.':'Jump to the next unfinished phrase.')}`;
+        const stateText=document.createElement('span');stateText.textContent=c.total?`${c.percent}%`:status;
+        const bar=document.createElement('progress');bar.max=100;bar.value=c.percent||0;bar.setAttribute('aria-label',`${label.textContent} ${unit} completeness`);
+        const count=document.createElement('small');count.textContent=!c.total?'—':unit==='phrase'?`${c.done}/${c.total} phrases`:unit==='word'?`${c.unitDone}/${c.unitTotal} words`:`${c.unitDone}/${c.unitTotal-c.missingSplits} syllables`;
+        button.append(stateText,bar,count);
+        if(c.missingSplits){const missing=document.createElement('small');missing.className='lvx-completion-missing';missing.textContent=`${c.missingSplits} word${c.missingSplits===1?'':'s'} unsplit`;button.append(missing);}
+        const s=saved.find(l=>l.id===lane.id)?.modes[unit];button.title=`${label.textContent} ${unit} timing: ${status}${c.total?`, ${c.percent}%. ${c.done} of ${c.total} phrases complete.`:'.'}${unit==='syllable'&&c.total?' Each word has equal weight; unsplit words count as unfinished.':''}${s?.total?` Saved: ${s.percent}%.`:''} ${blocked|| (c.status==='complete'?'All listed phrases complete.':'Jump to the next unfinished phrase.')}`;
         button.setAttribute('aria-label',button.title);button.disabled=Boolean(blocked||c.status==='complete'||c.status==='empty');button.onclick=()=>jumpUnfinished(lane.id,unit);grid.append(button);
       }
     }
-    panel.append(grid);const hint=document.createElement('small');hint.className='lvx-completion-hint';hint.textContent=buffered?`${buffered} phrase${buffered===1?'':'s'} in recording · use in preview to count.`:blocked||'Completed phrases / total · click to find unfinished';panel.append(hint);
+    panel.append(grid);const hint=document.createElement('small');hint.className='lvx-completion-hint';hint.textContent=buffered?`${buffered} phrase${buffered===1?'':'s'} in recording · use in preview to count.`:blocked||'Click a percentage to find unfinished timing.';panel.append(hint);
+    const scope=document.createElement('small');scope.className='lvx-completion-hint';scope.textContent='Listed lyrics only · coverage, not accuracy. Missing lyrics are not scored.';panel.append(scope);
   }
   function jumpUnfinished(laneId,mode){
     const blocked=completionBlockReason();if(blocked){setSyncNotice(blocked);return;}
