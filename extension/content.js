@@ -5094,7 +5094,7 @@
   }
 
   function renderVinylScore(score,mediaMs,area){
-    stage.classList.add('lvx-score-stage','lvx-vinyl-stage');stage.classList.remove('lvx-choreography-stage');stage.style.paddingTop='0px';
+    stage.classList.add('lvx-score-stage');
     let canvas=stage.querySelector('.lvx-vinyl-canvas');
     if(!canvas){canvas=document.createElement('canvas');canvas.className='lvx-vinyl-canvas';canvas.setAttribute('role','img');canvas.setAttribute('aria-label','Vinyl lyric history: earlier words wind toward the center');stage.prepend(canvas);}
     const ctx=canvas.getContext('2d'),dpr=Math.min(2,devicePixelRatio||1),width=Math.max(1,area.width),height=Math.max(1,area.height),clock=mediaMs-score.offsetMs;Object.assign(canvas.style,{position:'absolute',left:area.x+'px',top:area.y+'px',width:width+'px',height:height+'px',margin:'0'});
@@ -5128,9 +5128,7 @@
   function renderScore(mediaMs) {
     if(trackWatch?.loading()&&trackWatch?.status().generation>0)return;
     refreshRecordingTransport();
-    stage.classList.remove('lvx-vinyl-stage');
     if ((countIn.previewTake||tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete')) && timing.draft && !syncPanel.hidden && !stageEdit.active) {clearStagePerformance();renderCaptureScore();return;}
-    stage.classList.add('lvx-choreography-stage');
     const score = syllableTakeScore() || (timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score);
     renderStagePerformance(score,mediaMs);
     const regionFrame=(score.stageRegions||[]).filter(r=>mediaMs>=r.startMs&&mediaMs<r.endMs);
@@ -5139,6 +5137,9 @@
     if(stage.dataset.regionLayout!==String(regionLayout)){stage.dataset.regionLayout=String(regionLayout);for(const key of ['left','top','width','height'])stage.style[key]=(regionLayout?({left:0,top:0,width:100,height:100})[key]:placement[key])+'%';state.scoreSignature='';}
     const isBacking=phrase=>score.lanes.find(l=>l.id===phrase.laneId)?.role==='backing';
     const useVinyl=choreography.mode==='vinyl'&&!regionLayout&&!stageEdit.active&&!score.phrases.some(p=>!isBacking(p)&&mediaMs-score.offsetMs>=p.startMs&&mediaMs-score.offsetMs<p.endMs&&p.words.some(w=>w.appearance));
+    if(stage.classList.contains('lvx-vinyl-stage')!==useVinyl)stage.classList.toggle('lvx-vinyl-stage',useVinyl);
+    if(stage.classList.contains('lvx-choreography-stage')===useVinyl)stage.classList.toggle('lvx-choreography-stage',!useVinyl);
+    const stagePadding=useVinyl?'0px':'16px';if(stage.style.paddingTop!==stagePadding)stage.style.paddingTop=stagePadding;
     if(beatDisplayCache.score!==score||beatDisplayCache.map!==tempo.map||beatDisplayCache.linger!==linger){const ends=LvBeatTrack.presentationEnds(score,tempo.map,linger);beatDisplayCache={score,map:tempo.map,linger,ends:ends.phrases,units:ends.units};}
     const active = LvScore.activeAt(score, mediaMs,{displayEnds:beatDisplayCache.ends});
     // Lead-in: an empty lane shows its next phrase dimmed up to 2s early, so a rewind is never a blank screen.
@@ -5201,8 +5202,6 @@
     const cues=typeof LvChoreography==='undefined'?{}:expressionCues(score);
     // Authoring outline only while editing, so you can see where to continue a take while scrubbing.
     const takeIds = syncPanel.hidden ? null : takePhraseIds();
-    const choreographyTop=16;
-    stage.style.paddingTop=choreographyTop+'px';
     for (const phrase of active.phrases) {
       const line = [...stage.children].find(el => el.dataset.phrase === phrase.id);
       if (!line) continue;
