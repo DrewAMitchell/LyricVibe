@@ -61,19 +61,41 @@
     return validateEmojiMap(groups);
   }
   function formatEmojiMap(groups){return validateEmojiMap(groups).map(group=>(group.emoji||'none')+' = ('+group.terms.map(term=>/[\s,"\\()]/u.test(term)?JSON.stringify(term):term).join(', ')+')').join('\n');}
+  // Frozen bases are shared by value; each song records replacements and removals.
+  function emojiMapDelta(base,map){
+    const before=new Map(validateEmojiMap(base).flatMap(g=>g.terms.map(t=>[t,g.emoji]))),after=new Map(validateEmojiMap(map).flatMap(g=>g.terms.map(t=>[t,g.emoji])));
+    return {remove:[...before.keys()].filter(t=>!after.has(t)),set:validateEmojiMap(map).map(g=>({...g,terms:g.terms.filter(t=>before.get(t)!==g.emoji)})).filter(g=>g.terms.length)};
+  }
+  function applyEmojiMapDelta(base,delta){
+    if(!delta||!Array.isArray(delta.remove)||delta.remove.length>2000||delta.remove.some(t=>typeof t!=='string'||ruleWord(t)!==t))throw Error('Invalid emoji map removals.');
+    const values=new Map(validateEmojiMap(base).flatMap(g=>g.terms.map(t=>[t,g.emoji])));
+    for(const term of delta.remove)values.delete(term);
+    for(const group of validateEmojiMap(delta.set))for(const term of group.terms)values.set(term,group.emoji);
+    const groups=new Map();for(const [term,emoji]of values){if(!groups.has(emoji))groups.set(emoji,[]);groups.get(emoji).push(term);}
+    return validateEmojiMap([...groups].map(([emoji,terms])=>({emoji,terms})));
+  }
+  function resolveWordSet(value,set){
+    if(!set.emojiMapBaseId)return set;
+    const {emojiMapBaseId,emojiMapDelta:delta,...rest}=set;
+    return {...rest,emojiMap:applyEmojiMapDelta(value.emojiMapBases[emojiMapBaseId],delta)};
+  }
   function validateWordRuleSets(value){
-    if(!value||value.version!==1||!Array.isArray(value.sets)||!value.sets.length||value.sets.length>20)throw Error('Keep between 1 and 20 word-effect sets.');
+    if(!value||value.version!==1||!Array.isArray(value.sets)||!value.sets.length||value.sets.length>2020||value.sets.filter(s=>!s.songKey).length>20||value.sets.filter(s=>s.songKey).length>2000)throw Error('Keep at most 20 shared presets and 2,000 song presets.');
+    const emojiMapBases={};if(value.emojiMapBases){if(typeof value.emojiMapBases!=='object'||Array.isArray(value.emojiMapBases))throw Error('Invalid emoji map bases.');for(const [id,map]of Object.entries(value.emojiMapBases)){if(!/^[a-f0-9]{64}$/.test(id))throw Error('Invalid frozen map identity.');emojiMapBases[id]=validateEmojiMap(map);}}
     const ids=new Set(),names=new Set();const sets=value.sets.map(set=>{
       const name=String(set.name||'').trim();if(!name||name.length>48||names.has(name.toLowerCase()))throw Error('Use a unique set name, up to 48 characters.');if(typeof set.id!=='string'||!/^[a-zA-Z0-9_-]{1,64}$/.test(set.id)||ids.has(set.id))throw Error('Invalid word-effect set identity.');ids.add(set.id);names.add(name.toLowerCase());
       for(const key of ['emojiTags','emojiDictionary'])if(set[key]!==undefined&&typeof set[key]!=='boolean')throw Error('Emoji settings must be on or off.');
       if(set.emojiHold!==undefined&&!['word','phrase'].includes(set.emojiHold))throw Error('Hold emojis for the word or until the phrase ends.');
-      return {id:set.id,name,rules:validateWordRules(set.rules),...(set.emojiTags!==undefined?{emojiTags:set.emojiTags}:{}),...(set.emojiHold!==undefined?{emojiHold:set.emojiHold}:{}),...(set.emojiDictionary!==undefined?{emojiDictionary:set.emojiDictionary}:{}),...(set.emojiMap!==undefined?{emojiMap:validateEmojiMap(set.emojiMap)}:{})};
+      if(set.songKey!==undefined&&!/^youtube:[A-Za-z0-9_-]{11}$/.test(set.songKey))throw Error('Invalid song preset identity.');
+      if(set.emojiMapBaseId){if(!emojiMapBases[set.emojiMapBaseId])throw Error('The frozen emoji map base is missing.');applyEmojiMapDelta(emojiMapBases[set.emojiMapBaseId],set.emojiMapDelta);}
+      return {id:set.id,name,...(set.songKey?{songKey:set.songKey}:{}),...(set.emojiMapBaseId?{emojiMapBaseId:set.emojiMapBaseId,emojiMapDelta:{remove:[...new Set(set.emojiMapDelta.remove)],set:validateEmojiMap(set.emojiMapDelta.set)}}:{}),rules:validateWordRules(set.rules),...(set.emojiTags!==undefined?{emojiTags:set.emojiTags}:{}),...(set.emojiHold!==undefined?{emojiHold:set.emojiHold}:{}),...(set.emojiDictionary!==undefined?{emojiDictionary:set.emojiDictionary}:{}),...(!set.emojiMapBaseId&&set.emojiMap!==undefined?{emojiMap:validateEmojiMap(set.emojiMap)}:{})};
     });
+    if(sets.some(s=>s.id===value.activeId&&s.songKey))throw Error('A song preset cannot be the shared default.');
     if(!ids.has(value.activeId))throw Error('Choose an existing default set.');
-    let songSets;if(value.songSets!==undefined){if(!value.songSets||typeof value.songSets!=='object'||Array.isArray(value.songSets)||Object.keys(value.songSets).length>2000)throw Error('Keep at most 2,000 song preset assignments.');songSets={};for(const [key,id]of Object.entries(value.songSets)){if(!/^youtube:[A-Za-z0-9_-]{11}$/.test(key)||!ids.has(id))throw Error('Song presets need an exact video and an existing set.');songSets[key]=id;}}
-    return {version:1,activeId:value.activeId,sets,...(songSets?{songSets}:{})};
+    let songSets;if(value.songSets!==undefined){if(!value.songSets||typeof value.songSets!=='object'||Array.isArray(value.songSets)||Object.keys(value.songSets).length>2000)throw Error('Keep at most 2,000 song preset assignments.');songSets={};for(const [key,id]of Object.entries(value.songSets)){if(!/^youtube:[A-Za-z0-9_-]{11}$/.test(key)||!ids.has(id))throw Error('Song presets need an exact video and an existing set.');if(sets.find(s=>s.id===id).songKey&&sets.find(s=>s.id===id).songKey!==key)throw Error('This preset belongs to another song.');songSets[key]=id;}}
+    return {version:1,activeId:value.activeId,sets,...(songSets?{songSets}:{}),...(Object.keys(emojiMapBases).length?{emojiMapBases}:{})};
   }
-  function wordSetFor(value,source){const key=typeof source==='string'?source:source?scoreApi.mediaKey(source):null;return value.sets.find(set=>set.id===(value.songSets?.[key]||value.activeId))||value.sets[0];}
+  function wordSetFor(value,source){const key=typeof source==='string'?source:source?scoreApi.mediaKey(source):null;return resolveWordSet(value,value.sets.find(set=>set.id===(value.songSets?.[key]||value.activeId))||value.sets[0]);}
   function phraseMatches(words,map){
     const matches=new Map(),ends=new Map();
     // Timed compound pieces keep the joiner on the preceding piece, just as
@@ -450,5 +472,5 @@
     const particles=(count,smoke)=>Array.from({length:count},(_,i)=>{const seed=i+(smoke?47:11),period=(smoke?3100:1700)+hash(seed,3)*1900,age=((time+hash(seed,9)*period)%period)/period;return {x:(hash(seed,4)-.5)*2.5+Math.sin(age*4+seed)*.13,y:(smoke?.15:.55)-age*(smoke?.65:.95),alpha:(smoke?.12:.8)*Math.sin(Math.PI*age),size:smoke?.06+.07*age:.025};});
     return {width,height,time,palette:firePalettes[color]||firePalettes.ember,pixels,embers:reduced?[]:particles(4,false),smoke:reduced?[]:particles(3,true)};
   }
-  const api={validateEmojiMap,parseEmojiMap,formatEmojiMap,wordSetFor,coinSpin,stagePerformanceAt,layoutOrigins,landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,validateWordRuleSets,wordRuleAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
+  const api={emojiMapDelta,applyEmojiMapDelta,resolveWordSet,validateEmojiMap,parseEmojiMap,formatEmojiMap,wordSetFor,coinSpin,stagePerformanceAt,layoutOrigins,landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,validateWordRuleSets,wordRuleAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);
