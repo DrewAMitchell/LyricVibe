@@ -2414,6 +2414,8 @@
    stays outside the clipped lyric region. These dimensions never depend on beats. */
 #lvx-root .lvx-viewport{position:absolute;inset:0;overflow:hidden;pointer-events:none}
 #lvx-root .lvx-viewport .lvx-stage{right:auto;bottom:auto;width:100%;height:100%;box-sizing:border-box}
+#lvx-root .lvx-viewport .lvx-stage{clip-path:inset(0)}
+#lvx-root .lvx-viewport .lvx-stage[data-region-layout=true]{clip-path:inset(var(--lvx-area-top,0%) var(--lvx-area-right,0%) var(--lvx-area-bottom,0%) var(--lvx-area-left,0%))}
 #lvx-root .lvx-placement-custom .lvx-score-stage{padding:12px;gap:12px}
 #lvx-root .lvx-score-phrase{font-size:min(calc(clamp(24px,5vw,80px) * var(--lvx-score-scale,1)),var(--lvx-max-font,128px))}
 #lvx-root .lvx-score-backing{font-size:min(calc(clamp(18px,2.5vw,38px) * var(--lvx-score-scale,1)),var(--lvx-max-font,128px))}
@@ -2422,6 +2424,7 @@
 #lvx-root .lvx-flow-line{font-size:min(var(--lvx-flow-base-size),var(--lvx-flow-fit-size),var(--lvx-max-font,128px))}
 #lvx-root .lvx-placement-bounds{position:absolute;inset:0;box-sizing:border-box;border:2px solid #81d7f5;z-index:2;pointer-events:auto;cursor:move;touch-action:none;background:transparent}
 #lvx-root .lvx-placement-bounds[hidden]{display:none!important}
+#lvx-root.lvx-adjusting-area .lvx-sidebar{display:none!important}
 #lvx-root .lvx-placement-bounds>span{position:absolute;top:0;left:0;padding:3px 6px;background:#10232c;color:#bceaff;font:11px/16px system-ui,sans-serif;white-space:nowrap}
 #lvx-root .lvx-bounds-resize{position:absolute;bottom:0;right:0;width:32px;height:32px;background:#10232c;color:#bceaff;border:0;font:24px system-ui,sans-serif;cursor:nwse-resize;touch-action:none}
 #lvx-root .lvx-placement-settings{margin-bottom:12px;color:#d7e4ea;font:12px/1.5 system-ui,sans-serif}
