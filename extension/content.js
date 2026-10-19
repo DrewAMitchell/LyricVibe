@@ -441,7 +441,11 @@
     if(studio.wordSetId&&!wordRuleSets.sets.some(set=>set.id===studio.wordSetId))throw Error('This preset was removed elsewhere. Reopen the editor before saving.');
     setWordRuleSets({...wordRuleSets,sets:wordRuleSets.sets.map(set=>set.id===editingWordSet().id?{...set,rules}:set)},remember);return wordRules;
   }
-  function emojiTagsEnabled(settings={}){return settings.emojiTags??Boolean(LvChoreography.wordSetFor(wordRuleSets,wordPresetKey()).emojiTags);}
+  function emojiTagsEnabled(settings={}){
+    // This flag is read for every visible word/frame; do not expand a map here.
+    const id=wordRuleSets.songSets?.[wordPresetKey()]||wordRuleSets.activeId;
+    return settings.emojiTags??Boolean(wordRuleSets.sets.find(set=>set.id===id)?.emojiTags);
+  }
   function fillEmojiPicker(select,query,value='auto'){
     const choices=typeof LvEmojiTags==='undefined'?[]:LvEmojiTags.suggest(query,12),current=typeof LvEmojiTags==='undefined'?null:LvEmojiTags.describe(value);
     if(current&&!choices.some(choice=>choice.emoji===value))choices.unshift(current);
