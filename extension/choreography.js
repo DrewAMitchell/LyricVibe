@@ -76,7 +76,9 @@
   function wordSetFor(value,source){const key=typeof source==='string'?source:source?scoreApi.mediaKey(source):null;return value.sets.find(set=>set.id===(value.songSets?.[key]||value.activeId))||value.sets[0];}
   function phraseMatches(words,map){
     const matches=new Map(),ends=new Map();
-    for(let i=0;i<words.length;i++){if(matches.has(i))continue;for(let count=Math.min(4,words.length-i);count>=1;count--){const key=words.slice(i,i+count).map(w=>ruleWord(w.text)).join(' '),value=map.get(key);if(value!==undefined){for(let j=0;j<count;j++){matches.set(i+j,value);ends.set(i+j,i+count-1);}break;}}}
+    // Timed compound pieces keep the joiner on the preceding piece, just as
+    // playback does. Normalize after rejoining so five- + two stays five-two.
+    for(let i=0;i<words.length;i++){if(matches.has(i))continue;for(let count=Math.min(4,words.length-i);count>=1;count--){const pieces=words.slice(i,i+count),key=ruleWord(pieces.reduce((text,word,j)=>text+(j&&!/[-\u2010\u2011]$/u.test(pieces[j-1].text)?' ':'')+word.text,'')),value=map.get(key);if(value!==undefined){for(let j=0;j<count;j++){matches.set(i+j,value);ends.set(i+j,i+count-1);}break;}}}
     return {matches,ends};
   }
   function wordRuleAt(cue,now,{reduced=false}={}){

@@ -1,6 +1,16 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const emojis=require('../extension/emoji-tags.js'),core=require('../extension/score-core.js'),choreo=require('../extension/choreography.js');
 const score=text=>core.createPlainScore({videoId:'TESTVIDEO01',durationMs:10000},text,{contentHash:'c'.repeat(64)});
+test('hyphenated map terms still match separately timed compound pieces without matching unrelated words',()=>{
+ for(const hyphen of ['-','\u2010','\u2011']){
+  const compound='five'+hyphen+'two',map=[{emoji:'📏',terms:[compound]}],rules=[{word:compound,motion:'bounce',effects:[]}];
+  const s=score('five'+hyphen+' two two'),words=s.phrases[0].words;words.forEach((w,i)=>Object.assign(w,{startMs:1000+i*300,endMs:1200+i*300}));const before=structuredClone(s);
+  const cues=choreo.compose(s,rules,{emojiMap:map,emojiDictionary:false});assert.deepEqual(words.map(w=>cues[w.id].emoji),['','📏','']);assert.equal(cues[words[1].id].startMs,1300);assert.equal(cues[words[1].id].endMs,1500);assert.equal(cues[words[0].id].rule.word,choreo.ruleWord(compound));assert.deepEqual(s,before);
+  const whole=score(compound);assert.equal(choreo.compose(whole,[],{emojiMap:map})[whole.phrases[0].words[0].id].emoji,'📏');
+ }
+ const separate=score('five two');assert.ok(Object.values(choreo.compose(separate,[],{emojiMap:[{emoji:'📏',terms:['five-two']}],emojiDictionary:false})).every(c=>!c.emoji));
+ const longer=score('five- two tall');assert.deepEqual(Object.values(choreo.compose(longer,[],{emojiMap:[{emoji:'📏',terms:['five-two']},{emoji:'⭐',terms:['five-two tall']}],emojiDictionary:false})).map(c=>c.emoji),['','','⭐']);
+});
 test('emoji hold extends only presentation to the phrase end and survives preset and export snapshots',()=>{
  const s=score('love air'),phrase=s.phrases[0],[love,air]=phrase.words;phrase.startMs=1000;phrase.endMs=5000;Object.assign(love,{startMs:1000,endMs:1800});Object.assign(air,{startMs:2500,endMs:3500});const before=structuredClone(s);
  const library={version:1,activeId:'hold',sets:[{id:'hold',name:'Hold',rules:[],emojiTags:true,emojiHold:'phrase'}]};assert.deepEqual(choreo.validateWordRuleSets(JSON.parse(JSON.stringify(library))),library);
