@@ -1,6 +1,18 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const emojis=require('../extension/emoji-tags.js'),core=require('../extension/score-core.js'),choreo=require('../extension/choreography.js');
 const score=text=>core.createPlainScore({videoId:'TESTVIDEO01',durationMs:10000},text,{contentHash:'c'.repeat(64)});
+test('emoji hold extends only presentation to the phrase end and survives preset and export snapshots',()=>{
+ const s=score('love air'),phrase=s.phrases[0],[love,air]=phrase.words;phrase.startMs=1000;phrase.endMs=5000;Object.assign(love,{startMs:1000,endMs:1800});Object.assign(air,{startMs:2500,endMs:3500});const before=structuredClone(s);
+ const library={version:1,activeId:'hold',sets:[{id:'hold',name:'Hold',rules:[],emojiTags:true,emojiHold:'phrase'}]};assert.deepEqual(choreo.validateWordRuleSets(JSON.parse(JSON.stringify(library))),library);
+ assert.throws(()=>choreo.validateWordRuleSets({...library,sets:[{...library.sets[0],emojiHold:'forever'}]}),/Hold emojis/);
+ const word=choreo.compose(s,[]),held=choreo.compose(s,[],library.sets[0]);assert.equal(word[love.id].emojiEndMs,1800);assert.equal(held[love.id].emojiEndMs,5000);assert.equal(held[love.id].endMs,1800);assert.equal(held[air.id].startMs,2500);assert.deepEqual(s,before);
+ const exp=require('../extension/overlay-export.js'),packet=exp.create(s,{theme:'neon',fontScale:1,liteMode:false,choreography:{mode:'classic'},placement:{left:0,top:0,width:100,height:100,minFontPx:28,maxFontPx:128},wordSet:library.sets[0],backingDisplay:choreo.backingSettings(),backingLabel:'hidden',linger:{mode:'off',beats:1},bloom:true,tempoMap:null},{startMs:1000,endMs:5000,width:640,height:360,fps:30});assert.equal(exp.validate(JSON.parse(JSON.stringify(packet))).display.wordSet.emojiHold,'phrase');
+});
+test('turntable holds each emoji beside its word until its selected end, including staggered backing words and seeks',()=>{
+ for(const text of ['love air','(love air)']){const s=score(text),phrase=s.phrases[0],[love,air]=phrase.words;phrase.startMs=1000;phrase.endMs=5000;Object.assign(love,{startMs:1000,endMs:1800});Object.assign(air,{startMs:2500,endMs:3500});
+ const track=hold=>choreo.vinylTrack(s,()=>.5,{emojiTags:true,cues:choreo.compose(s,[],{emojiHold:hold})}),word=track('word'),held=track('phrase'),emojis=(t,at)=>choreo.vinylAt(t,at).glyphs.filter(g=>g.emoji).map(g=>g.text);
+ assert.deepEqual(emojis(held,999),[]);assert.deepEqual(emojis(held,1500),['❤️']);assert.deepEqual(emojis(word,1800),[]);assert.deepEqual(emojis(held,2200),['❤️']);assert.deepEqual(emojis(held,3000),['❤️','🌬️']);assert.deepEqual(emojis(held,5000),[]);assert.deepEqual(emojis(held,1500),['❤️']);assert.deepEqual(choreo.vinylAt(word,3000).glyphs.filter(g=>!g.emoji),choreo.vinylAt(held,3000).glyphs.filter(g=>!g.emoji));}
+});
 test('offline CLDR keywords resolve names, synonyms and preferred lyric words without substring guesses',()=>{
  assert.equal(emojis.count,1577);assert.equal(emojis.match('LOVE!').emoji,'❤️');assert.equal(emojis.match('breeze').label,'wind face');assert.equal(emojis.match('thunder').label,'high voltage');assert.equal(emojis.match('levitate').label,'cloud');
  assert.ok(emojis.suggest('joy').some(e=>e.keywords.includes('joy')));assert.ok(emojis.describe('🌬️').keywords.includes('wind'));assert.equal(emojis.match('the'),null);assert.equal(emojis.match('airflowzzz'),null);assert.deepEqual(emojis.match('flower'),emojis.match('flower'));

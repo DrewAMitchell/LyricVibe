@@ -60,7 +60,8 @@
     const ids=new Set(),names=new Set();const sets=value.sets.map(set=>{
       const name=String(set.name||'').trim();if(!name||name.length>48||names.has(name.toLowerCase()))throw Error('Use a unique set name, up to 48 characters.');if(typeof set.id!=='string'||!/^[a-zA-Z0-9_-]{1,64}$/.test(set.id)||ids.has(set.id))throw Error('Invalid word-effect set identity.');ids.add(set.id);names.add(name.toLowerCase());
       for(const key of ['emojiTags','emojiDictionary'])if(set[key]!==undefined&&typeof set[key]!=='boolean')throw Error('Emoji settings must be on or off.');
-      return {id:set.id,name,rules:validateWordRules(set.rules),...(set.emojiTags!==undefined?{emojiTags:set.emojiTags}:{}),...(set.emojiDictionary!==undefined?{emojiDictionary:set.emojiDictionary}:{}),...(set.emojiMap!==undefined?{emojiMap:validateEmojiMap(set.emojiMap)}:{})};
+      if(set.emojiHold!==undefined&&!['word','phrase'].includes(set.emojiHold))throw Error('Hold emojis for the word or until the phrase ends.');
+      return {id:set.id,name,rules:validateWordRules(set.rules),...(set.emojiTags!==undefined?{emojiTags:set.emojiTags}:{}),...(set.emojiHold!==undefined?{emojiHold:set.emojiHold}:{}),...(set.emojiDictionary!==undefined?{emojiDictionary:set.emojiDictionary}:{}),...(set.emojiMap!==undefined?{emojiMap:validateEmojiMap(set.emojiMap)}:{})};
     });
     if(!ids.has(value.activeId))throw Error('Choose an existing default set.');
     let songSets;if(value.songSets!==undefined){if(!value.songSets||typeof value.songSets!=='object'||Array.isArray(value.songSets)||Object.keys(value.songSets).length>2000)throw Error('Keep at most 2,000 song preset assignments.');songSets={};for(const [key,id]of Object.entries(value.songSets)){if(!/^youtube:[A-Za-z0-9_-]{11}$/.test(key)||!ids.has(id))throw Error('Song presets need an exact video and an existing set.');songSets[key]=id;}}
@@ -88,7 +89,7 @@
   }
   // Unknown syllable counts remain estimates; they never become timing evidence.
   function syllableCount(word){return word.syllables?.length||Math.max(1,(token(word.text).replace(/e$/,'').match(/[aeiouy]+/g)||[]).length);}
-  function compose(score,rules=defaultWordRules,{emojiMap=[],emojiDictionary=true}={}){
+  function compose(score,rules=defaultWordRules,{emojiMap=[],emojiDictionary=true,emojiHold='word'}={}){
     const ruleMap=new Map(validateWordRules(rules).map(rule=>[rule.word,rule]));
     const emojiRules=new Map(validateEmojiMap(emojiMap).flatMap(group=>group.terms.map(term=>[term,group.emoji])));
     const phrases=score.phrases.map(phrase=>{
@@ -112,7 +113,7 @@
         const rule=matches.get(i);
         const emoji=word.appearance?.emoji!==undefined?word.appearance.emoji:rule?.emoji!==undefined?(i===matchEnds.get(i)?rule.emoji:''):tags.matches.has(i)?(i===tags.ends.get(i)?tags.matches.get(i):''):(emojiDictionary?emojiApi?.match(word.text)?.emoji||'':'');
         const reasons=[...(sustained.length?['sustained']:[]),...(impact?['fast-then-stop']:[]),...(direction?['direction-'+text]:[]),...(rule?['word-rule:'+rule.word]:[])];
-        cues[word.id]={emoji,doubled:!!(word.doubled||p.phrase.doubled),wordId:word.id,phraseId:p.phrase.id,startMs:word.startMs,endMs:word.endMs,
+        cues[word.id]={emoji,emojiEndMs:emojiHold==='phrase'?Math.max(word.endMs,p.end,p.phrase.endMs??p.end):word.endMs,doubled:!!(word.doubled||p.phrase.doubled),wordId:word.id,phraseId:p.phrase.id,startMs:word.startMs,endMs:word.endMs,
           weight:(lightWords.has(text)?.78:1)+Math.min(.25,text.length*.018)+Math.min(.16,(count-1)*.06)+(impact?.4:0)+(sustained.length?.18:0),
           sustained:sustained.map(u=>({id:u.id,startMs:u.startMs,endMs:u.endMs})),impact,direction,reasons,...(rule?{rule}:{}),
           evidence:{phraseSyllablesPerSecond:p.rate,pauseAfterMs:gap,syllableBasis:word.syllables?.length?'authored':'estimated-from-spelling'}};
@@ -361,12 +362,12 @@
         // One phrase enters and leaves the shared feed as a single block. Keep
         // the source words and their timing intact; this is presentation only.
         const text=parts.map(p=>p.text+(p.tag?' '+p.tag:'')).join(' ').replace(/^\((.*)\)$/,'$1');
-        let at=1;const doubledRanges=parts.map(p=>{const start=at,end=at+glyphParts(p.text).length;at+=glyphParts(p.text+(p.tag?' '+p.tag:'')).length+1;return p.word.doubled?[start,end]:null;}).filter(Boolean);
-        tokens.push({doubled:!!phrase.doubled,doubledRanges,id:words[0].id,wordIds:words.map(word=>word.id),phraseId:phrase.id,laneId:phrase.laneId,backing:true,text:'('+text.toUpperCase()+')',startMs:Math.min(...words.map(w=>w.startMs)),endMs:Math.max(...words.map(w=>w.endMs)),order:order++});
-      }else for(const word of words)tokens.push({doubled:!!(phrase.doubled||word.doubled),id:word.id,phraseId:phrase.id,laneId:phrase.laneId,text:String(word.text).trim().toUpperCase()+(emojiTags&&cues[word.id]?.emoji?' '+cues[word.id].emoji:''),startMs:word.startMs,endMs:word.endMs,order:order++});
+        let at=1;const emojiRanges=[],doubledRanges=parts.map(p=>{const start=at,end=at+glyphParts(p.text).length;if(p.tag)emojiRanges.push({start:end+1,end:end+1+glyphParts(p.tag).length,startMs:p.word.startMs,endMs:cues[p.word.id]?.emojiEndMs??p.word.endMs});at+=glyphParts(p.text+(p.tag?' '+p.tag:'')).length+1;return p.word.doubled?[start,end]:null;}).filter(Boolean);
+        tokens.push({doubled:!!phrase.doubled,doubledRanges,emojiRanges,id:words[0].id,wordIds:words.map(word=>word.id),phraseId:phrase.id,laneId:phrase.laneId,backing:true,text:'('+text.toUpperCase()+')',startMs:Math.min(...words.map(w=>w.startMs)),endMs:Math.max(...words.map(w=>w.endMs)),order:order++});
+      }else for(const part of parts){const {word,text,tag}=part,start=glyphParts(text).length+1;tokens.push({doubled:!!(phrase.doubled||word.doubled),id:word.id,phraseId:phrase.id,laneId:phrase.laneId,text:text+(tag?' '+tag:''),emojiRanges:tag?[{start,end:start+glyphParts(tag).length,startMs:word.startMs,endMs:cues[word.id]?.emojiEndMs??word.endMs}]:[],startMs:word.startMs,endMs:word.endMs,order:order++});}
     }
     tokens.sort((a,b)=>a.startMs-b.startMs||a.order-b.order);let total=0;
-    for(const token of tokens){let x=0;token.chars=glyphParts(token.text).map((text,index)=>{const emoji=emojiTags&&/\p{Extended_Pictographic}/u.test(text),width=Math.max(.05,measure(text))*(emoji?.55:1);const char={text,emoji,center:x+width/2,width,doubled:token.doubled||token.doubledRanges?.some(([start,end])=>index>=start&&index<end)||false};x+=width+.015;return char;});token.offset=total;token.textWidth=x;token.width=x+Math.max(.35,measure(' '));token.center=total+x/2;total+=token.width;}
+    for(const token of tokens){let x=0;token.chars=glyphParts(token.text).map((text,index)=>{const hold=token.emojiRanges?.find(r=>index>=r.start&&index<r.end),emoji=!!hold||emojiTags&&/\p{Extended_Pictographic}/u.test(text),width=Math.max(.05,measure(text))*(emoji?.55:1);const char={text,emoji,...(hold?{emojiStartMs:hold.startMs,emojiEndMs:hold.endMs}:{}),center:x+width/2,width,doubled:token.doubled||token.doubledRanges?.some(([start,end])=>index>=start&&index<end)||false};x+=width+.015;return char;});token.offset=total;token.textWidth=x;token.width=x+Math.max(.35,measure(' '));token.center=total+x/2;total+=token.width;}
     const decay=-Math.log(.78)/(2*Math.PI),capacity=Math.log(1/.18)/decay,entryFont=.21;
     // Integral of entryFont/(1+d/compression) gives the angle traveled. Capacity
     // affects distant history, never the font size of the word at the feed mouth.
@@ -386,6 +387,7 @@
       const current=clock<token.endMs,duration=Math.max(1,Math.min(260,(token.endMs-token.startMs)*.35)),feed=reduced?1:smooth((clock-token.startMs)/duration),handoff=reduced?(clock>=token.departMs?1:0):smooth((clock-token.departMs)/260),fit=Math.min(1,1.65/(track.entryFont*Math.max(.1,token.textWidth))),age=Math.max(0,head-token.center)*handoff,flatten=smooth(age/Math.max(6,token.width));
       const centerW=track.entryFont*track.compression*Math.log1p(age/track.compression),centerR=Math.exp(-track.decay*centerW),centerA=-Math.PI/2-centerW,centerFont=track.entryFont*centerR/(1+age/track.compression)*fit;
       for(const ch of token.chars){
+        if(ch.emojiStartMs!==undefined&&(clock<ch.emojiStartMs||clock>=ch.emojiEndMs))continue;
         const d=Math.max(0,age+token.textWidth/2-ch.center),winding=track.entryFont*track.compression*Math.log1p(d/track.compression),curveR=Math.exp(-track.decay*winding),curveA=-Math.PI/2-winding,curveFont=track.entryFont*curveR/(1+d/track.compression)*fit;
         const radius=centerR+(curveR-centerR)*flatten,font=centerFont+(curveFont-centerFont)*flatten,flatX=centerR*Math.cos(centerA)+(ch.center-token.textWidth/2)*centerFont,flatY=centerR*Math.sin(centerA),x=flatX+(curveR*Math.cos(curveA)-flatX)*flatten,y=flatY+(curveR*Math.sin(curveA)-flatY)*flatten-(token.feedRow*.25+(1-feed)*.48)*(1-handoff),angle=-Math.PI/2+(curveA+Math.PI/2)*flatten;
         glyphs.push({wordId:token.id,emoji:ch.emoji,doubled:ch.doubled,text:ch.text,radius,angle,font:font*(ch.emoji?.55:1),x,y,current,feed:feed<1,top:handoff===0});
