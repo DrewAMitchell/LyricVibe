@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LyricVibe · Songs</title><link rel="stylesheet" href="song-library.css"><script src="score-core.js" defer></script><script src="song-library.js" defer></script><script src="song-library-page.js" defer></script></head>
+<body><main>
+<header><div><small class="eyebrow">LYRICVIBE / YOUR LIBRARY</small><h1>Songs</h1><p>Pick up where the timing leaves off.</p></div><button id="refresh" type="button">Refresh</button></header>
+<section class="tools" aria-label="Find songs"><label class="search">Search songs<input id="search" type="search" placeholder="Title, artist or video ID" autocomplete="off"></label><label>Show<select id="filter"><option value="all">All songs</option><option value="needs-work">Needs work</option><option value="complete">100% timed</option><option value="preview">Unsaved previews</option></select></label></section>
+<div class="list-heading"><p id="count" role="status">Loading songs…</p><span>Click a column heading to sort</span></div>
+<p id="error" role="alert" hidden></p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Songs and timing completeness"><table><thead><tr><th scope="col"><button data-sort="title">Song <span></span></button></th><th scope="col" aria-sort="ascending"><button data-sort="percent">Completeness <span>↑</span></button></th><th scope="col"><button data-sort="phrase">Phrases <span></span></button></th><th scope="col"><button data-sort="word">Words <span></span></button></th><th scope="col"><button data-sort="syllable">Syllables <span></span></button></th></tr></thead><tbody id="songs"></tbody></table></div>
+<p id="empty" hidden>No saved songs yet. Open a YouTube song with LyricVibe to start.</p>
+<footer>Local to this browser. Percentages cover the lyrics already entered, not accuracy or missing lyrics. Unsaved previews are labeled; recorded input counts after you use it in the preview. Song links open YouTube in a new tab.</footer>
+</main></body></html>
