@@ -27,10 +27,50 @@
       return {word,motion:rule.motion,effects:[...new Set(rule.effects)],...(rule.emoji!==undefined?{emoji:rule.emoji}:{})};
     });
   }
+  function validateEmojiMap(groups){
+    if(!Array.isArray(groups)||groups.length>200)throw Error('Use at most 200 emoji groups.');
+    const seen=new Set(),merged=new Map();let count=0;
+    for(const group of groups){
+      if(!group||!scoreApi.validEmoji(group.emoji)||!Array.isArray(group.terms)||!group.terms.length)throw Error('Each group needs one emoji and at least one word or phrase.');
+      const terms=merged.get(group.emoji)||[];
+      for(const raw of group.terms){if(typeof raw!=='string')throw Error('Map terms must be text.');const term=ruleWord(raw);if(!term||term.length>64||term.split(' ').length>4)throw Error('Use words or phrases of up to four words (64 characters).');if(seen.has(term))throw Error('“'+term+'” appears more than once in the map.');seen.add(term);terms.push(term);if(++count>2000)throw Error('Use at most 2,000 map terms.');}
+      merged.set(group.emoji,terms);
+    }
+    return [...merged].map(([emoji,terms])=>({emoji,terms}));
+  }
+  function parseEmojiMap(text){
+    if(typeof text!=='string'||text.length>150000)throw Error('Keep the map under 150,000 characters.');
+    const groups=[];
+    for(const [index,raw]of text.split(/\r?\n/).entries()){
+      const line=raw.trim();if(!line||line.startsWith('#'))continue;
+      try{
+        const match=line.match(/^(.+?)\s*(?:=|\bequals\b)\s*\((.*)\)\s*$/iu);if(!match)throw Error('Use 🌊 = (flow, water, "take a dip").');
+        const emoji=match[1].trim().toLowerCase()==='none'?'':match[1].trim(),tokens=[];let token='',quoted=false,escaped=false;
+        for(const ch of match[2]){if(escaped){token+=ch;escaped=false;continue;}if(ch==='\\'&&quoted){token+=ch;escaped=true;continue;}if(ch==='"'){quoted=!quoted;token+=ch;continue;}if(ch===','&&!quoted){tokens.push(token);token='';}else token+=ch;}
+        if(quoted||escaped)throw Error('Close the quoted phrase.');tokens.push(token);
+        const terms=tokens.map(value=>{value=value.trim();if(!value)throw Error('Remove the empty term.');if(value.startsWith('"')){const parsed=JSON.parse(value);if(typeof parsed!=='string')throw Error('Use a quoted phrase.');return parsed;}if(value.includes('"'))throw Error('Quote the entire phrase.');return value;});
+        groups.push(...validateEmojiMap([{emoji,terms}]));
+      }catch(error){throw Error('Line '+(index+1)+': '+error.message);}
+    }
+    return validateEmojiMap(groups);
+  }
+  function formatEmojiMap(groups){return validateEmojiMap(groups).map(group=>(group.emoji||'none')+' = ('+group.terms.map(term=>/[\s,"\\()]/u.test(term)?JSON.stringify(term):term).join(', ')+')').join('\n');}
   function validateWordRuleSets(value){
     if(!value||value.version!==1||!Array.isArray(value.sets)||!value.sets.length||value.sets.length>20)throw Error('Keep between 1 and 20 word-effect sets.');
-    const ids=new Set(),names=new Set();const sets=value.sets.map(set=>{const name=String(set.name||'').trim();if(!name||name.length>48||names.has(name.toLowerCase()))throw Error('Use a unique set name, up to 48 characters.');if(typeof set.id!=='string'||!/^[a-zA-Z0-9_-]{1,64}$/.test(set.id)||ids.has(set.id))throw Error('Invalid word-effect set identity.');ids.add(set.id);names.add(name.toLowerCase());if(set.emojiTags!==undefined&&typeof set.emojiTags!=='boolean')throw Error('Emoji tags must be on or off.');return {id:set.id,name,rules:validateWordRules(set.rules),...(set.emojiTags!==undefined?{emojiTags:set.emojiTags}:{})};});
-    if(!ids.has(value.activeId))throw Error('Choose an existing word-effect set.');return {version:1,activeId:value.activeId,sets};
+    const ids=new Set(),names=new Set();const sets=value.sets.map(set=>{
+      const name=String(set.name||'').trim();if(!name||name.length>48||names.has(name.toLowerCase()))throw Error('Use a unique set name, up to 48 characters.');if(typeof set.id!=='string'||!/^[a-zA-Z0-9_-]{1,64}$/.test(set.id)||ids.has(set.id))throw Error('Invalid word-effect set identity.');ids.add(set.id);names.add(name.toLowerCase());
+      for(const key of ['emojiTags','emojiDictionary'])if(set[key]!==undefined&&typeof set[key]!=='boolean')throw Error('Emoji settings must be on or off.');
+      return {id:set.id,name,rules:validateWordRules(set.rules),...(set.emojiTags!==undefined?{emojiTags:set.emojiTags}:{}),...(set.emojiDictionary!==undefined?{emojiDictionary:set.emojiDictionary}:{}),...(set.emojiMap!==undefined?{emojiMap:validateEmojiMap(set.emojiMap)}:{})};
+    });
+    if(!ids.has(value.activeId))throw Error('Choose an existing default set.');
+    let songSets;if(value.songSets!==undefined){if(!value.songSets||typeof value.songSets!=='object'||Array.isArray(value.songSets)||Object.keys(value.songSets).length>2000)throw Error('Keep at most 2,000 song preset assignments.');songSets={};for(const [key,id]of Object.entries(value.songSets)){if(!/^youtube:[A-Za-z0-9_-]{11}$/.test(key)||!ids.has(id))throw Error('Song presets need an exact video and an existing set.');songSets[key]=id;}}
+    return {version:1,activeId:value.activeId,sets,...(songSets?{songSets}:{})};
+  }
+  function wordSetFor(value,source){const key=typeof source==='string'?source:source?scoreApi.mediaKey(source):null;return value.sets.find(set=>set.id===(value.songSets?.[key]||value.activeId))||value.sets[0];}
+  function phraseMatches(words,map){
+    const matches=new Map(),ends=new Map();
+    for(let i=0;i<words.length;i++){if(matches.has(i))continue;for(let count=Math.min(4,words.length-i);count>=1;count--){const key=words.slice(i,i+count).map(w=>ruleWord(w.text)).join(' '),value=map.get(key);if(value!==undefined){for(let j=0;j<count;j++){matches.set(i+j,value);ends.set(i+j,i+count-1);}break;}}}
+    return {matches,ends};
   }
   function wordRuleAt(cue,now,{reduced=false}={}){
     if(!cue?.rule||now<cue.startMs||now>=cue.endMs)return null;
@@ -48,8 +88,9 @@
   }
   // Unknown syllable counts remain estimates; they never become timing evidence.
   function syllableCount(word){return word.syllables?.length||Math.max(1,(token(word.text).replace(/e$/,'').match(/[aeiouy]+/g)||[]).length);}
-  function compose(score,rules=defaultWordRules){
+  function compose(score,rules=defaultWordRules,{emojiMap=[],emojiDictionary=true}={}){
     const ruleMap=new Map(validateWordRules(rules).map(rule=>[rule.word,rule]));
+    const emojiRules=new Map(validateEmojiMap(emojiMap).flatMap(group=>group.terms.map(term=>[term,group.emoji])));
     const phrases=score.phrases.map(phrase=>{
       const words=phrase.words.filter(w=>!w.excluded),start=words[0]?.startMs,end=Math.max(...words.map(w=>w.endMs));
       return {phrase,words,start,end,rate:words.reduce((n,w)=>n+syllableCount(w),0)*1000/Math.max(1,end-start)};
@@ -60,8 +101,7 @@
       const gap=next?next.start-p.end:Math.max(0,(score.source?.durationMs??p.end)-(score.offsetMs||0)-p.end);
       const fast=p.rate>=4.5||p.rate>=3&&p.rate>=typical*1.3;
       const perSyllable=median(p.words.map(w=>(w.endMs-w.startMs)/syllableCount(w)));
-      const matches=new Map(),matchEnds=new Map();
-      for(let i=0;i<p.words.length;i++){if(matches.has(i))continue;for(let count=Math.min(4,p.words.length-i);count>=1;count--){const key=p.words.slice(i,i+count).map(w=>ruleWord(w.text)).join(' '),rule=ruleMap.get(key);if(rule){for(let j=0;j<count;j++){matches.set(i+j,rule);matchEnds.set(i+j,i+count-1);}break;}}}
+      const {matches,ends:matchEnds}=phraseMatches(p.words,ruleMap),tags=phraseMatches(p.words,emojiRules);
       p.words.forEach((word,i)=>{
         const count=syllableCount(word),duration=word.endMs-word.startMs;
         const units=word.syllables?.length?word.syllables:[word];
@@ -70,7 +110,7 @@
         const direction=text==='up'?[0,-1]:text==='down'?[0,1]:['left','right'].includes(text)&&previous.includes('the')&&previous.includes('to')?[text==='left'?-1:1,0]:null;
         const impact=fast&&gap>=550&&i===p.words.length-1;
         const rule=matches.get(i);
-        const emoji=word.appearance?.emoji!==undefined?word.appearance.emoji:rule?.emoji!==undefined?(i===matchEnds.get(i)?rule.emoji:''):(emojiApi?.match(word.text)?.emoji||'');
+        const emoji=word.appearance?.emoji!==undefined?word.appearance.emoji:rule?.emoji!==undefined?(i===matchEnds.get(i)?rule.emoji:''):tags.matches.has(i)?(i===tags.ends.get(i)?tags.matches.get(i):''):(emojiDictionary?emojiApi?.match(word.text)?.emoji||'':'');
         const reasons=[...(sustained.length?['sustained']:[]),...(impact?['fast-then-stop']:[]),...(direction?['direction-'+text]:[]),...(rule?['word-rule:'+rule.word]:[])];
         cues[word.id]={emoji,doubled:!!(word.doubled||p.phrase.doubled),wordId:word.id,phraseId:p.phrase.id,startMs:word.startMs,endMs:word.endMs,
           weight:(lightWords.has(text)?.78:1)+Math.min(.25,text.length*.018)+Math.min(.16,(count-1)*.06)+(impact?.4:0)+(sustained.length?.18:0),
@@ -400,5 +440,5 @@
     const particles=(count,smoke)=>Array.from({length:count},(_,i)=>{const seed=i+(smoke?47:11),period=(smoke?3100:1700)+hash(seed,3)*1900,age=((time+hash(seed,9)*period)%period)/period;return {x:(hash(seed,4)-.5)*2.5+Math.sin(age*4+seed)*.13,y:(smoke?.15:.55)-age*(smoke?.65:.95),alpha:(smoke?.12:.8)*Math.sin(Math.PI*age),size:smoke?.06+.07*age:.025};});
     return {width,height,time,palette:firePalettes[color]||firePalettes.ember,pixels,embers:reduced?[]:particles(4,false),smoke:reduced?[]:particles(3,true)};
   }
-  const api={coinSpin,stagePerformanceAt,layoutOrigins,landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,validateWordRuleSets,wordRuleAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
+  const api={validateEmojiMap,parseEmojiMap,formatEmojiMap,wordSetFor,coinSpin,stagePerformanceAt,layoutOrigins,landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,validateWordRuleSets,wordRuleAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

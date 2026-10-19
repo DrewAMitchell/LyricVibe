@@ -18,3 +18,29 @@ test('vinyl tags are optional grapheme glyphs and keep doubled backing word rang
  const s=score('(love(d) air)'),before=structuredClone(s),cues=choreo.compose(s),plain=choreo.vinylTrack(s,()=>.5),tagged=choreo.vinylTrack(s,()=>.5,{emojiTags:true,cues});
  assert.equal(plain.tokens[0].text,'(LOVE AIR)');assert.equal(tagged.tokens[0].text,'(LOVE ❤️ AIR 🌬️)');assert.equal(tagged.tokens[0].chars.filter(c=>c.emoji).length,2);assert.equal(tagged.tokens[0].chars.filter(c=>c.doubled).map(c=>c.text).join(''),'LOVE');assert.deepEqual(s,before);
 });
+
+
+test('grouped emoji map text round-trips words and quoted phrases and rejects ambiguous duplicate matches',()=>{
+ const text='🌊 = (flow, water, "take a dip")\n💦 equals (drip, sweat, wet, gush)\nnone = (baby)';
+ const groups=choreo.parseEmojiMap(text);assert.deepEqual(groups[0],{emoji:'🌊',terms:['flow','water','take a dip']});assert.equal(groups[2].emoji,'');assert.deepEqual(choreo.parseEmojiMap(choreo.formatEmojiMap(groups)),groups);
+ assert.throws(()=>choreo.parseEmojiMap('🌊 = (Water)\n💦 = (water!)'),/more than once/);
+ for(const bad of ['water = (flow)','🌊 = (flow,)','🌊 = ("take a dip)','🌊 = ("one two three four five")'])assert.throws(()=>choreo.parseEmojiMap(bad),/Line 1/);
+ assert.deepEqual(choreo.parseEmojiMap('# a comment\n\n'),[]);
+});
+
+test('song presets resolve by exact video while library round-trip retains maps and legacy default behavior',()=>{
+ const base={version:1,activeId:'default',sets:[{id:'default',name:'Default',rules:[]},{id:'water',name:'Water',rules:[],emojiTags:true,emojiDictionary:false,emojiMap:choreo.parseEmojiMap('🌊 = (water)')},{id:'innuendo',name:'Innuendo',rules:[],emojiTags:true,emojiDictionary:false,emojiMap:choreo.parseEmojiMap('💦 = (water)')}],songSets:{'youtube:TESTVIDEO01':'water','youtube:TESTVIDEO02':'innuendo'}};
+ const library=choreo.validateWordRuleSets(JSON.parse(JSON.stringify(base)));assert.deepEqual(library,base);
+ assert.equal(choreo.wordSetFor(library,{videoId:'TESTVIDEO01'}).id,'water');assert.equal(choreo.wordSetFor(library,{videoId:'TESTVIDEO02'}).id,'innuendo');assert.equal(choreo.wordSetFor(library,{videoId:'TESTVIDEO03'}).id,'default');
+ assert.throws(()=>choreo.validateWordRuleSets({...base,songSets:{'youtube:TESTVIDEO01':'missing'}}),/existing set/);
+ assert.throws(()=>choreo.validateWordRuleSets({...base,songSets:{'song title':'water'}}),/exact video/);
+ const legacy={version:1,activeId:'default',sets:[{id:'default',name:'Default',rules:[]}]};assert.deepEqual(choreo.validateWordRuleSets(legacy),legacy);
+});
+
+test('emoji groups match longest exact phrases independently of motion, with dictionary opt-out and explicit overrides',()=>{
+ const s=score('flow water take a dip drip sweat wet gush waterfall love'),before=structuredClone(s),words=s.phrases[0].words;
+ const options={emojiDictionary:false,emojiMap:choreo.parseEmojiMap('🌊 = (flow, water, "take a dip")\n💦 = (dip, drip, sweat, wet, gush)')},rules=[{word:'flow',motion:'float',effects:[]}];
+ const cues=choreo.compose(s,rules,options);assert.deepEqual(words.map(w=>cues[w.id].emoji),['🌊','🌊','','','🌊','💦','💦','💦','💦','','']);assert.equal(cues[words[0].id].rule.motion,'float');assert.equal(cues[words[1].id].rule,undefined);assert.deepEqual(s,before);
+ assert.equal(choreo.compose(s,rules,{...options,emojiDictionary:true})[words.at(-1).id].emoji,'❤️');
+ rules[0].emoji='⭐';assert.equal(choreo.compose(s,rules,options)[words[0].id].emoji,'⭐');words[0].appearance={emoji:'🔥'};assert.equal(choreo.compose(s,rules,options)[words[0].id].emoji,'🔥');
+});

@@ -386,15 +386,23 @@
   let backingDisplay=LvChoreography.backingSettings(),backingLabels={};
   let wordRules=LvChoreography.validateWordRules(LvChoreography.defaultWordRules),wordRulesHistory=[];
   let wordRuleSets={version:1,activeId:'default',sets:[{id:'default',name:'Default',rules:wordRules}]};
+  function wordPresetKey(){return LvScore.mediaKey({url:location.href});}
+  function editingWordSet(){return wordRuleSets.sets.find(set=>set.id===studio.wordSetId)||LvChoreography.wordSetFor(wordRuleSets,wordPresetKey());}
+  function assignWordSet(id,key=wordPresetKey()){if(!/^youtube:[A-Za-z0-9_-]{11}$/.test(key))throw Error('Open a song before assigning its preset.');const songSets={...wordRuleSets.songSets};if(id===null)delete songSets[key];else songSets[key]=id;return setWordRuleSets({...wordRuleSets,songSets});}
   function setWordRuleSets(value,remember=true){
-    const next=LvChoreography.validateWordRuleSets(value);if(remember)wordRulesHistory=[...wordRulesHistory,structuredClone(wordRuleSets)].slice(-20);wordRuleSets=next;wordRules=next.sets.find(s=>s.id===next.activeId).rules;
+    const next=LvChoreography.validateWordRuleSets(value);if(remember)wordRulesHistory=[...wordRulesHistory,structuredClone(wordRuleSets)].slice(-20);wordRuleSets=next;wordRules=editingWordSet().rules;
     chrome.storage.local.set({lvxWordRuleSets:wordRuleSets,lvxWordRules:wordRules}).catch(error=>setHud('Word sets changed in this tab; local save failed: '+error.message,true,true));
     state.scoreSignature='';if(state.score)renderScore(getMediaTimeMs());renderStylePreview();return next;
   }
-  function setWordRules(rules,remember=true){
-    setWordRuleSets({...wordRuleSets,sets:wordRuleSets.sets.map(set=>set.id===wordRuleSets.activeId?{...set,rules}:set)},remember);return wordRules;
+  function wordPresetStorageChanged(changes,area){
+    if(area!=='local'||!changes.lvxWordRuleSets?.newValue)return;
+    try{const next=LvChoreography.validateWordRuleSets(changes.lvxWordRuleSets.newValue);if(JSON.stringify(next)===JSON.stringify(wordRuleSets))return;wordRulesHistory=[];wordRuleSets=next;wordRules=editingWordSet().rules;state.scoreSignature='';if(root.isConnected){if(state.score)renderScore(getMediaTimeMs());const status=themePicker.querySelector('[data-set-status]');if(status)status.textContent='Presets updated in another tab. Your unsaved text is retained.';}}catch(error){setHud('Shared presets need review: '+error.message,true,true);}
   }
-  function emojiTagsEnabled(settings={}){return settings.emojiTags??Boolean(wordRuleSets.sets.find(set=>set.id===wordRuleSets.activeId)?.emojiTags);}
+  function setWordRules(rules,remember=true){
+    if(studio.wordSetId&&!wordRuleSets.sets.some(set=>set.id===studio.wordSetId))throw Error('This preset was removed elsewhere. Reopen the editor before saving.');
+    setWordRuleSets({...wordRuleSets,sets:wordRuleSets.sets.map(set=>set.id===editingWordSet().id?{...set,rules}:set)},remember);return wordRules;
+  }
+  function emojiTagsEnabled(settings={}){return settings.emojiTags??Boolean(LvChoreography.wordSetFor(wordRuleSets,wordPresetKey()).emojiTags);}
   function fillEmojiPicker(select,query,value='auto'){
     const choices=typeof LvEmojiTags==='undefined'?[]:LvEmojiTags.suggest(query,12),current=typeof LvEmojiTags==='undefined'?null:LvEmojiTags.describe(value);
     if(current&&!choices.some(choice=>choice.emoji===value))choices.unshift(current);
@@ -408,13 +416,14 @@
     tag.dataset.emoji=emoji;tag.title=typeof LvEmojiTags==='undefined'?'':LvEmojiTags.describe(emoji)?.label||'Emoji tag';tag.hidden=clock<cue.startMs||clock>=cue.endMs;
   }
   function buildWordRulesEditor(){
-    const container=document.createElement('section');container.className='lvx-word-set-control';container.innerHTML='<div class="lvx-word-set-quick"><label>Word-effect set<select aria-label="Word-effect set"></select></label><button type="button" data-set-use>Use set</button><span role="status" data-set-status></span></div><label class="lvx-emoji-enable"><input type="checkbox" aria-label="Emoji tags beside words"> Emoji tags beside words</label>';
+    wordRules=editingWordSet().rules;
+    const container=document.createElement('section');container.className='lvx-word-set-control';container.innerHTML='<div class="lvx-word-set-quick"><label>Preset<select aria-label="Word-effect set"></select></label><button type="button" data-set-use>Use for this song</button><button type="button" data-set-inherit>Use default</button><span role="status" data-set-status></span></div><label class="lvx-emoji-enable"><input type="checkbox" aria-label="Emoji tags beside words"> Emoji tags beside words</label>';
     const panel=document.createElement('details');panel.className='lvx-word-rules';panel.open=Boolean(studio.wordRulesOpen);
     panel.innerHTML='<summary>Word rules <span>Motion + effects</span></summary><p>Exact words, ignoring case and surrounding punctuation. Saved across songs. Authored effects take priority.</p><label class="lvx-rules-enable"><input type="checkbox" aria-label="Enable automatic word expression"> Automatic expression</label><div class="lvx-rule-list" role="group" aria-label="Saved word rules"></div><div class="lvx-rule-toolbar"><button type="button" data-rule-new>+ Add word</button><button type="button" data-rule-undo>Undo rule change</button><button type="button" data-rule-defaults>Restore starters</button></div><form class="lvx-rule-form"><label>Word<input aria-label="Word to match" maxlength="64" required autocomplete="off" spellcheck="false"></label><label>Motion<select aria-label="Word rule motion"></select></label><fieldset><legend>Effects · combine any</legend></fieldset><div class="lvx-rule-emoji"><label>Emoji<select aria-label="Word rule emoji"></select></label><label>Find an emoji<input aria-label="Find an emoji" placeholder="Try breeze, joy, thunder" autocomplete="off"></label><small data-emoji-keywords></small></div><div class="lvx-rule-preview" aria-label="Word rule preview"><div class="lvx-rule-preview-line"><span class="lvx-score-word"></span></div></div><div class="lvx-rule-toolbar"><button type="button" data-rule-play>Play preview</button><button type="submit">Save rule</button><button type="button" data-rule-delete>Remove rule</button></div><p class="lvx-rule-status" role="status"></p></form>';
     panel.ontoggle=()=>{studio.wordRulesOpen=panel.open;renderWordRulePreview();};
     container.append(panel);panel.querySelector('p').textContent='Words or short phrases, ignoring case and surrounding punctuation. Saved across songs. Authored effects take priority.';
-    const management=document.createElement('div');management.className='lvx-rule-toolbar';management.innerHTML='<input aria-label="New set name" placeholder="New set name" maxlength="48"><button type="button" data-set-copy>Save as new set</button><button type="button" data-set-delete>Delete set</button>';panel.querySelector('.lvx-rule-toolbar').before(management);
-    const list=panel.querySelector('.lvx-rule-list'),form=panel.querySelector('form'),input=form.querySelector('input'),motion=form.querySelector('select'),status=form.querySelector('[role=status]'),enabled=panel.querySelector('.lvx-rules-enable input');
+    const management=document.createElement('div');management.className='lvx-rule-toolbar';management.innerHTML='<input aria-label="New set name" placeholder="New set name" maxlength="48"><button type="button" data-set-copy>Save as new set</button><button type="button" data-set-rename>Rename</button><button type="button" data-set-default>Make default</button><button type="button" data-set-delete>Delete set</button>';container.insertBefore(management,panel);
+    const setStatus=container.querySelector('[data-set-status]'),list=panel.querySelector('.lvx-rule-list'),form=panel.querySelector('form'),input=form.querySelector('input'),motion=form.querySelector('select'),status=form.querySelector('[role=status]'),enabled=panel.querySelector('.lvx-rules-enable input');
     enabled.checked=choreography.automatic;enabled.disabled=choreography.mode==='vinyl';enabled.onchange=()=>{setChoreography({...choreography,automatic:enabled.checked});refresh();};
     if(choreography.mode==='vinyl')panel.querySelector('p').textContent='Preview and edit rules here. Word expression appears in Classic, Falling words and Word puzzle; Vinyl keeps its shared spiral.';
     for(const [value,label]of Object.entries(LvChoreography.wordRuleMotions)){const option=document.createElement('option');option.value=value;option.textContent=label;motion.append(option);}
@@ -422,18 +431,33 @@
     const emojiSelect=form.querySelector('[aria-label="Word rule emoji"]'),emojiSearch=form.querySelector('[aria-label="Find an emoji"]');
     const emojiDescription=()=>{const selected=emojiSelect.value==='auto'?(typeof LvEmojiTags==='undefined'?null:LvEmojiTags.match(input.value)):(typeof LvEmojiTags==='undefined'?null:LvEmojiTags.describe(emojiSelect.value)),details=selected&&LvEmojiTags.describe(selected.emoji);form.querySelector('[data-emoji-keywords]').textContent=details?details.emoji+' '+details.label+' · '+details.keywords.join(', '):emojiSelect.value===''?'No tag for this word.':'No dictionary match yet.';};
     const select=word=>{const rule=wordRules.find(r=>r.word===word);panel.__selectedWord=rule?.word||null;studio.wordRule=rule?.word||null;input.value=rule?.word||'';motion.value=rule?.motion||'off';emojiSearch.value='';fillEmojiPicker(emojiSelect,input.value,rule?.emoji??'auto');emojiDescription();for(const check of form.querySelectorAll('fieldset input'))check.checked=rule?.effects.includes(check.value)||false;form.querySelector('[data-rule-delete]').disabled=!rule;for(const button of list.children)button.setAttribute('aria-pressed',String(button.dataset.word===rule?.word));status.textContent='';previewTime=700;renderWordRulePreview();};
-    const refresh=()=>{const activeSet=wordRuleSets.sets.find(set=>set.id===wordRuleSets.activeId);container.querySelector('[aria-label="Emoji tags beside words"]').checked=Boolean(activeSet.emojiTags);container.querySelector('[data-set-status]').textContent=choreography.mode==='vinyl'?'Word effects appear in Classic, Falling words or Word puzzle.':choreography.automatic?'Composing with '+activeSet.name+'.':'Use set to compose automatically.';const sets=container.querySelector('[aria-label="Word-effect set"]');sets.replaceChildren(...wordRuleSets.sets.map(set=>{const o=document.createElement('option');o.value=set.id;o.textContent=set.name+' · '+set.rules.length+' rules';return o;}));sets.value=wordRuleSets.activeId;management.querySelector('[data-set-delete]').disabled=wordRuleSets.sets.length===1;list.replaceChildren();for(const rule of wordRules){const button=document.createElement('button'),name=document.createElement('strong'),detail=document.createElement('small');button.type='button';button.dataset.word=rule.word;name.textContent=rule.word;detail.textContent=[...(rule.motion==='off'?[]:[LvChoreography.wordRuleMotions[rule.motion]]),...rule.effects.map(id=>LvChoreography.wordRuleEffects[id]),...(rule.emoji?[rule.emoji]:[])].join(' + ')||'Still';button.append(name,detail);button.onclick=()=>select(rule.word);list.append(button);}panel.querySelector('[data-rule-undo]').disabled=!wordRulesHistory.length;};
-    container.querySelector('[aria-label="Emoji tags beside words"]').onchange=event=>{setWordRuleSets({...wordRuleSets,sets:wordRuleSets.sets.map(set=>set.id===wordRuleSets.activeId?{...set,emojiTags:event.target.checked}:set)});refresh();};
-    container.querySelector('[aria-label="Word-effect set"]').onchange=event=>{setWordRuleSets({...wordRuleSets,activeId:event.target.value});refresh();select(wordRules[0]?.word);};
-    container.querySelector('[data-set-use]').onclick=()=>{setChoreography({...choreography,automatic:true});enabled.checked=true;container.querySelector('[data-set-status]').textContent=choreography.mode==='vinyl'?'Saved. Choose Classic, Falling words or Word puzzle to show word effects.':'Composing with '+wordRuleSets.sets.find(s=>s.id===wordRuleSets.activeId).name+'.';};
-    management.querySelector('[data-set-copy]').onclick=()=>{try{const id='set-'+crypto.randomUUID();setWordRuleSets({...wordRuleSets,activeId:id,sets:[...wordRuleSets.sets,{id,name:management.querySelector('input').value,rules:wordRules,emojiTags:emojiTagsEnabled()}]});management.querySelector('input').value='';refresh();select(wordRules[0]?.word);status.textContent='New set saved. Edit its rules below.';}catch(error){status.textContent=error.message;}};
-    management.querySelector('[data-set-delete]').onclick=()=>{if(wordRuleSets.sets.length<2)return;const sets=wordRuleSets.sets.filter(s=>s.id!==wordRuleSets.activeId);setWordRuleSets({...wordRuleSets,activeId:sets[0].id,sets});refresh();select(wordRules[0]?.word);status.textContent='Set removed. Undo restores it.';};
+    const refresh=()=>{const activeSet=editingWordSet();wordRules=activeSet.rules;container.querySelector('[aria-label="Emoji tags beside words"]').checked=Boolean(activeSet.emojiTags);const applied=LvChoreography.wordSetFor(wordRuleSets,wordPresetKey()),bound=wordRuleSets.songSets?.[wordPresetKey()];container.querySelector('[data-set-status]').textContent='This song: '+applied.name+(bound?' · saved for this video':' · default')+(activeSet.id!==applied.id?' · editing '+activeSet.name:'');container.querySelector('[data-set-use]').disabled=!wordPresetKey();container.querySelector('[data-set-inherit]').disabled=!bound;const sets=container.querySelector('[aria-label="Word-effect set"]');sets.replaceChildren(...wordRuleSets.sets.map(set=>{const o=document.createElement('option');o.value=set.id;o.textContent=set.name;return o;}));sets.value=activeSet.id;management.querySelector('[data-set-delete]').disabled=wordRuleSets.sets.length===1;list.replaceChildren();for(const rule of wordRules){const button=document.createElement('button'),name=document.createElement('strong'),detail=document.createElement('small');button.type='button';button.dataset.word=rule.word;name.textContent=rule.word;detail.textContent=[...(rule.motion==='off'?[]:[LvChoreography.wordRuleMotions[rule.motion]]),...rule.effects.map(id=>LvChoreography.wordRuleEffects[id]),...(rule.emoji?[rule.emoji]:[])].join(' + ')||'Still';button.append(name,detail);button.onclick=()=>select(rule.word);list.append(button);}panel.querySelector('[data-rule-undo]').disabled=!wordRulesHistory.length;refreshMap();};
+    container.querySelector('[aria-label="Emoji tags beside words"]').onchange=event=>{setWordRuleSets({...wordRuleSets,sets:wordRuleSets.sets.map(set=>set.id===editingWordSet().id?{...set,emojiTags:event.target.checked}:set)});refresh();};
+    container.querySelector('[aria-label="Word-effect set"]').onchange=event=>{studio.wordSetId=event.target.value;wordRules=editingWordSet().rules;refresh();select(wordRules[0]?.word);};
+    container.querySelector('[data-set-use]').onclick=()=>{try{assignWordSet(editingWordSet().id);setChoreography({...choreography,automatic:true});enabled.checked=true;refresh();}catch(error){setStatus.textContent=error.message;}};
+    container.querySelector('[data-set-inherit]').onclick=()=>{try{assignWordSet(null);studio.wordSetId=wordRuleSets.activeId;refresh();select(wordRules[0]?.word);}catch(error){setStatus.textContent=error.message;}};
+    management.querySelector('[data-set-copy]').onclick=()=>{try{if(draftMap().dirty)throw Error('Save or revert the map text before copying the preset.');const id='set-'+crypto.randomUUID(),original=editingWordSet(),name=management.querySelector('input').value;setWordRuleSets({...wordRuleSets,sets:[...wordRuleSets.sets,{...original,id,name}]});studio.wordSetId=id;management.querySelector('input').value='';refresh();select(wordRules[0]?.word);setStatus.textContent='New preset saved. Edit its map, then Use for this song.';}catch(error){setStatus.textContent=error.message;}};
+    management.querySelector('[data-set-rename]').onclick=()=>{try{const id=editingWordSet().id,name=management.querySelector('input').value;setWordRuleSets({...wordRuleSets,sets:wordRuleSets.sets.map(set=>set.id===id?{...set,name}:set)});management.querySelector('input').value='';refresh();}catch(error){setStatus.textContent=error.message;}};
+    management.querySelector('[data-set-default]').onclick=()=>{setWordRuleSets({...wordRuleSets,activeId:editingWordSet().id});refresh();};
+    management.querySelector('[data-set-delete]').onclick=()=>{if(wordRuleSets.sets.length<2)return;const id=editingWordSet().id,sets=wordRuleSets.sets.filter(set=>set.id!==id),songSets=Object.fromEntries(Object.entries(wordRuleSets.songSets||{}).filter(([,setId])=>setId!==id)),activeId=wordRuleSets.activeId===id?sets[0].id:wordRuleSets.activeId;studio.wordSetId=activeId;setWordRuleSets({...wordRuleSets,activeId,sets,songSets});refresh();select(wordRules[0]?.word);setStatus.textContent='Preset removed; assigned songs use the default. Undo restores it.';};
     panel.querySelector('[data-rule-new]').onclick=()=>{select(null);input.focus();};
     panel.querySelector('[data-rule-undo]').onclick=()=>{if(wordRulesHistory.length){setWordRuleSets(wordRulesHistory.pop(),false);refresh();select(wordRules[0]?.word);status.textContent='Previous set and rules restored.';}};
     panel.querySelector('[data-rule-defaults]').onclick=()=>{setWordRules(LvChoreography.defaultWordRules);refresh();select(wordRules[0]?.word);status.textContent='Starter rules restored. Undo keeps your previous set available.';};
     form.onsubmit=event=>{event.preventDefault();try{const rule={word:input.value,motion:motion.value,...(emojiSelect.value!=='auto'?{emoji:emojiSelect.value}:{}),effects:[...form.querySelectorAll('fieldset input:checked')].map(n=>n.value)},rules=wordRules.filter(r=>r.word!==panel.__selectedWord);rules.push(rule);setWordRules(rules);refresh();select(LvChoreography.ruleWord(rule.word));status.textContent='Saved across songs. '+(choreography.automatic?'Automatic expression is on.':'Turn on Automatic expression to use rules in the song.');}catch(error){status.textContent=error.message;}};
     form.querySelector('[data-rule-delete]').onclick=()=>{if(!panel.__selectedWord)return;setWordRules(wordRules.filter(r=>r.word!==panel.__selectedWord));refresh();select(wordRules[0]?.word);status.textContent='Rule removed. Undo restores it.';};
     form.querySelector('[data-rule-play]').onclick=()=>setPreviewPlaying(!previewPlaying);
+    const mapPanel=document.createElement('details');mapPanel.className='lvx-emoji-map';mapPanel.open=studio.emojiMapOpen!==false;mapPanel.innerHTML='<summary>Emoji map <span>Words + phrases</span></summary><p>One emoji per line, followed by its words or quoted phrases. Longer phrases win. Word-specific overrides take priority.</p><label>Map<textarea aria-label="Emoji map text" rows="6" spellcheck="false" placeholder="🌊 = (flow, water, &quot;take a dip&quot;)&#10;💦 = (drip, sweat, wet, gush)"></textarea></label><label class="lvx-emoji-dictionary"><input type="checkbox" aria-label="Fill unmatched words from dictionary"> Fill unmatched words from dictionary</label><div class="lvx-rule-toolbar"><button type="button" data-map-save>Save &amp; enable map</button><button type="button" data-map-copy>Copy map</button><button type="button" data-map-example>Insert example</button><button type="button" data-map-revert>Revert text</button><button type="button" data-map-undo>Undo preset change</button></div><p role="status" data-map-status></p>';container.insertBefore(mapPanel,panel);
+    const mapText=mapPanel.querySelector('textarea'),dictionary=mapPanel.querySelector('input'),mapStatus=mapPanel.querySelector('[data-map-status]');studio.emojiMapDrafts??={};
+    const savedMap=set=>JSON.stringify({emojiMap:set.emojiMap||[],emojiDictionary:set.emojiDictionary!==false});
+    const draftMap=()=>{const set=editingWordSet(),saved=savedMap(set);let draft=studio.emojiMapDrafts[set.id];if(!draft||!draft.dirty&&draft.basis!==saved)draft=studio.emojiMapDrafts[set.id]={basis:saved,text:LvChoreography.formatEmojiMap(set.emojiMap||[]),dictionary:set.emojiDictionary!==false,dirty:false};return draft;};
+    function refreshMap(){const set=editingWordSet(),draft=draftMap();mapText.dataset.setId=set.id;mapText.value=draft.text;dictionary.checked=draft.dictionary;mapPanel.querySelector('[data-map-example]').disabled=!!draft.text.trim();mapPanel.querySelector('[data-map-undo]').disabled=!wordRulesHistory.length;mapStatus.textContent=draft.dirty?(draft.basis!==savedMap(set)?'This preset changed elsewhere. Copy your text, then Revert text before saving.':'Unsaved map text · '+set.name):(set.emojiMap?.length||0)+' emoji groups · '+(set.emojiMap||[]).reduce((n,g)=>n+g.terms.length,0)+' matches · '+set.name;}
+    mapPanel.ontoggle=()=>studio.emojiMapOpen=mapPanel.open;
+    const editMap=()=>{const draft=draftMap();draft.text=mapText.value;draft.dictionary=dictionary.checked;draft.dirty=true;mapStatus.textContent='Unsaved map text · '+editingWordSet().name;mapPanel.querySelector('[data-map-example]').disabled=!!mapText.value.trim();};mapText.oninput=editMap;dictionary.onchange=editMap;
+    mapPanel.querySelector('[data-map-example]').onclick=()=>{if(mapText.value.trim())return;mapText.value='🌊 = (flow, water, "take a dip")\n💦 = (drip, sweat, wet, gush)';editMap();};
+    mapPanel.querySelector('[data-map-save]').onclick=()=>{try{const set=editingWordSet(),draft=draftMap();if(mapText.dataset.setId!==set.id)throw Error('Preset selection changed. Reopen the editor before saving.');if(draft.basis!==savedMap(set))throw Error('This preset changed elsewhere. Copy your text, then Revert text before saving.');const emojiMap=LvChoreography.parseEmojiMap(mapText.value);setWordRuleSets({...wordRuleSets,sets:wordRuleSets.sets.map(item=>item.id===set.id?{...item,emojiMap,emojiDictionary:dictionary.checked,emojiTags:true}:item)});delete studio.emojiMapDrafts[set.id];refresh();mapStatus.textContent='Map saved to '+set.name+' · emoji tags on. '+(LvChoreography.wordSetFor(wordRuleSets,wordPresetKey()).id===set.id?'Active for this song.':'Choose Use for this song to apply it.');}catch(error){mapStatus.textContent=error.message;}};
+    mapPanel.querySelector('[data-map-copy]').onclick=async()=>{try{await navigator.clipboard.writeText(mapText.value);mapStatus.textContent='Map copied. Paste it into another preset or a text editor.';}catch{mapText.focus();mapText.select();mapStatus.textContent='Text selected. Press Ctrl+C to copy.';}};
+    mapPanel.querySelector('[data-map-revert]').onclick=()=>{delete studio.emojiMapDrafts[editingWordSet().id];refreshMap();};
+    mapPanel.querySelector('[data-map-undo]').onclick=()=>{if(!wordRulesHistory.length)return;const id=editingWordSet().id;setWordRuleSets(wordRulesHistory.pop(),false);delete studio.emojiMapDrafts[id];refresh();select(wordRules[0]?.word);};
     form.oninput=event=>{if(event.target===input||event.target===emojiSearch)fillEmojiPicker(emojiSelect,emojiSearch.value||input.value,emojiSelect.value||'');emojiDescription();renderWordRulePreview();};refresh();select(studio.wordRule||wordRules[0]?.word);return container;
   }
   function renderWordRulePreview(){
@@ -445,8 +469,8 @@
     const line=panel.querySelector('.lvx-rule-preview-line'),node=line.firstElementChild;
     if(node.textContent!==rule.word){node.textContent=rule.word;delete node.dataset.flexLetters;}
     node.style.fontSize=Math.max(16,Math.min(58,(panel.clientWidth-65)/Math.max(2,rule.word.length)*1.4))+'px';
-    const word={id:'word-rule-preview',text:rule.word,startMs:250,endMs:2250,effects:[]},clock=previewTime%2700,cues=LvChoreography.compose({phrases:[{id:'rule-preview',words:[word]}]},[rule]);
-    expressLine(line,[word],clock,cues,{...choreography,mode:'classic',automatic:true,dance:'off'});
+    const word={id:'word-rule-preview',text:rule.word,startMs:250,endMs:2250,effects:[]},clock=previewTime%2700,cues=LvChoreography.compose({phrases:[{id:'rule-preview',words:[word]}]},[rule],editingWordSet());
+    expressLine(line,[word],clock,cues,{...choreography,mode:'classic',automatic:true,dance:'off',emojiTags:!!editingWordSet().emojiTags});
     const button=form.querySelector('[data-rule-play]');button.textContent=previewPlaying?'Pause preview':'Play preview';button.setAttribute('aria-pressed',String(previewPlaying));
   }
   function backingLabelKey(){const score=timing.draft?.score||state.score;return score?LvScore.mediaKey(score.source):null;}
@@ -492,7 +516,7 @@
       words.forEach((word,i)=>paintWordTexture(line.children[i],word,clock,tile.dataset.theme));
       const previewHeight=Math.max(60,tile.querySelector('.lvx-tile-stage').clientHeight-16);
       choreographLine(line,words,clock,tile.querySelector('.lvx-tile-stage').clientWidth-16,previewHeight,Math.min(64,previewHeight*.7),{},Math.min(48,previewHeight*.54));
-      if(typeof LvChoreography!=='undefined')expressLine(line,words,clock,LvChoreography.compose({source:{durationMs:words.length*450+1800},phrases:[{id:'preview',laneId:'lead',words}]},wordRules),{...choreography,theme:tile.dataset.theme});
+      if(typeof LvChoreography!=='undefined')expressLine(line,words,clock,LvChoreography.compose({source:{durationMs:words.length*450+1800},phrases:[{id:'preview',laneId:'lead',words}]},editingWordSet().rules,editingWordSet()),{...choreography,theme:tile.dataset.theme,emojiTags:!!editingWordSet().emojiTags});
     }
   }
   function setPreviewPlaying(value){previewPlaying=value;cancelAnimationFrame(previewFrame);previewFrame=0;previewLast=0;themePicker.dataset.playing=String(value);const b=themePicker.querySelector('[data-preview-play]');if(b){b.textContent=value?'Pause preview':'Play preview';b.setAttribute('aria-pressed',String(value));}renderStylePreview();if(value&&!themePicker.hidden)previewFrame=requestAnimationFrame(previewTick);}
@@ -622,7 +646,7 @@
   }
   function toggleThemePicker(force) {
     const open = force ?? themePicker.hidden;
-    if (open) buildThemePicker();
+    if(open){const key=wordPresetKey();if(studio.wordSetMediaKey!==key){studio.wordSetMediaKey=key;studio.wordSetId=LvChoreography.wordSetFor(wordRuleSets,key).id;}buildThemePicker();}
     themePicker.hidden = !open; themeButton.setAttribute('aria-expanded', String(open));
     if(open)setPreviewPlaying(previewPlaying);else setPreviewPlaying(false);
     if(!open&&!placementEditing)bounds.hidden=true;
@@ -3514,9 +3538,9 @@
     observation: Object.freeze({status:()=>trackWatch?.status()}),
     hints: getPageHints,
     placement:Object.freeze({getState:()=>({...placement}),set:value=>applyPlacement(value,true)}),
-    choreography:Object.freeze({getState:()=>({...choreography}),set:value=>setChoreography({...choreography,...value}),inspect:()=>{const score=timing.draft&&timing.view==='proposed'?timing.draft.score:state.score;return score&&typeof LvChoreography!=='undefined'?LvChoreography.compose(score,wordRules):{};}}),
+    choreography:Object.freeze({getState:()=>({...choreography}),set:value=>setChoreography({...choreography,...value}),inspect:()=>{const score=timing.draft&&timing.view==='proposed'?timing.draft.score:state.score;return score&&typeof LvChoreography!=='undefined'?expressionCues(score):{};}}),
     wordRules:Object.freeze({getState:()=>structuredClone(wordRules),set:setWordRules}),
-    wordRuleSets:Object.freeze({getState:()=>structuredClone(wordRuleSets),set:setWordRuleSets}),
+    wordRuleSets:Object.freeze({getState:()=>structuredClone(wordRuleSets),set:setWordRuleSets,forSong:(key=wordPresetKey())=>structuredClone(LvChoreography.wordSetFor(wordRuleSets,key)),assign:assignWordSet}),
     linger:Object.freeze({getState:()=>({...linger}),set:setLinger}),
     backingDisplay:Object.freeze({getState:()=>({...backingDisplay,labels:backingLabelMode()}),set:setBackingDisplay,setLabels:setBackingLabel}),
     tempo:Object.freeze({getState:()=>JSON.parse(JSON.stringify({mediaKey:tempo.mediaKey,map:tempo.map,taps:tempo.taps,estimate:tempo.estimate,revision:tempo.revision})),at:ms=>LvTapTiming.tempoAt(tempo.map,ms),tap:tapTempo,setMap:updateTempoMap}),
@@ -3556,6 +3580,8 @@
       }
     });
   } catch (_) {}
+
+  chrome.storage.onChanged?.addListener(wordPresetStorageChanged);
 
   /* Detect if we're on Spotify */
   state.isSpotify = location.hostname.includes('spotify.com');
@@ -4951,7 +4977,7 @@
   let beatDisplayCache={score:null,map:null,ends:{}};
   const beatStyledNodes=new Set();
   let expressionPlan={score:null,cues:{}};
-  function expressionCues(score){if(expressionPlan.score!==score||expressionPlan.rules!==wordRules)expressionPlan={score,rules:wordRules,cues:LvChoreography.compose(score,wordRules)};return expressionPlan.cues;}
+  function expressionCues(score){if(expressionPlan.score!==score||expressionPlan.library!==wordRuleSets){const set=LvChoreography.wordSetFor(wordRuleSets,score.source);expressionPlan={score,library:wordRuleSets,cues:LvChoreography.compose(score,set.rules,set)};}return expressionPlan.cues;}
   function ensureDanceLetters(node){
     if(!node.dataset.flexLetters){const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT),texts=[];while(walker.nextNode())texts.push(walker.currentNode);
       for(const text of texts){if(text.parentElement.closest('.lvx-dance-letter'))continue;const fragment=document.createDocumentFragment();for(const char of Array.from(text.textContent)){const letter=document.createElement('span');letter.className='lvx-dance-letter';letter.textContent=char;fragment.append(letter);}text.replaceWith(fragment);}node.dataset.flexLetters='true';}
@@ -5073,7 +5099,7 @@
     if(!canvas){canvas=document.createElement('canvas');canvas.className='lvx-vinyl-canvas';canvas.setAttribute('role','img');canvas.setAttribute('aria-label','Vinyl lyric history: earlier words wind toward the center');stage.prepend(canvas);}
     const ctx=canvas.getContext('2d'),dpr=Math.min(2,devicePixelRatio||1),width=Math.max(1,area.width),height=Math.max(1,area.height),clock=mediaMs-score.offsetMs;Object.assign(canvas.style,{position:'absolute',left:area.x+'px',top:area.y+'px',width:width+'px',height:height+'px',margin:'0'});
     const pixelW=Math.round(width*dpr),pixelH=Math.round(height*dpr);if(canvas.width!==pixelW||canvas.height!==pixelH){canvas.width=pixelW;canvas.height=pixelH;canvas.__frameKey=null;}
-    const tags=emojiTagsEnabled();if(canvas.__score!==score||canvas.__rules!==wordRules||canvas.__emojiTags!==tags){ctx.font='800 100px Arial Narrow, Impact, sans-serif';canvas.__track=LvChoreography.vinylTrack(score,text=>ctx.measureText(text).width/100,{emojiTags:tags,cues:expressionCues(score)});canvas.__score=score;canvas.__rules=wordRules;canvas.__emojiTags=tags;canvas.__frameKey=null;}
+    const tags=emojiTagsEnabled();if(canvas.__score!==score||canvas.__library!==wordRuleSets||canvas.__emojiTags!==tags){ctx.font='800 100px Arial Narrow, Impact, sans-serif';canvas.__track=LvChoreography.vinylTrack(score,text=>ctx.measureText(text).width/100,{emojiTags:tags,cues:expressionCues(score)});canvas.__score=score;canvas.__library=wordRuleSets;canvas.__emojiTags=tags;canvas.__frameKey=null;}
     const key=[clock,width,height,bloomMotion.matches].join(':');if(canvas.__frameKey===key)return;canvas.__frameKey=key;ctx.setTransform(dpr,0,0,dpr,0,0);
     const frame=LvChoreography.paintVinyl(ctx,canvas.__track,clock,width,height,{reduced:bloomMotion.matches});canvas.dataset.wordCount=String(frame.words.length);canvas.dataset.glyphCount=String(frame.glyphs.length);canvas.dataset.firstWord=frame.words[0]||'';canvas.dataset.sourceMs=String(mediaMs);canvas.dataset.scoreMs=String(clock);
     if(canvas.__transcript!==frame.text){canvas.__transcript=frame.text;canvas.setAttribute('aria-label','Sung lyric history: '+(frame.text||'waiting for the first word'));}
@@ -6282,6 +6308,7 @@
      TEARDOWN / SHOW
      ══════════════════════════════════════ */
   function teardown() {
+    chrome.storage.onChanged?.removeListener(wordPresetStorageChanged);
     clearTimeout(controlsNoticeTimer);controlsNotice.hidden=true;
     overlayEnabled=false;trackWatch?.sync();
     resumeSyncPanel=resumeSyncPanel||!syncPanel.hidden;
@@ -6318,6 +6345,7 @@
 
   function show() {
     const resuming=!overlayEnabled;overlayEnabled=true;
+    if(resuming){chrome.storage.onChanged?.addListener(wordPresetStorageChanged);chrome.storage.local.get(['lvxWordRuleSets'],result=>{if(result?.lvxWordRuleSets)wordPresetStorageChanged({lvxWordRuleSets:{newValue:result.lvxWordRuleSets}},'local');});}
     if(resuming&&resumeSyncPanel){syncPanel.hidden=false;resumeSyncPanel=false;}
     if (!root.isConnected) {
       root.append(viewport, preview, progress, sidebar, themePicker, shortcutsPanel, errorPanel,controlsNotice);
