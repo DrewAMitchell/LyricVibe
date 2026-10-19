@@ -2415,7 +2415,8 @@
 #lvx-root .lvx-viewport{position:absolute;inset:0;overflow:hidden;pointer-events:none}
 #lvx-root .lvx-viewport .lvx-stage{right:auto;bottom:auto;width:100%;height:100%;box-sizing:border-box}
 #lvx-root .lvx-viewport .lvx-stage{clip-path:inset(0)}
-#lvx-root .lvx-viewport .lvx-stage[data-region-layout=true]{clip-path:inset(var(--lvx-area-top,0%) var(--lvx-area-right,0%) var(--lvx-area-bottom,0%) var(--lvx-area-left,0%))}
+#lvx-root .lvx-viewport .lvx-stage[data-region-layout=true]{clip-path:inset(0)}
+#lvx-root .lvx-placement-scope{flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;padding:8px 0;border-top:1px solid #ffffff24}
 #lvx-root .lvx-placement-custom .lvx-score-stage{padding:12px;gap:12px}
 #lvx-root .lvx-score-phrase{font-size:min(calc(clamp(24px,5vw,80px) * var(--lvx-score-scale,1)),var(--lvx-max-font,128px))}
 #lvx-root .lvx-score-backing{font-size:min(calc(clamp(18px,2.5vw,38px) * var(--lvx-score-scale,1)),var(--lvx-max-font,128px))}
@@ -2759,6 +2760,13 @@
 #lvx-root .lvx-stage-edit-panel summary span{color:#9db6c1;margin-left:12px;font-size:10px}
 #lvx-root .lvx-stage-edit-panel p{font-size:11px;color:#b8d6c7;margin:8px 0 0}
 #lvx-root .lvx-stage-edit-panel [data-error=true]{color:#ffc3b0}
+#lvx-root .lvx-stage-regions-editor{border-top:1px solid #344d55;padding-top:6px}
+#lvx-root .lvx-stage-regions-editor [data-stage=area-hint]{margin:0 0 8px;color:#c9ddc3}
+#lvx-root .lvx-stage-keyframe-list{display:grid;gap:4px;max-height:180px;overflow:auto;margin-top:10px}
+#lvx-root .lvx-stage-keyframe-list>label{display:flex;align-items:flex-start;gap:8px;padding:6px;background:#192b32;border-radius:5px;cursor:pointer;font-size:12px}
+#lvx-root .lvx-stage-keyframe-list input{width:16px;min-height:16px;margin:2px 0;flex:none}
+#lvx-root .lvx-stage-region-management [data-stage=area-name]{max-width:none}
+#lvx-root .lvx-stage-regions-editor [data-stage=keyframe]{min-width:140px}
 #lvx-root .lvx-stage-edit-panel :focus-visible{outline:2px solid #def2c3;outline-offset:3px}
 #lvx-root .lvx-stage[data-region-layout=true]{padding:0!important;overflow:hidden}
 @media(max-width:680px){#lvx-root .lvx-stage-edit-panel{left:12px;right:12px;bottom:12px;padding:12px}#lvx-root .lvx-stage-edit-panel header span{display:none}}

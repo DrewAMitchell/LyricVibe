@@ -50,6 +50,24 @@ export interface ScorePhrase {
   [key: string]: unknown;
 }
 
+export interface ScoreStageArea {
+  id: string;
+  name: string;
+  rect: { x: number; y: number; width: number; height: number };
+  provenance: "manual";
+}
+
+export type ScoreStageRegion = {
+  id: string;
+  target: { kind: "phrase"; id: string };
+  startMs: number;
+  endMs: number;
+  provenance: "manual";
+} & (
+  | { rect: { x: number; y: number; width: number; height: number }; areaId?: never }
+  | { areaId: string; rect?: never }
+);
+
 export interface LyricVibeScore {
   version: "lyricvibe.score.v1";
   revision: number;
@@ -57,6 +75,8 @@ export interface LyricVibeScore {
   source: ScoreSource;
   lyrics: ScoreLyrics;
   phrases: ScorePhrase[];
+  stageAreas?: ScoreStageArea[];
+  stageRegions?: ScoreStageRegion[];
   [key: string]: unknown;
 }
 

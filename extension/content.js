@@ -119,29 +119,65 @@
   const viewport = document.createElement('div');viewport.className='lvx-viewport';viewport.append(stage);
   const placementDefaults={left:0,top:0,width:100,height:100,minFontPx:28,maxFontPx:128};
   let placement={...placementDefaults},placementEditing=false,lyricsOnly=false;
+  let globalPlacement={...placementDefaults},songPlacement=null,placementMediaKey='',placementLoadVersion=0,placementPendingRefresh=false,placementSaveError='';
+  let placementWrites=Promise.resolve();
   var stageEdit={active:false,phraseId:null,wordId:null,regionId:null,drag:null,drawing:false};
   function setLyricsOnly(value){lyricsOnly=Boolean(value);root.classList.toggle('lvx-lyrics-only',lyricsOnly);clearTimeout(controlsNoticeTimer);controlsNotice.hidden=!lyricsOnly;if(lyricsOnly){controlsNoticeTimer=setTimeout(()=>{controlsNotice.hidden=true;},4500);setPlacementEditing(false);toggleThemePicker(false);toggleShortcutsPanel(false);}if(state.score)renderScore(getMediaTimeMs());}
   let controlsNoticeTimer=0;
   const controlsNotice=document.createElement('div');controlsNotice.className='lvx-controls-notice';controlsNotice.hidden=true;controlsNotice.setAttribute('role','status');controlsNotice.setAttribute('aria-live','polite');
   controlsNotice.innerHTML='<span>Controls hidden · press <kbd>\\</kbd> or <kbd>Esc</kbd> to bring them back</span><button type="button">Show controls</button>';
   controlsNotice.querySelector('button').onclick=()=>setLyricsOnly(false);
-  function setPlacementEditing(value){placementEditing=Boolean(value);if(placementEditing){setLyricsOnly(false);toggleThemePicker(false);}bounds.hidden=!placementEditing;root.classList.toggle('lvx-adjusting-area',placementEditing);}
+  function setPlacementEditing(value){placementEditing=Boolean(value);if(placementEditing){setLyricsOnly(false);toggleThemePicker(false);}bounds.hidden=!placementEditing;root.classList.toggle('lvx-adjusting-area',placementEditing);if(!placementEditing&&placementPendingRefresh){placementPendingRefresh=false;void loadPlacement(true);}}
   const bounds=document.createElement('div');bounds.className='lvx-placement-bounds';bounds.hidden=true;
   bounds.setAttribute('aria-label','Lyric placement bounds');
   bounds.innerHTML='<span>Drag the area to move · drag the corner to resize</span><button class="lvx-bounds-done" type="button">Done</button><button class="lvx-bounds-resize" aria-label="Resize lyric bounds" title="Drag to resize">↘</button>';
   bounds.querySelector('.lvx-bounds-done').onclick=()=>{setPlacementEditing(false);toggleThemePicker(true);};
   viewport.append(bounds);
-  function applyPlacement(value,persist=false){
+  function normalizePlacement(value){
     const next={...placementDefaults,...value};
     for(const key of Object.keys(placementDefaults))if(!Number.isFinite(next[key]))throw Error('Placement values must be numbers.');
     next.width=clamp(next.width,20,100);next.height=clamp(next.height,20,100);
     next.left=clamp(next.left,0,100-next.width);next.top=clamp(next.top,0,100-next.height);next.minFontPx=clamp(next.minFontPx,12,96);next.maxFontPx=clamp(next.maxFontPx,next.minFontPx,200);
+    return Object.fromEntries(Object.keys(placementDefaults).map(key=>[key,next[key]]));
+  }
+  function placementSongKey(){const key=LvScore.mediaKey({url:location.href});return /^youtube:[A-Za-z0-9_-]{11}$/.test(key)?key:'';}
+  function writePlacement(action,key){
+    placementLoadVersion++;placementSaveError='';syncPlacementFields();
+    placementWrites=placementWrites.then(action).catch(error=>{if(key===placementSongKey()){placementSaveError=error.message;setHud('Area changed in this tab; local save failed: '+error.message,true,true);syncPlacementFields();}});
+    return placementWrites;
+  }
+  async function loadPlacement(force=false){
+    const key=placementSongKey();if(!force&&placementMediaKey===key)return;
+    const version=++placementLoadVersion;if(placementMediaKey!==key){placementMediaKey=key;songPlacement=null;applyPlacement(globalPlacement);}
+    try{await placementWrites;const stored=await chrome.storage.local.get(['lvxPlacement',...(key?['lvxPlacement:'+key]:[])]);
+      if(version!==placementLoadVersion||key!==placementSongKey())return;
+      globalPlacement=normalizePlacement(stored.lvxPlacement||placementDefaults);songPlacement=key&&stored['lvxPlacement:'+key]?normalizePlacement(stored['lvxPlacement:'+key]):null;
+      applyPlacement(songPlacement||globalPlacement);syncPlacementFields();if(state.score)renderScore(getMediaTimeMs());
+    }catch(error){if(version===placementLoadVersion)setHud('Could not load this song’s lyric area: '+error.message,true,true);}
+  }
+  function useGlobalPlacement(){
+    const key=placementSongKey();if(!key)throw Error('Open a song before changing its area.');
+    placementMediaKey=key;songPlacement=null;applyPlacement(globalPlacement);syncPlacementFields();if(state.score)renderScore(getMediaTimeMs());
+    return writePlacement(()=>chrome.storage.local.remove('lvxPlacement:'+key),key).then(()=>{if(key===placementSongKey())return loadPlacement(true);});
+  }
+  function makeGlobalPlacement(){
+    const key=placementSongKey(),value=normalizePlacement(placement);globalPlacement=value;syncPlacementFields();
+    return writePlacement(()=>chrome.storage.local.set({lvxPlacement:value}),key);
+  }
+  function placementStorageChanged(changes,area){
+    if(area!=='local'||!changes.lvxPlacement&&!changes['lvxPlacement:'+placementSongKey()])return;
+    const globalSame=!changes.lvxPlacement||JSON.stringify(changes.lvxPlacement.newValue||placementDefaults)===JSON.stringify(globalPlacement),songChange=changes['lvxPlacement:'+placementSongKey()],songSame=!songChange||JSON.stringify(songChange.newValue||null)===JSON.stringify(songPlacement);
+    if(globalSame&&songSame)return;
+    if(placementEditing||document.activeElement?.matches('[data-placement]')){placementPendingRefresh=true;return;}
+    void loadPlacement(true);
+  }
+  function applyPlacement(value,persist=false){
+    const next=normalizePlacement(value);
     placement=next;
     for(const node of [stage,bounds]){const area=node===stage&&stage.dataset.regionLayout==='true'?placementDefaults:next;Object.assign(node.style,{left:area.left+'%',top:area.top+'%',width:area.width+'%',height:area.height+'%'});}
-    for(const [edge,value]of Object.entries({top:next.top,right:100-next.left-next.width,bottom:100-next.top-next.height,left:next.left}))viewport.style.setProperty('--lvx-area-'+edge,value+'%');
     stage.style.setProperty('--lvx-max-font',next.maxFontPx+'px');stage.style.setProperty('--lvx-min-font',next.minFontPx+'px');
     viewport.classList.toggle('lvx-placement-custom',next.left!==0||next.top!==0||next.width!==100||next.height!==100);
-    if(persist)chrome.storage.local.set({lvxPlacement:next}).catch(error=>setHud('Bounds changed in this tab; local save failed: '+error.message,true,true));
+    if(persist){const key=placementSongKey();placementMediaKey=key;if(key)songPlacement={...next};else globalPlacement={...next};void writePlacement(()=>chrome.storage.local.set({[key?'lvxPlacement:'+key:'lvxPlacement']:next}),key);syncPlacementFields();}
     if(persist&&state.score)renderScore(getMediaTimeMs());
     return {...next};
   }
@@ -382,6 +418,7 @@
 
   /* Display picker: one tile per theme, animated with this video's own lyrics. */
   const themePicker = document.createElement('div');
+  themePicker.addEventListener('focusout',()=>{if(placementPendingRefresh&&!placementEditing)queueMicrotask(()=>{if(!document.activeElement?.matches('[data-placement]')){placementPendingRefresh=false;void loadPlacement(true);}});});
   themePicker.className = 'lvx-theme-picker'; themePicker.hidden = true;
   const studio={view:'look',page:0,effectsOpen:false,areaOpen:false,exitOpen:false};
   let backingDisplay=LvChoreography.backingSettings(),backingLabels={};
@@ -544,11 +581,13 @@
     const performanceControls=document.createElement('div');performanceControls.className='lvx-performance-controls';
     performanceControls.innerHTML='<button type="button" data-adjust-area>Adjust lyric area</button><button type="button" data-lyrics-only>Lyrics only <kbd>\\</kbd></button><p>Move and resize the lyric area. Press \\ to hide or restore controls; Esc also restores them.</p>';
     performanceControls.querySelector('[data-adjust-area]').onclick=()=>setPlacementEditing(true);performanceControls.querySelector('[data-lyrics-only]').onclick=()=>setLyricsOnly(true);themePicker.append(performanceControls);
+    const areaScope=document.createElement('div');areaScope.className='lvx-placement-scope';areaScope.innerHTML='<p data-placement-status role="status"></p><button type="button" data-placement-inherit>Use global default</button><button type="button" data-placement-global>Make this the global default</button>';
+    areaScope.querySelector('[data-placement-inherit]').onclick=()=>void useGlobalPlacement();areaScope.querySelector('[data-placement-global]').onclick=()=>void makeGlobalPlacement();performanceControls.append(areaScope);
     const editStage=document.createElement('button');editStage.type='button';editStage.textContent='Stage Edit ↗';editStage.dataset.stageEdit='open';editStage.title='Draw timed regions and style individual words on the video';editStage.onclick=()=>void openStageEdit();performanceControls.prepend(editStage);
     const textSizes=document.createElement('div');textSizes.className='lvx-performance-sizes';
     textSizes.innerHTML=['minFontPx','maxFontPx'].map(key=>`<label>${key==='minFontPx'?'Minimum text (preferred)':'Maximum text'} <span>px</span><input aria-label="${key==='minFontPx'?'Minimum lyric text size':'Maximum lyric text size'}" data-placement="${key}" type="number" min="12" max="${key==='minFontPx'?96:200}" value="${placement[key]}" step="1"></label>`).join('');
     textSizes.addEventListener('change',event=>{const key=event.target.dataset.placement,value=Number(event.target.value);if(key&&event.target.value.trim()&&Number.isFinite(value)){applyPlacement({...placement,[key]:value},true);syncPlacementFields();}});performanceControls.append(textSizes);textSizes.querySelector('[data-placement="maxFontPx"]').disabled=choreography.mode==='puzzle'&&choreography.fillStage;textSizes.querySelector('[data-placement="maxFontPx"]').title='Turn off Fit puzzle to lyric area to use this maximum.';for(const input of textSizes.querySelectorAll('input'))if(choreography.mode==='vinyl')input.disabled=true;
-    const sizeHint=document.createElement('small');sizeHint.textContent='Turntable moves and scales with the lyric area.';performanceControls.append(sizeHint);sizeHint.hidden=choreography.mode!=='vinyl';
+    const sizeHint=document.createElement('small');sizeHint.textContent='Turntable moves and scales with this song’s lyric area.';performanceControls.append(sizeHint);sizeHint.hidden=choreography.mode!=='vinyl';
     const motionControls=document.createElement('div');motionControls.className='lvx-motion-controls';
     motionControls.innerHTML='<label>Layout <select aria-label="Lyric choreography"><option value="classic">Classic</option><option value="fall">Falling words</option><option value="puzzle">Word puzzle</option><option value="vinyl">Vinyl history</option></select></label><label><input type="checkbox"> Allow upside-down words</label><label>Expression <select aria-label="Automatic lyric expression"><option value="auto">Automatic</option><option value="off">Static + authored</option></select></label><button type="button" data-preview-play>Play preview</button><span>Expression works in every layout. Your authored effects take priority.</span>';
     const motionSelect=motionControls.querySelector('select'),upside=motionControls.querySelector('input');motionSelect.value=choreography.mode;upside.checked=choreography.upsideDown;upside.disabled=choreography.mode!=='puzzle';
@@ -596,7 +635,7 @@
       grid.append(tile);
     }
     organizeStyleStudio({heading,performanceControls,motionControls,danceLabel,bloomLabel,lingerControls,settings,grid});
-    themePicker.dataset.motion=choreography.mode;setPreviewPlaying(previewPlaying);
+    themePicker.dataset.motion=choreography.mode;syncPlacementFields();setPreviewPlaying(previewPlaying);
   }
   function organizeStyleStudio({heading,performanceControls,motionControls,danceLabel,bloomLabel,lingerControls,settings,grid}){
     heading.className='lvx-studio-heading';heading.innerHTML='<div><small>LYRICVIBE</small><h2>Display style</h2></div><button type="button" aria-label="Close display studio">✕</button>';
@@ -632,7 +671,7 @@
     motionControls.remove();
     settings.open=studio.areaOpen;settings.ontoggle=()=>{if(!settings.isConnected)return;studio.areaOpen=settings.open;if(settings.open){exits.open=false;studio.exitOpen=false;}};
     const exits=document.createElement('details');exits.className='lvx-studio-exits';exits.open=studio.exitOpen;exits.innerHTML='<summary>Phrase exits <span>When the singing stops</span></summary>';exits.append(lingerControls);exits.ontoggle=()=>{if(!exits.isConnected)return;studio.exitOpen=exits.open;if(exits.open){settings.open=false;studio.areaOpen=false;}};
-    performanceControls.querySelector('p').textContent='Global lyric boundary · drag to move, resize to fit. Includes Turntable and clips authored phrase regions. Saved for every song on this browser.';
+    performanceControls.querySelector('p').textContent='Drag to move, resize to fit. Changes save for this song. Named Stage Edit regions override this default during their keyframes.';
     const backing=document.createElement('details');backing.className='lvx-backing-controls';
     backing.innerHTML='<summary>Backing vocals <span>Area · part names</span></summary><label>Space <select aria-label="Backing vocal space"><option value="separate">Separate area</option><option value="shared">Share main area</option></select></label><label>Area limit <input aria-label="Backing area limit" type="range" min="15" max="40" step="1"><output></output></label><p>All backing parts share this limit. Smaller, plain text at 65% opacity. Drawn Stage Edit regions take priority.</p>';
     const backingSpace=backing.querySelector('select'),backingArea=backing.querySelector('input'),backingValue=backing.querySelector('output');backingSpace.value=backingDisplay.space;backingArea.value=String(Math.round(backingDisplay.area*100));backingValue.textContent=backingArea.value+'%';
@@ -647,13 +686,13 @@
   }
   function toggleThemePicker(force) {
     const open = force ?? themePicker.hidden;
-    if(open){const key=wordPresetKey();if(studio.wordSetMediaKey!==key){studio.wordSetMediaKey=key;studio.wordSetId=LvChoreography.wordSetFor(wordRuleSets,key).id;}buildThemePicker();}
+    if(open){void loadPlacement();const key=wordPresetKey();if(studio.wordSetMediaKey!==key){studio.wordSetMediaKey=key;studio.wordSetId=LvChoreography.wordSetFor(wordRuleSets,key).id;}buildThemePicker();}
     themePicker.hidden = !open; themeButton.setAttribute('aria-expanded', String(open));
     if(open)setPreviewPlaying(previewPlaying);else setPreviewPlaying(false);
     if(!open&&!placementEditing)bounds.hidden=true;
     if (open) themePicker.querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
   }
-  function syncPlacementFields(){for(const input of themePicker.querySelectorAll('[data-placement]'))if(document.activeElement!==input)input.value=String(Math.round(placement[input.dataset.placement]*10)/10);}
+  function syncPlacementFields(){for(const input of themePicker.querySelectorAll('[data-placement]'))if(document.activeElement!==input)input.value=String(Math.round(placement[input.dataset.placement]*10)/10);const status=themePicker.querySelector('[data-placement-status]');if(status)status.textContent=placementSaveError?'Area not saved: '+placementSaveError:!placementSongKey()?'Global default · this player has no supported song identity':songPlacement?'This song · custom area':'This song · using global default';const inherit=themePicker.querySelector('[data-placement-inherit]');if(inherit)inherit.disabled=!songPlacement;const global=themePicker.querySelector('[data-placement-global]');if(global)global.disabled=!placementSongKey();}
   themePicker.addEventListener('keydown', event => { if (event.key === 'Escape') { event.stopPropagation(); toggleThemePicker(false); themeButton.focus(); } });
   document.addEventListener('pointerdown', event => { if (!themePicker.hidden && !themePicker.contains(event.target) && !bounds.contains(event.target) && event.target !== themeButton) toggleThemePicker(false); }, true);
 
@@ -3441,8 +3480,58 @@
     try{const item=performanceItemDraft(rect);if(await stageOperation({type:'setStageItem',item})){stageEdit.itemId=item.id;stageEdit.itemRect=item.rect;stageEdit.fieldsDirty=false;refreshPerformanceEditor(true);return true;}}catch(error){stageMessage(error.message,true);}return false;
   }
   buildPerformanceEditor();
+  function buildStageRegionsEditor(){
+    if(stageControl('keyframe'))return;
+    const panel=document.createElement('div');panel.className='lvx-stage-regions-editor';
+    panel.innerHTML='<div class="lvx-stage-edit-row"><label>Keyframe<select data-stage="keyframe" aria-label="Stage keyframe"></select></label><button type="button" data-stage="keyframe-new">New keyframe</button><button type="button" data-stage="keyframe-split">Split at playhead</button></div><div class="lvx-stage-edit-row"><label>Region<select data-stage="area" aria-label="Keyframe region"></select></label><button type="button" data-stage="area-new">New named region</button></div><p data-stage="area-hint"></p><details class="lvx-stage-region-management"><summary>Regions &amp; groups</summary><div class="lvx-stage-edit-row"><label>Region name<input data-stage="area-name" aria-label="Region name" maxlength="80"></label><button type="button" data-stage="area-rename">Rename</button><button type="button" data-stage="area-delete">Delete unused region</button></div><div data-stage="keyframe-list" class="lvx-stage-keyframe-list" aria-label="Keyframes to group"></div><div class="lvx-stage-edit-row"><label>Target region<select data-stage="group-area" aria-label="Group target region"></select></label><button type="button" data-stage="group-assign">Assign selected</button><button type="button" data-stage="group-detach">Make selected independent</button></div><p data-stage="group-status"></p></details>';
+    stageControl('phrase').closest('.lvx-stage-edit-row').after(panel);stageEdit.keyframeSelection=new Set();
+    stageControl('keyframe').onchange=()=>{if(stageEdit.fieldsDirty)return;const id=stageControl('keyframe').value;if(!id){newStageKeyframe();return;}stageEdit.regionId=id;stageEdit.newInterval=null;stageEdit.areaId=timing.draft.score.stageRegions.find(r=>r.id===id)?.areaId||'';refreshStageEdit();};
+    stageControl('keyframe-new').onclick=newStageKeyframe;
+    stageControl('keyframe-split').onclick=async()=>{const current=selectedRegion(),atMs=Math.round(getMediaTimeMs());if(!current||atMs<=current.startMs||atMs>=current.endMs){stageMessage('Place the playhead inside this keyframe before splitting.',true);return;}const newRegionId='region-'+crypto.randomUUID();if(await stageOperation({type:'splitStageRegion',regionId:current.id,atMs,newRegionId})){stageEdit.regionId=newRegionId;stageEdit.newInterval=null;refreshStageEdit();stageMessage('Keyframe split. Choose a different region for the later part, or keep both together.');}};
+    stageControl('area').onchange=async()=>{const areaId=stageControl('area').value;const current=selectedRegion();if(current){if(!await stageOperation({type:'assignStageRegions',regionIds:[current.id],areaId:areaId||null})){refreshStageEdit();return;}}stageEdit.areaId=areaId;refreshStageEdit();};
+    stageControl('area-new').onclick=async()=>{const areas=timing.draft.score.stageAreas||[];let n=1;while(areas.some(a=>a.name==='Region '+n))n++;const area={id:'area-'+crypto.randomUUID(),name:'Region '+n,rect:stageRegionRect(),provenance:'manual'},current=selectedRegion(),ops=[{type:'setStageArea',area}];if(current)ops.push({type:'assignStageRegions',regionIds:[current.id],areaId:area.id});if(await stageOperation(ops)){stageEdit.areaId=area.id;refreshStageEdit();stageControl('area-name').closest('details').open=true;stageControl('area-name').focus();stageControl('area-name').select();}};
+    stageControl('area-name').oninput=()=>{const area=selectedStageArea();if(area){stageEdit.areaNameDrafts||={};stageEdit.areaNameDrafts[area.id]={name:stageControl('area-name').value,basis:area.name};}};
+    stageControl('area-name').onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();stageControl('area-rename').click();}if(event.key==='Escape'){event.preventDefault();event.stopPropagation();delete stageEdit.areaNameDrafts?.[stageEdit.areaId];refreshStageEdit();}};
+    stageControl('area-rename').onclick=async()=>{const area=selectedStageArea(),draft=stageEdit.areaNameDrafts?.[area?.id];if(draft&&draft.basis!==area.name){stageMessage('This region was renamed elsewhere. Press Escape in its name to reload, or edit your name again.',true);return;}if(area&&await stageOperation({type:'setStageArea',area:{...area,name:stageControl('area-name').value.trim()}})){delete stageEdit.areaNameDrafts?.[area.id];refreshStageEdit();}};
+    stageControl('area-delete').onclick=async()=>{const area=selectedStageArea();if(area&&await stageOperation({type:'deleteStageArea',areaId:area.id})){stageEdit.areaId='';refreshStageEdit();}};
+    stageControl('group-assign').onclick=()=>void assignStageKeyframes(stageControl('group-area').value);
+    stageControl('group-detach').onclick=()=>void assignStageKeyframes(null);
+  }
+  function selectedStageArea(){return timing.draft?.score.stageAreas?.find(a=>a.id===stageEdit.areaId)||null;}
+  function stageRegionRect(){return selectedRegion()?.rect||selectedStageArea()?.rect||{x:placement.left/100,y:placement.top/100,width:placement.width/100,height:placement.height/100};}
+  function newStageKeyframe(){
+    if(stageEditBusy()||stageEdit.fieldsDirty)return;const phrase=stagePhrase();if(!phrase)return;
+    const start=Math.max(0,phrase.startMs+timing.draft.score.offsetMs),end=Math.max(start+1,phrase.endMs+timing.draft.score.offsetMs),regions=(timing.draft.score.stageRegions||[]).filter(r=>r.target.id===phrase.id).sort((a,b)=>a.startMs-b.startMs),gaps=[];let cursor=start;
+    for(const r of regions){if(r.startMs>cursor)gaps.push({startMs:cursor,endMs:Math.min(end,r.startMs)});cursor=Math.max(cursor,r.endMs);if(cursor>=end)break;}if(cursor<end)gaps.push({startMs:cursor,endMs:end});
+    const now=getMediaTimeMs(),gap=gaps.find(g=>now>=g.startMs&&now<g.endMs)||gaps.find(g=>g.startMs>=now)||gaps[0];
+    if(!gap){stageMessage('This phrase is fully assigned. Split a keyframe to give part of it a different region.',true);return;}
+    stageEdit.regionId=null;stageEdit.newInterval=gap;refreshStageEdit();stageMessage('New keyframe interval selected. Choose a region, then Use interval or Draw region.');
+  }
+  async function assignStageKeyframes(areaId){
+    const regionIds=[...(stageEdit.keyframeSelection||[])];if(!regionIds.length||areaId==='')return;
+    if(await stageOperation({type:'assignStageRegions',regionIds,areaId})){refreshStageEdit();stageMessage(areaId===null?'Selected keyframes now have independent copies of their regions.':'Selected keyframes now share the target region.');}
+  }
+  function refreshStageRegions(){
+    if(!stageControl('keyframe')||!timing.draft)return;const score=timing.draft.score,regions=score.stageRegions||[],areas=score.stageAreas||[],current=selectedRegion(),busy=stageEditBusy()||stageEdit.fieldsDirty;
+    const selectionKey=LvScore.mediaKey(score.source)+':'+score.lyrics.contentHash;if(stageEdit.selectionKey!==selectionKey){stageEdit.selectionKey=selectionKey;stageEdit.keyframeSelection=new Set();stageEdit.areaNameDrafts={};}
+    if(current)stageEdit.areaId=current.areaId||'';else if(!areas.some(a=>a.id===stageEdit.areaId))stageEdit.areaId='';
+    const option=(value,text)=>{const o=document.createElement('option');o.value=value;o.textContent=text;return o;},time=r=>(r.startMs/1000).toFixed(2)+'–'+(r.endMs/1000).toFixed(2)+'s',areaName=r=>areas.find(a=>a.id===r.areaId)?.name||'Independent';
+    stageControl('keyframe').replaceChildren(option('','New keyframe'),...regions.filter(r=>r.target.id===stageEdit.phraseId).sort((a,b)=>a.startMs-b.startMs).map(r=>option(r.id,time(r)+' · '+areaName(r))));stageControl('keyframe').value=current?.id||'';
+    stageControl('area').replaceChildren(option('','Independent area'),...areas.map(a=>option(a.id,a.name)));stageControl('area').value=stageEdit.areaId||'';
+    const area=selectedStageArea(),members=area?regions.filter(r=>r.areaId===area.id).length:0;
+    stageControl('area-hint').textContent=area?area.name+' · '+members+' keyframe'+(members===1?'':'s')+' share this area. Dragging it moves the whole group.':current?'This keyframe has its own area. Name it to share it with others.':'No keyframe yet. The song’s default area is used until you create one.';
+    if(document.activeElement!==stageControl('area-name'))stageControl('area-name').value=stageEdit.areaNameDrafts?.[area?.id]?.name??area?.name??'';
+    const target=stageControl('group-area').value;stageControl('group-area').replaceChildren(option('','Choose a region'),...areas.map(a=>option(a.id,a.name)));stageControl('group-area').value=areas.some(a=>a.id===target)?target:area?.id||'';
+    const selection=stageEdit.keyframeSelection||new Set();stageEdit.keyframeSelection=new Set([...selection].filter(id=>regions.some(r=>r.id===id)));
+    const list=stageControl('keyframe-list');list.replaceChildren();for(const r of [...regions].sort((a,b)=>a.startMs-b.startMs||a.target.id.localeCompare(b.target.id))){const label=document.createElement('label'),input=document.createElement('input'),text=document.createElement('span');input.type='checkbox';input.dataset.keyframeId=r.id;input.checked=stageEdit.keyframeSelection.has(r.id);input.disabled=busy;const phrase=score.phrases.find(p=>p.id===r.target.id);text.textContent=time(r)+' · '+(phrase?.words.map(w=>w.text).join(' ')||'Phrase')+' · '+areaName(r);label.append(input,text);input.onchange=()=>{if(input.checked)stageEdit.keyframeSelection.add(r.id);else stageEdit.keyframeSelection.delete(r.id);refreshStageGroupActions();};list.append(label);}
+    for(const node of stagePanel.querySelectorAll('.lvx-stage-regions-editor button,.lvx-stage-regions-editor select,.lvx-stage-regions-editor input'))node.disabled=busy;
+    stageControl('keyframe-split').disabled=busy||!current;stageControl('area-name').disabled=busy||!area;stageControl('area-rename').disabled=busy||!area;stageControl('area-delete').disabled=busy||!area||members>0;stageControl('area-delete').title=members?'Assign or detach its keyframes before deleting this region.':'';
+    stageControl('group-area').onchange=refreshStageGroupActions;refreshStageGroupActions();
+  }
+  function refreshStageGroupActions(){const count=stageEdit.keyframeSelection?.size||0,busy=stageEditBusy()||stageEdit.fieldsDirty;stageControl('group-assign').disabled=busy||!count||!stageControl('group-area').value;stageControl('group-detach').disabled=busy||!count;stageControl('group-status').textContent=count+' keyframe'+(count===1?'':'s')+' selected · assignment and detaching are undoable.';}
+  buildStageRegionsEditor();
   function stagePhrase(){return timing.draft?.score.phrases.find(p=>p.id===stageEdit.phraseId);}
-  function selectedRegion(){return stageEdit.subject==='performance'?{rect:stageEdit.itemRect}:timing.draft?.score.stageRegions?.find(r=>r.id===stageEdit.regionId)||null;}
+  function selectedRegion(){if(stageEdit.subject==='performance')return {rect:stageEdit.itemRect};const score=timing.draft?.score,r=score?.stageRegions?.find(r=>r.id===stageEdit.regionId);return r?{...r,rect:LvScore.resolveStageRegionRect(score,r)}:null;}
   function stageMessage(text,error=false){const node=stageControl('status');node.textContent=text;node.dataset.error=String(error);}
   function stageEditBusy(){return timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active;}
   async function openStageEdit(){
@@ -3463,22 +3552,22 @@
   function refreshStageEdit(selectRegion=false){
     if(!stageEdit.active)return;
     refreshPerformanceEditor(selectRegion);if(stageEdit.subject==='performance')return;const p=stagePhrase();if(!p){stageEdit.subject='performance';refreshPerformanceEditor(true);return;}
-    if(selectRegion){const regions=(timing.draft.score.stageRegions||[]).filter(r=>r.target.id===p.id);stageEdit.regionId=(LvScore.stageRegionAt(timing.draft.score,p.id,getMediaTimeMs())||regions[0])?.id||null;stageEdit.wordId=p.words.find(w=>!w.excluded)?.id||null;}
+    if(selectRegion){const regions=(timing.draft.score.stageRegions||[]).filter(r=>r.target.id===p.id);stageEdit.regionId=(LvScore.stageRegionAt(timing.draft.score,p.id,getMediaTimeMs())||regions[0])?.id||null;stageEdit.newInterval=null;stageEdit.wordId=p.words.find(w=>!w.excluded)?.id||null;}
     stageControl('phrase').value=p.id;
-    const region=selectedRegion();if(!stageEdit.fieldsDirty){stageControl('start').value=((region?.startMs??Math.max(0,p.startMs+timing.draft.score.offsetMs))/1000).toFixed(3);stageControl('end').value=((region?.endMs??Math.max(1,p.endMs+timing.draft.score.offsetMs))/1000).toFixed(3);stageEdit.previewRevision=timing.draft.previewRevision;stageEdit.token=timing.draft.token;}
+    const region=selectedRegion();if(!stageEdit.fieldsDirty){stageControl('start').value=((region?.startMs??stageEdit.newInterval?.startMs??Math.max(0,p.startMs+timing.draft.score.offsetMs))/1000).toFixed(3);stageControl('end').value=((region?.endMs??stageEdit.newInterval?.endMs??Math.max(1,p.endMs+timing.draft.score.offsetMs))/1000).toFixed(3);stageEdit.previewRevision=timing.draft.previewRevision;stageEdit.token=timing.draft.token;}
     stageControl('word').replaceChildren(...p.words.filter(w=>!w.excluded).map(w=>{const o=document.createElement('option');o.value=w.id;o.textContent=w.text;return o;}));stageControl('word').value=stageEdit.wordId;
     const word=p.words.find(w=>w.id===stageEdit.wordId);stageControl('look').value=word?.appearance?.look||'';stageControl('motion').value=word?.appearance?.motion??'';stageControl('art').value=word?.appearance?.art??'';
     for(const button of stagePanel.querySelectorAll('button,select,input'))button.disabled=stageEditBusy();stageControl('remove').disabled=stageEditBusy()||stageEdit.fieldsDirty||!region;stageControl('undo').disabled=stageEditBusy()||stageEdit.fieldsDirty||!timing.draft.undoScores?.length;
     for(const name of ['phrase','word','look','motion','art'])stageControl(name).disabled=stageEditBusy()||stageEdit.fieldsDirty;stageControl('revert').hidden=!stageEdit.fieldsDirty;
     const emojiWord=p.words.find(w=>w.id===stageEdit.wordId);if(stageControl('emoji'))fillEmojiPicker(stageControl('emoji'),stageControl('emoji-search').value||emojiWord?.text,emojiWord?.appearance?.emoji??'auto');
-    paintStageBox();state.scoreSignature='';renderScore(getMediaTimeMs());refreshEffectTracks();
+    refreshStageRegions();paintStageBox();state.scoreSignature='';renderScore(getMediaTimeMs());refreshEffectTracks();
   }
-  function paintStageBox(){const r=stageEdit.drag?.rect||selectedRegion()?.rect||{x:.1,y:.2,width:.8,height:.55};Object.assign(stageBox.style,{left:r.x*100+'%',top:r.y*100+'%',width:r.width*100+'%',height:r.height*100+'%'});stageSurface.classList.toggle('lvx-drawing-region',stageEdit.drawing);stageControl('draw').setAttribute('aria-pressed',String(stageEdit.drawing));stageBox.querySelector('span').textContent=stageEdit.subject==='performance'?'Performance item area':'Draw or drag this phrase’s region';const placing=stageEdit.subject==='performance'&&stageEdit.drawing;stagePanel.classList.toggle('lvx-stage-placing',placing);root.classList.toggle('lvx-effects-drawing',placing&&stageEdit.dock==='effects');if(stageEdit.dock==='effects'){stageSurface.hidden=!placing;syncPanel.classList.toggle('lvx-effects-placing',placing);}if(stageControl('item-placement-stop'))stageControl('item-placement-stop').hidden=!placing;}
+  function paintStageBox(){const r=stageEdit.drag?.rect||stageRegionRect();Object.assign(stageBox.style,{left:r.x*100+'%',top:r.y*100+'%',width:r.width*100+'%',height:r.height*100+'%'});stageSurface.classList.toggle('lvx-drawing-region',stageEdit.drawing);stageControl('draw').setAttribute('aria-pressed',String(stageEdit.drawing));stageBox.querySelector('span').textContent=stageEdit.subject==='performance'?'Performance item area':selectedStageArea()?selectedStageArea().name+' · drag moves all assigned keyframes':'Draw or drag this keyframe’s region';const placing=stageEdit.drawing;stagePanel.classList.toggle('lvx-stage-placing',placing);root.classList.toggle('lvx-effects-drawing',placing&&stageEdit.dock==='effects');if(stageEdit.dock==='effects'){stageSurface.hidden=!placing;syncPanel.classList.toggle('lvx-effects-placing',placing);}if(stageControl('item-placement-stop'))stageControl('item-placement-stop').hidden=!placing;}
   async function stageOperation(operation){
     if(stageEditBusy()||!stageEdit.active)return false;
     if(stageEdit.previewRevision!==timing.draft?.previewRevision||stageEdit.token!==timing.draft?.token){stageMessage('The preview changed elsewhere. Revert the interval or reopen Stage Edit before changing it.',true);return false;}
     timing.busy=true;
-    try{const result=await timingRequest('LV_TIMING_TUNE',{operation});timing.draft=result.preview;timing.view='proposed';stageEdit.previewRevision=result.preview.previewRevision;if(['setStageRegion','setStageItem','deleteStageItem'].includes(operation.type))stageEdit.fieldsDirty=false;stageMessage('Preview updated · Save score to keep it.');return true;}
+    try{const result=await timingRequest('LV_TIMING_TUNE',{operation});timing.draft=result.preview;timing.view='proposed';stageEdit.previewRevision=result.preview.previewRevision;if([].concat(operation).some(op=>['setStageRegion','setStageArea','assignStageRegions','splitStageRegion','setStageItem','deleteStageItem'].includes(op.type)))stageEdit.fieldsDirty=false;stageMessage('Preview updated · Save score to keep it.');return true;}
     catch(error){stageMessage(error.message,true);return false;}
     finally{timing.busy=false;refreshTimingPanel();refreshStageEdit();}
   }
@@ -3487,8 +3576,9 @@
     const p=stagePhrase();if(!p)return;
     const start=stageControl('start').value,end=stageControl('end').value;
     if(!start.trim()||!end.trim()){stageMessage('Enter the start and end of this region.',true);return;}
-    const region={id:stageEdit.regionId||'region-'+crypto.randomUUID(),target:{kind:'phrase',id:p.id},startMs:Math.round(Number(start)*1000),endMs:Math.round(Number(end)*1000),rect,provenance:'manual'};
-    if(await stageOperation({type:'setStageRegion',region})){stageEdit.regionId=region.id;refreshStageEdit();return true;}return false;
+    const area=selectedStageArea(),region={id:stageEdit.regionId||'region-'+crypto.randomUUID(),target:{kind:'phrase',id:p.id},startMs:Math.round(Number(start)*1000),endMs:Math.round(Number(end)*1000),...(area?{areaId:area.id}:{rect}),provenance:'manual'},operations=[];
+    if(area&&JSON.stringify(area.rect)!==JSON.stringify(rect))operations.push({type:'setStageArea',area:{...area,rect}});operations.push({type:'setStageRegion',region});
+    if(await stageOperation(operations)){stageEdit.regionId=region.id;stageEdit.newInterval=null;refreshStageEdit();return true;}return false;
   }
   for(const [name,values]of [['look',LvScore.DISPLAY_CATALOG.looks],['motion',LvScore.DISPLAY_CATALOG.motions],['art',LvScore.DISPLAY_CATALOG.wordArt]]){const select=stageControl(name);const inherited=document.createElement('option');inherited.value='';inherited.textContent='Use display default';select.append(inherited);for(const value of values){const option=document.createElement('option');option.value=value;option.textContent=name==='look'?THEME_LABELS[value]:name==='art'?({off:'No illustration',...LvChoreography.wordRuleEffects})[value]:({off:'Static',tip:'Topple',mix:'Mix',flex:'Flex',bounce:'Bounce',launch:'Launch',rock:'Rock in an arc',float:'Levitate'})[value];select.append(option);}}
   stageControl('revert').onclick=()=>{stageEdit.fieldsDirty=false;refreshStageEdit();stageMessage('Interval restored from the preview.');};
@@ -3499,21 +3589,21 @@
   stageControl('draw').onclick=()=>{stageEdit.drawing=!stageEdit.drawing;paintStageBox();stageMessage(stageEdit.drawing?'Drag across the video to draw this phrase’s region.':'Drag the region to move it; drag its corner to resize.');};
   stageControl('seek').onclick=()=>{const p=stagePhrase(),media=getMedia();if(p&&media){media.pause();media.currentTime=Math.max(0,p.startMs+timing.draft.score.offsetMs)/1000;renderScore(getMediaTimeMs());}};
   stageControl('play').onclick=()=>{const media=getMedia();if(media){if(media.paused)void media.play().catch(e=>stageMessage(e.message,true));else media.pause();}};
-  stageControl('interval').onclick=()=>void saveStageRegion(selectedRegion()?.rect||{x:.1,y:.2,width:.8,height:.55});
+  stageControl('interval').onclick=()=>void saveStageRegion(stageRegionRect());
   stageControl('remove').onclick=async()=>{if(await stageOperation({type:'deleteStageRegion',regionId:stageEdit.regionId})){stageEdit.regionId=null;refreshStageEdit();}};
   stageControl('undo').onclick=async()=>{if(stageEditBusy())return;timing.busy=true;try{timing.draft=(await timingRequest('LV_TIMING_UNDO')).preview;stageMessage('Last preview edit undone.');}catch(e){stageMessage(e.message,true);}finally{timing.busy=false;refreshStageEdit(true);}};
-  stageControl('save').onclick=async()=>{if(!timing.draft){stageMessage('The preview closed elsewhere. Reopen Stage Edit.',true);return;}if(stageEdit.fieldsDirty&&!await saveStageRegion(selectedRegion()?.rect||{x:.1,y:.2,width:.8,height:.55}))return;await applyTimingReview();stageMessage(timing.saveError||'Score saved. Keep editing or choose Done.',Boolean(timing.saveError));refreshStageEdit(true);};
+  stageControl('save').onclick=async()=>{if(!timing.draft){stageMessage('The preview closed elsewhere. Reopen Stage Edit.',true);return;}if(stageEdit.fieldsDirty&&!await saveStageRegion(stageRegionRect()))return;await applyTimingReview();stageMessage(timing.saveError||'Score saved. Keep editing or choose Done.',Boolean(timing.saveError));refreshStageEdit(true);};
   stageControl('emoji-search').oninput=()=>fillEmojiPicker(stageControl('emoji'),stageControl('emoji-search').value||stagePhrase()?.words.find(w=>w.id===stageEdit.wordId)?.text,stageControl('emoji').value);
   for(const name of ['look','motion','art','emoji'])stageControl(name).onchange=()=>{const appearance={};for(const k of ['look','motion','art'])if(stageControl(k).value)appearance[k]=stageControl(k).value;if(stageControl('emoji').value!=='auto')appearance.emoji=stageControl('emoji').value;void stageOperation({type:'setWordAppearance',wordId:stageEdit.wordId,appearance:Object.keys(appearance).length?appearance:null});};
   stageSurface.addEventListener('pointerdown',event=>{
     if(event.button!==0||stageEditBusy()||!stageEdit.active)return;if(!stageEdit.drawing&&!event.target.closest('.lvx-stage-edit-box'))return;
-    event.preventDefault();const bounds=viewport.getBoundingClientRect(),point=e=>({x:clamp((e.clientX-bounds.left)/bounds.width,0,1),y:clamp((e.clientY-bounds.top)/bounds.height,0,1)}),origin=point(event),initial=selectedRegion()?.rect||{x:.1,y:.2,width:.8,height:.55},drawing=stageEdit.drawing,resizing=Boolean(event.target.closest('[data-region-resize]'));
+    event.preventDefault();const bounds=viewport.getBoundingClientRect(),point=e=>({x:clamp((e.clientX-bounds.left)/bounds.width,0,1),y:clamp((e.clientY-bounds.top)/bounds.height,0,1)}),origin=point(event),initial=stageRegionRect(),drawing=stageEdit.drawing,resizing=Boolean(event.target.closest('[data-region-resize]'));
     stageSurface.setPointerCapture(event.pointerId);stageEdit.drag={rect:{...initial}};
     const move=e=>{const at=point(e),dx=at.x-origin.x,dy=at.y-origin.y;stageEdit.drag.rect=drawing?{x:Math.min(origin.x,at.x),y:Math.min(origin.y,at.y),width:Math.abs(dx),height:Math.abs(dy)}:resizing?{...initial,width:clamp(initial.width+dx,.02,1-initial.x),height:clamp(initial.height+dy,.02,1-initial.y)}:{...initial,x:clamp(initial.x+dx,0,1-initial.width),y:clamp(initial.y+dy,0,1-initial.height)};paintStageBox();state.scoreSignature='';renderScore(getMediaTimeMs());};
     const finish=e=>{stageSurface.removeEventListener('pointermove',move);stageSurface.removeEventListener('pointerup',finish);stageSurface.removeEventListener('pointercancel',finish);const rect=stageEdit.drag?.rect;stageEdit.drag=null;stageEdit.drawing=false;paintStageBox();if(e.type==='pointerup'&&rect?.width>=.02&&rect?.height>=.02)void saveStageRegion(rect);else{stageMessage('Region cancelled. Draw an area at least 2% of the video.',true);state.scoreSignature='';renderScore(getMediaTimeMs());}};
     stageSurface.addEventListener('pointermove',move);stageSurface.addEventListener('pointerup',finish);stageSurface.addEventListener('pointercancel',finish);
   });
-  stage.addEventListener('click',event=>{if(!stageEdit.active||stageEditBusy()||stageEdit.fieldsDirty)return;const word=event.target.closest('[data-word]'),phrase=event.target.closest('[data-phrase]');if(!word||!phrase)return;stageEdit.phraseId=phrase.dataset.phrase;refreshStageEdit(true);stageEdit.wordId=word.dataset.word;refreshStageEdit();stagePanel.querySelector('details').open=true;});
+  stage.addEventListener('click',event=>{if(!stageEdit.active||stageEditBusy()||stageEdit.fieldsDirty)return;const word=event.target.closest('[data-word]'),phrase=event.target.closest('[data-phrase]');if(!word||!phrase)return;stageEdit.phraseId=phrase.dataset.phrase;refreshStageEdit(true);stageEdit.wordId=word.dataset.word;refreshStageEdit();stageControl('look').closest('details').open=true;});
   root.append(viewport, preview, progress, sidebar, themePicker, shortcutsPanel, syncPanel, errorPanel,controlsNotice,stagePanel,transcriptDialog);
   buildEffectsWorkspace();
   function mountRoot() {
@@ -3538,7 +3628,7 @@
     hide: teardown,
     observation: Object.freeze({status:()=>trackWatch?.status()}),
     hints: getPageHints,
-    placement:Object.freeze({getState:()=>({...placement}),set:value=>applyPlacement(value,true)}),
+    placement:Object.freeze({getState:()=>({...placement}),getSettings:()=>({mediaKey:placementMediaKey,custom:!!songPlacement,global:{...globalPlacement},area:{...placement}}),set:value=>applyPlacement(value,true),useGlobal:useGlobalPlacement,makeGlobal:makeGlobalPlacement,load:loadPlacement,saved:()=>placementWrites}),
     choreography:Object.freeze({getState:()=>({...choreography}),set:value=>setChoreography({...choreography,...value}),inspect:()=>{const score=timing.draft&&timing.view==='proposed'?timing.draft.score:state.score;return score&&typeof LvChoreography!=='undefined'?expressionCues(score):{};}}),
     wordRules:Object.freeze({getState:()=>structuredClone(wordRules),set:setWordRules}),
     wordRuleSets:Object.freeze({getState:()=>structuredClone(wordRuleSets),set:setWordRuleSets,forSong:(key=wordPresetKey())=>structuredClone(LvChoreography.wordSetFor(wordRuleSets,key)),assign:assignWordSet}),
@@ -3568,7 +3658,7 @@
       linger=LvBeatTrack.lingerSettings(result?.lvxLinger);
       if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={beatPulse:c.beatPulse!==false,landing:Object.hasOwn(LvChoreography.landingStyles,c.landing)?c.landing:'settle',dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic===true,autoFire:c.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,c.fireColor)?c.fireColor:'ember',fireSmoke:c.fireSmoke!==false,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:Object.hasOwn(LvChoreography.layoutOrigins,c.origin)?c.origin:'top-left'};}
       bloomEnabled=result?.lvxBloomEnabled!==false;
-      if(result?.lvxPlacement)try{applyPlacement(result.lvxPlacement);}catch(error){setHud(error.message,true,true);}
+      void loadPlacement(true);
       if (result && result.lvxTheme && THEMES.includes(result.lvxTheme)) {
         applyTheme(result.lvxTheme);
       }
@@ -3583,6 +3673,7 @@
   } catch (_) {}
 
   chrome.storage.onChanged?.addListener(wordPresetStorageChanged);
+  chrome.storage.onChanged?.addListener(placementStorageChanged);
 
   /* Detect if we're on Spotify */
   state.isSpotify = location.hostname.includes('spotify.com');
@@ -4315,6 +4406,7 @@
       timing.phraseIndex=0;tapping.wordId=null;
       tempo.mediaKey=null;tempo.map=null;
     }
+    void loadPlacement();
     state.active=false;state.errorShown=false;state.currentIndex=-1;state.currentMoment=null;state.scoreSignature='';
     state._flowLastIndex=-999;state.spotifyNullCount=0;state.spotifyLastGoodWall=0;
     state.timingErrors=[];state.mediaDriftSamples=[];state.spotifyAutoCalibSamples=[];
@@ -4401,6 +4493,7 @@
      TRACK START
      ══════════════════════════════════════ */
   function startTrack(payload) {
+    void loadPlacement();
     const hints=payload.hints||{};trackWatch?.accept(LvScore.mediaKey(hints)||((hints.track||hints.pageTitle||'').trim()+'|||'+(hints.artist||'').trim()));
     state.score = null;
     state.auditionLoop = null;
@@ -5132,8 +5225,8 @@
     if ((countIn.previewTake||tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete')) && timing.draft && !syncPanel.hidden && !stageEdit.active) {clearStagePerformance();renderCaptureScore();return;}
     const score = syllableTakeScore() || (timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score);
     renderStagePerformance(score,mediaMs);
-    const regionFrame=(score.stageRegions||[]).filter(r=>mediaMs>=r.startMs&&mediaMs<r.endMs);
-    if(stageEdit.active&&stageEdit.subject!=='performance'&&stageEdit.drag){const p=stagePhrase();if(p){const existing=regionFrame.findIndex(r=>r.target.id===p.id),draft={id:'drag',target:{kind:'phrase',id:p.id},rect:stageEdit.drag.rect};if(existing>=0)regionFrame[existing]=draft;else regionFrame.push(draft);}}
+    const regionFrame=(score.stageRegions||[]).filter(r=>mediaMs>=r.startMs&&mediaMs<r.endMs).map(r=>({...r,rect:LvScore.resolveStageRegionRect(score,r)}));
+    if(stageEdit.active&&stageEdit.subject!=='performance'&&stageEdit.drag){const p=stagePhrase(),area=selectedStageArea();if(area)for(const r of regionFrame)if(r.areaId===area.id)r.rect=stageEdit.drag.rect;if(p){const existing=regionFrame.findIndex(r=>r.target.id===p.id),draft={id:'drag',target:{kind:'phrase',id:p.id},rect:stageEdit.drag.rect};if(existing>=0)regionFrame[existing]=draft;else regionFrame.push(draft);}}
     const regionLayout=regionFrame.length>0;
     if(stage.dataset.regionLayout!==String(regionLayout)){stage.dataset.regionLayout=String(regionLayout);for(const key of ['left','top','width','height'])stage.style[key]=(regionLayout?({left:0,top:0,width:100,height:100})[key]:placement[key])+'%';state.scoreSignature='';}
     const isBacking=phrase=>score.lanes.find(l=>l.id===phrase.laneId)?.role==='backing';
@@ -5241,7 +5334,7 @@
       if(label){const header=backingLabelMode()==='header',size=header?Math.min(18,rect.height*.25):Math.min(120,rect.width*.25);Object.assign(label.style,{left:rect.x+'px',top:rect.y+'px',width:(header?rect.width:size)+'px',height:(header?size:rect.height)+'px',opacity:String(phrase.opacity*.65),fontSize:Math.min(12,rect.height*.2)+'px'});if(header){rect.y+=size;rect.height=Math.max(1,rect.height-size);}else{rect.x+=size;rect.width=Math.max(1,rect.width-size);}}
       const {width,height}=rect,maxFont=backing?Math.min(48,placement.maxFontPx*.6):settings.mode==='puzzle'?(settings.fillStage?Math.max(width,height):placement.maxFontPx):Math.min(placement.maxFontPx,laneFont(phrase,score)),minFont=backing?Math.min(maxFont,placement.minFontPx*.6):placement.minFontPx;
       choreographLine(line,phrase.words,atMs,width,height,maxFont,cues,minFont,settings);
-      Object.assign(line.style,{position:'absolute',left:rect.x+'px',top:rect.y+'px',margin:'0',overflow:'hidden'});line.dataset.region=authoredRegion?.id||'default';
+      Object.assign(line.style,{position:'absolute',left:rect.x+'px',top:rect.y+'px',margin:'0',overflow:'hidden'});line.dataset.region=authoredRegion?.id||'default';line.dataset.area=authoredRegion?.areaId||'';
       if(!backing)expressLine(line,phrase.words,atMs,cues,settings);else phrase.words.forEach((word,i)=>{paintWordTexture(line.children[i],word,atMs);paintWordEmoji(line.children[i],cues[word.id],atMs,emojiTagsEnabled(settings));});
     }
   }
@@ -6309,6 +6402,7 @@
      ══════════════════════════════════════ */
   function teardown() {
     chrome.storage.onChanged?.removeListener(wordPresetStorageChanged);
+    chrome.storage.onChanged?.removeListener(placementStorageChanged);
     clearTimeout(controlsNoticeTimer);controlsNotice.hidden=true;
     overlayEnabled=false;trackWatch?.sync();
     resumeSyncPanel=resumeSyncPanel||!syncPanel.hidden;
@@ -6345,7 +6439,7 @@
 
   function show() {
     const resuming=!overlayEnabled;overlayEnabled=true;
-    if(resuming){chrome.storage.onChanged?.addListener(wordPresetStorageChanged);chrome.storage.local.get(['lvxWordRuleSets'],result=>{if(result?.lvxWordRuleSets)wordPresetStorageChanged({lvxWordRuleSets:{newValue:result.lvxWordRuleSets}},'local');});}
+    if(resuming){chrome.storage.onChanged?.addListener(wordPresetStorageChanged);chrome.storage.onChanged?.addListener(placementStorageChanged);void loadPlacement(true);chrome.storage.local.get(['lvxWordRuleSets'],result=>{if(result?.lvxWordRuleSets)wordPresetStorageChanged({lvxWordRuleSets:{newValue:result.lvxWordRuleSets}},'local');});}
     if(resuming&&resumeSyncPanel){syncPanel.hidden=false;resumeSyncPanel=false;}
     if (!root.isConnected) {
       root.append(viewport, preview, progress, sidebar, themePicker, shortcutsPanel, errorPanel,controlsNotice);

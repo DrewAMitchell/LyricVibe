@@ -361,15 +361,24 @@
         if(!r||['x','y','width','height'].some(k=>typeof r[k]!=='number'||!Number.isFinite(r[k]))||r.x<0||r.y<0||r.width<.02||r.height<.02||r.x+r.width>1.000001||r.y+r.height>1.000001)bad('performance area must fit inside the normalized video surface');
       }
     }
+    if(score.stageAreas!==undefined){
+      if(!Array.isArray(score.stageAreas)||score.stageAreas.length>128)bad('stage areas must be a bounded list');
+      const areaIds=new Set();for(const area of score.stageAreas){
+        if(!area||typeof area.id!=='string'||!area.id||area.id.length>128||areaIds.has(area.id)||typeof area.name!=='string'||!area.name.trim()||area.name.length>80||area.provenance!=='manual')bad('invalid stage area identity or name');
+        areaIds.add(area.id);validateStageRect(area.rect,'stage area rectangle',bad);
+      }
+    }
     if(score.stageRegions!==undefined){
       if(!Array.isArray(score.stageRegions)||score.stageRegions.length>512)bad('stage regions must be a bounded list');
       const seen=new Set();
       for(const region of score.stageRegions){
-        const r=region?.rect;
         if(!region||typeof region.id!=='string'||!region.id||region.id.length>128||seen.has(region.id)||region.provenance!=='manual'||region.target?.kind!=='phrase'||!score.phrases.some(p=>p.id===region.target.id))bad('invalid stage region identity or target');
         seen.add(region.id);
         if(!Number.isSafeInteger(region.startMs)||region.startMs<0||!Number.isSafeInteger(region.endMs)||region.endMs<=region.startMs)bad('stage interval must use increasing source milliseconds');
-        if(!r||['x','y','width','height'].some(k=>typeof r[k]!=='number'||!Number.isFinite(r[k]))||r.x<0||r.y<0||r.width<.02||r.height<.02||r.x+r.width>1.000001||r.y+r.height>1.000001)bad('stage rectangle must fit inside the normalized video surface');
+        const hasRect=Object.prototype.hasOwnProperty.call(region,'rect'),hasArea=Object.prototype.hasOwnProperty.call(region,'areaId');
+        if(hasRect===hasArea)bad('stage region must reference exactly one rectangle or area');
+        if(hasRect)validateStageRect(region.rect,'stage rectangle',bad);
+        else if(typeof region.areaId!=='string'||!(score.stageAreas||[]).some(area=>area.id===region.areaId))bad('stage region references an unknown area');
       }
       for(let i=0;i<score.stageRegions.length;i++)for(let j=i+1;j<score.stageRegions.length;j++){
         const a=score.stageRegions[i],b=score.stageRegions[j];
@@ -392,6 +401,9 @@
       }
     }
     return score;
+  }
+  function validateStageRect(rect,label,bad){
+    if(!rect||['x','y','width','height'].some(k=>typeof rect[k]!=='number'||!Number.isFinite(rect[k]))||rect.x<0||rect.y<0||rect.width<.02||rect.height<.02||rect.x+rect.width>1.000001||rect.y+rect.height>1.000001)bad(`${label} must fit inside the normalized video surface`);
   }
 
   function locateWord(score, wordId) {
@@ -449,6 +461,29 @@
     }else if(op.type==='deleteStageItem'){
       if(!(next.stageItems||[]).some(item=>item.id===op.itemId))fail('UNKNOWN_ID','Unknown performance item');
       next.stageItems=next.stageItems.filter(item=>item.id!==op.itemId);
+    }else if(op.type==='setStageArea'){
+      if(!op.area||typeof op.area.id!=='string')fail('INVALID_OPERATION','Provide a named stage area');
+      next.stageAreas=[...(next.stageAreas||[]).filter(area=>area.id!==op.area.id),clone(op.area)];
+    }else if(op.type==='deleteStageArea'){
+      if(!(next.stageAreas||[]).some(area=>area.id===op.areaId))fail('UNKNOWN_ID','Unknown stage area');
+      if((next.stageRegions||[]).some(region=>region.areaId===op.areaId))fail('AREA_IN_USE','Detach stage regions before deleting this area');
+      next.stageAreas=next.stageAreas.filter(area=>area.id!==op.areaId);
+    }else if(op.type==='assignStageRegions'){
+      if(!Array.isArray(op.regionIds)||!op.regionIds.length||op.regionIds.length>512||op.regionIds.some(id=>typeof id!=='string')||new Set(op.regionIds).size!==op.regionIds.length)fail('INVALID_OPERATION','Choose distinct stage keyframes to assign');
+      if(op.areaId!==null&&typeof op.areaId!=='string')fail('INVALID_OPERATION','Choose a stage area or null to detach');
+      const selected=op.regionIds.map(id=>next.stageRegions?.find(region=>region.id===id));
+      if(selected.some(region=>!region))fail('UNKNOWN_ID','Unknown stage keyframe');
+      if(op.areaId!==null&&!(next.stageAreas||[]).some(area=>area.id===op.areaId))fail('UNKNOWN_ID','Unknown stage area');
+      for(const region of selected){
+        if(op.areaId===null){region.rect=clone(resolveStageRegionRect(next,region));delete region.areaId;}
+        else{delete region.rect;region.areaId=op.areaId;}
+      }
+    }else if(op.type==='splitStageRegion'){
+      const region=next.stageRegions?.find(item=>item.id===op.regionId);
+      if(!region)fail('UNKNOWN_ID','Unknown stage keyframe');
+      if(!Number.isSafeInteger(op.atMs)||op.atMs<=region.startMs||op.atMs>=region.endMs)fail('INVALID_OPERATION','Split inside the keyframe interval');
+      if(typeof op.newRegionId!=='string'||!op.newRegionId||op.newRegionId.length>128||next.stageRegions.some(item=>item.id===op.newRegionId))fail('INVALID_OPERATION','Provide a unique keyframe ID');
+      const second={...clone(region),id:op.newRegionId,startMs:op.atMs};region.endMs=op.atMs;next.stageRegions.push(second);
     }else if(op.type==='setStageRegion'){
       if(!op.region||typeof op.region.id!=='string')fail('INVALID_OPERATION','Provide a timed stage region');
       next.stageRegions=[...(next.stageRegions||[]).filter(r=>r.id!==op.region.id),clone(op.region)];
@@ -822,6 +857,7 @@
     return { version: receipt.version, mediaKey: receipt.mediaKey, lyricsHash: receipt.lyricsHash, expectedRevision: receipt.expectedRevision, adapter: receipt.adapter, model: receipt.model, proposals, automaticAdmissionEnabled: false };
   }
 
+  function resolveStageRegionRect(score,region){return Object.prototype.hasOwnProperty.call(region||{},'areaId')?(score.stageAreas||[]).find(area=>area.id===region.areaId)?.rect:region?.rect;}
   function stageRegionAt(score,phraseId,sourceMs){return (score.stageRegions||[]).find(r=>r.target.id===phraseId&&sourceMs>=r.startMs&&sourceMs<r.endMs)||null;}
   // Authored timing only: estimates and buffered input do not establish completion.
   function phraseTimingCoverage(phrase) {
@@ -841,5 +877,5 @@
       }))};
     });
   }
-  return { VERSION, DISPLAY_CATALOG, validEmoji, stageRegionAt, ScoreError, mediaKey, parseLrc, parseVocalText, doubledText, displayToken, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, phraseTimingCoverage, timingCoverage };
+  return { VERSION, DISPLAY_CATALOG, validEmoji, stageRegionAt, resolveStageRegionRect, ScoreError, mediaKey, parseLrc, parseVocalText, doubledText, displayToken, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, phraseTimingCoverage, timingCoverage };
 });
