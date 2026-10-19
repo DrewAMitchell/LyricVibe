@@ -3088,7 +3088,7 @@
 #lvx-root .lvx-rule-emoji { display:grid;grid-template-columns:1fr 1fr;gap:8px; }
 #lvx-root .lvx-rule-emoji small { grid-column:1/-1;color:#abc2cd;line-height:1.5; }
 #lvx-root .lvx-rule-emoji select,#lvx-root .lvx-rule-emoji input { width:100%;min-width:0; }
-#lvx-root .lvx-word-has-emoji { position:relative;box-sizing:border-box;padding-inline-end:.55em; }
+#lvx-root .lvx-word-has-emoji { position:relative;box-sizing:border-box;padding-inline-end:var(--lvx-emoji-space,.55em); }
 #lvx-root .lvx-word-emoji { position:absolute;right:0;top:.15em;font:400 .46em/1 'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif;color:initial!important;-webkit-text-fill-color:initial;background:none;filter:none;text-shadow:none;letter-spacing:0;pointer-events:none; }
 #lvx-root .lvx-word-emoji::after { content:attr(data-emoji);color:initial!important;-webkit-text-fill-color:initial;background:none;filter:none;text-shadow:none; }
 #lvx-root .lvx-word-emoji[hidden] { display:none; }

@@ -56,3 +56,11 @@ test('emoji groups match longest exact phrases independently of motion, with dic
  assert.equal(choreo.compose(s,rules,{...options,emojiDictionary:true})[words.at(-1).id].emoji,'❤️');
  rules[0].emoji='⭐';assert.equal(choreo.compose(s,rules,options)[words[0].id].emoji,'⭐');words[0].appearance={emoji:'🔥'};assert.equal(choreo.compose(s,rules,options)[words[0].id].emoji,'🔥');
 });
+
+test('a mapped emoji pair survives save and export, keeps other mappings, and paints both turntable glyphs',()=>{
+ const map=choreo.parseEmojiMap('🛌 = ("lay down")\n⛱️⬇️ = (underground)\n✅ = (good)');assert.equal(map.length,3);assert.equal(map[1].emoji,'⛱️⬇️');assert.deepEqual(choreo.parseEmojiMap(choreo.formatEmojiMap(map)),map);
+ for(const bad of ['⛱️ ⬇️','⛱️,⬇️','⛱️⬇️🫀'])assert.throws(()=>choreo.parseEmojiMap(bad+' = (underground)'),/two adjacent/);
+ const s=score('underground'),p=s.phrases[0];p.startMs=1000;p.endMs=4000;Object.assign(p.words[0],{startMs:1000,endMs:2000});const preset={id:'pair',name:'Pair',rules:[],emojiTags:true,emojiHold:'phrase',emojiMap:map};assert.equal(choreo.validateWordRuleSets({version:1,activeId:'pair',sets:[preset]}).sets[0].emojiMap[1].emoji,'⛱️⬇️');
+ const cues=choreo.compose(s,[],preset);assert.equal(cues[p.words[0].id].emoji,'⛱️⬇️');const track=choreo.vinylTrack(s,()=>.5,{emojiTags:true,cues});assert.deepEqual(choreo.vinylAt(track,3000).glyphs.filter(g=>g.emoji).map(g=>g.text),['⛱️','⬇️']);assert.equal(choreo.vinylAt(track,4000).glyphs.filter(g=>g.emoji).length,0);
+ const exp=require('../extension/overlay-export.js'),packet=exp.create(s,{theme:'neon',fontScale:1,liteMode:false,choreography:{mode:'classic'},placement:{left:0,top:0,width:100,height:100,minFontPx:28,maxFontPx:128},wordSet:preset,backingDisplay:choreo.backingSettings(),backingLabel:'hidden',linger:{mode:'off',beats:1},bloom:true,tempoMap:null},{startMs:1000,endMs:4000,width:640,height:360,fps:30});assert.equal(exp.validate(JSON.parse(JSON.stringify(packet))).display.wordSet.emojiMap[1].emoji,'⛱️⬇️');
+});

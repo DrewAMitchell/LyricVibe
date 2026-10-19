@@ -27,11 +27,17 @@
       return {word,motion:rule.motion,effects:[...new Set(rule.effects)],...(rule.emoji!==undefined?{emoji:rule.emoji}:{})};
     });
   }
+  function validEmojiMapTag(value){
+    if(typeof value!=='string'||value.length>64)return false;
+    if(value==='')return true;
+    const tags=glyphParts(value);
+    return tags.length<=2&&tags.every(tag=>scoreApi.validEmoji(tag));
+  }
   function validateEmojiMap(groups){
     if(!Array.isArray(groups)||groups.length>200)throw Error('Use at most 200 emoji groups.');
     const seen=new Set(),merged=new Map();let count=0;
     for(const group of groups){
-      if(!group||!scoreApi.validEmoji(group.emoji)||!Array.isArray(group.terms)||!group.terms.length)throw Error('Each group needs one emoji and at least one word or phrase.');
+      if(!group||!validEmojiMapTag(group.emoji)||!Array.isArray(group.terms)||!group.terms.length)throw Error('Each group needs one emoji or two adjacent emojis and at least one word or phrase.');
       const terms=merged.get(group.emoji)||[];
       for(const raw of group.terms){if(typeof raw!=='string')throw Error('Map terms must be text.');const term=ruleWord(raw);if(!term||term.length>64||term.split(' ').length>4)throw Error('Use words or phrases of up to four words (64 characters).');if(seen.has(term))throw Error('“'+term+'” appears more than once in the map.');seen.add(term);terms.push(term);if(++count>2000)throw Error('Use at most 2,000 map terms.');}
       merged.set(group.emoji,terms);
@@ -113,7 +119,7 @@
         const rule=matches.get(i);
         const emoji=word.appearance?.emoji!==undefined?word.appearance.emoji:rule?.emoji!==undefined?(i===matchEnds.get(i)?rule.emoji:''):tags.matches.has(i)?(i===tags.ends.get(i)?tags.matches.get(i):''):(emojiDictionary?emojiApi?.match(word.text)?.emoji||'':'');
         const reasons=[...(sustained.length?['sustained']:[]),...(impact?['fast-then-stop']:[]),...(direction?['direction-'+text]:[]),...(rule?['word-rule:'+rule.word]:[])];
-        cues[word.id]={emoji,emojiEndMs:emojiHold==='phrase'?Math.max(word.endMs,p.end,p.phrase.endMs??p.end):word.endMs,doubled:!!(word.doubled||p.phrase.doubled),wordId:word.id,phraseId:p.phrase.id,startMs:word.startMs,endMs:word.endMs,
+        cues[word.id]={emoji,emojiCount:glyphParts(emoji).length,emojiEndMs:emojiHold==='phrase'?Math.max(word.endMs,p.end,p.phrase.endMs??p.end):word.endMs,doubled:!!(word.doubled||p.phrase.doubled),wordId:word.id,phraseId:p.phrase.id,startMs:word.startMs,endMs:word.endMs,
           weight:(lightWords.has(text)?.78:1)+Math.min(.25,text.length*.018)+Math.min(.16,(count-1)*.06)+(impact?.4:0)+(sustained.length?.18:0),
           sustained:sustained.map(u=>({id:u.id,startMs:u.startMs,endMs:u.endMs})),impact,direction,reasons,...(rule?{rule}:{}),
           evidence:{phraseSyllablesPerSecond:p.rate,pauseAfterMs:gap,syllableBasis:word.syllables?.length?'authored':'estimated-from-spelling'}};
