@@ -1,13 +1,17 @@
 {
   "manifest_version": 3,
   "name": "LyricVibe Development — Video Scores",
-  "version": "0.5.0",
-  "description": "Overlay synced kinetic lyrics on any music tab \u2014 YouTube Music, Spotify, SoundCloud, and more.",
+  "version": "2026.4.2.0",
+  "description": "Overlay synced kinetic lyrics on any music tab — YouTube Music, Spotify, SoundCloud, and more.",
   "minimum_chrome_version": "116",
   "permissions": [
     "activeTab",
     "scripting",
-    "storage", "unlimitedStorage", "tabCapture", "offscreen", "nativeMessaging"
+    "storage",
+    "unlimitedStorage",
+    "tabCapture",
+    "offscreen",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "https://lrclib.net/*",
@@ -20,9 +24,15 @@
     "https://*.huggingface.co/*",
     "https://*.hf.co/*"
   ],
-  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
   "options_page": "options.html",
-  "content_security_policy": { "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*" },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*"
+  },
   "action": {
     "default_title": "Toggle LyricVibe (Ctrl+Shift+L)",
     "default_icon": {
@@ -47,5 +57,6 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  }
+  },
+  "version_name": "2026.4.2.0"
 }
