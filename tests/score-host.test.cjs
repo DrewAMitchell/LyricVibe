@@ -94,6 +94,20 @@ function makeHarness() {
 
 function recordFor(h, id = ID_A) { return h.values[`lvScore:youtube:${id}`]; }
 
+test('exact song-wide sync survives worker restart and export without changing word times or another video', async () => {
+  const h = makeHarness(); await h.ensure(1); await h.ensure(2);
+  const before = structuredClone(recordFor(h).score), other = structuredClone(recordFor(h, ID_B));
+  const result = await h.dispatch({type:'LV_SCORE_OPERATION', mediaKey:`youtube:${ID_A}`, expectedRevision:before.revision, operation:{type:'setOffset',offsetMs:-170}});
+  assert.equal(result.ok,true); assert.equal(result.score.offsetMs,-170);
+  assert.deepEqual(structuredClone(result.score.phrases),before.phrases);
+  assert.deepEqual(recordFor(h, ID_B),other);
+  h.restartWorker();
+  const reopened = await h.dispatch({type:'LV_SCORE_GET',mediaKey:`youtube:${ID_A}`});
+  assert.equal(reopened.score.offsetMs,-170);
+  assert.equal(JSON.parse(JSON.stringify(reopened.score)).offsetMs,-170);
+  assert.deepEqual(structuredClone(reopened.score.phrases),before.phrases);
+});
+
 test('plain lyrics explicitly open an editable source-bound score without a timed provider', async()=>{
   const h=makeHarness(),sender={id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`};
   h.context.recognize=async()=>{throw Error('Manual authoring must not need the provider');};
@@ -133,7 +147,7 @@ test('opening overlay Sync after saved text replacement preserves edits and resu
   const source=fs.readFileSync(path.join(root,'extension/content.js'),'utf8');
   const opener=source.slice(source.indexOf('  async function openTimingReview()'),source.indexOf('  function discardTimingLocal()'));
   const timing={busy:false,draft:null}, panel={hidden:true,focus(){}}, notices=[];
-  const context=vm.createContext({timing,tapping:{},timingWorkspace:null,stageEdit:{active:false},syncPanel:panel,state:{auditionLoop:null,score:edited.score},unplacedWords:()=>[],loadTempo:async()=>{},hasBaselineTempo:()=>true,refreshTimingPanel(){},setSyncNotice:text=>notices.push(text),
+  const context=vm.createContext({syncSave:{pending:null},timing,tapping:{},timingWorkspace:null,stageEdit:{active:false},syncPanel:panel,state:{auditionLoop:null,score:edited.score},unplacedWords:()=>[],loadTempo:async()=>{},hasBaselineTempo:()=>true,refreshTimingPanel(){},setSyncNotice:text=>notices.push(text),
     async timingRequest(type,extra={}) {
       const result=await h.dispatch({type,mediaKey:`youtube:${ID_A}`,expectedRevision:edited.score.revision,lyricsHash:edited.score.lyrics.contentHash,...extra},
         {id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`});

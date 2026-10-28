@@ -2854,6 +2854,10 @@
 #lvx-root .lvx-sidebar .lvx-hud-offset .lvx-offset-input{width:58px;padding:3px 1px}
 #lvx-root .lvx-sidebar .lvx-hud-offset .lvx-offset-control::after{font-size:9px}
 #lvx-root .lvx-sidebar .lvx-hud-offset .lvx-sync-btn{min-height:30px;padding:0;min-width:0}
+#lvx-root .lvx-sidebar .lvx-sync-save-note{grid-column:1/-1;display:block;white-space:normal;text-align:center;font:10px/1.4 system-ui;color:#b7d3df;padding-top:2px}
+#lvx-root .lvx-sidebar .lvx-sync-save-note[data-state=error]{color:#ffd38a}
+#lvx-root .lvx-sidebar .lvx-hud-offset .lvx-sync-retry{grid-column:1/-1;padding:3px 8px}
+#lvx-root .lvx-sidebar .lvx-sync-retry[hidden]{display:none}
 #lvx-root .lvx-sidebar .lvx-hud>button{min-height:34px;width:auto;flex:0 0 auto}
 #lvx-root .lvx-sidebar-pin[aria-pressed=true]{background:#d9edc1;color:#18251a}
 #lvx-root .lvx-sidebar .lvx-hud{flex-wrap:nowrap;align-content:stretch;box-sizing:border-box}

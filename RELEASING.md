@@ -43,7 +43,7 @@ Chrome rules: <https://developer.chrome.com/docs/extensions/reference/manifest/v
    One maintainer owns release allocation at a time; do not prepare in parallel.
 4. Run `npm run release:package` (or the VS Code release launch entry). It exports
    exact committed source to a new ignored directory, installs the lockfile,
-   runs unit/package tests, typecheck, build, and isolated Chrome save/startup
+   runs unit/package tests, typecheck, build, and isolated Chrome save/startup/sync
    regressions. Requires Node 22+, npm, Python 3.11+ and installed Chrome. This is a
    native local release qualification path; no live user browser is controlled.
 5. Inspect `.verification/releases/v<version>/`: extension ZIP, `SHA256SUMS`, and

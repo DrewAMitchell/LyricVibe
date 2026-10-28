@@ -269,10 +269,12 @@
   offsetInput.className = 'lvx-offset-input';
   offsetInput.type = 'number'; offsetInput.step = '1'; offsetInput.value = '0';
   offsetInput.setAttribute('aria-label', 'Lyric offset in milliseconds');
-  offsetInput.title = 'Type exact milliseconds. Scroll: 100 ms · Shift: 1000 ms · Alt: 1 ms. Positive moves lyrics later.';
+  offsetInput.title = 'Whole-song correction saved for this video and included in score exports. Negative is earlier (for example −170); positive is later. Scroll: 100 ms · Shift: 1000 ms · Alt: 1 ms.';
   offsetControl.append(offsetInput, document.createTextNode(' ms'));
   let offsetWheelTimer = 0;
   let offsetDraftKey = '';
+  // One in-flight write per song; rapid nudges replace only the queued target.
+  const syncSave = { pending: null, running: false, error: '', displayBasis: null, displayScore: null };
   const currentOffsetKey = () => state.score ? LvScore.mediaKey(state.score.source) : state.trackKey;
   function commitOffsetInput() {
     clearTimeout(offsetWheelTimer); offsetWheelTimer = 0;
@@ -336,6 +338,13 @@
   offsetGroup.title = 'Sync: offset of the lyric track against the music. − earlier, + later ([ and ] keys); type ms or scroll';
   const syncLabel = document.createElement('span'); syncLabel.className = 'lvx-sidebar-sync-heading'; syncLabel.textContent = 'SYNC';
   offsetGroup.append(syncLabel, syncEarlier, offsetControl, syncLater, autoSyncButton);
+  const syncRetryButton = document.createElement('button');
+  syncRetryButton.type = 'button'; syncRetryButton.className = 'lvx-sync-btn lvx-sync-retry'; syncRetryButton.textContent = 'Retry save'; syncRetryButton.hidden = true;
+  syncRetryButton.addEventListener('click', () => { syncSave.error = ''; void flushSyncOffset(); });
+  const syncSaveStatus = document.createElement('small');
+  syncSaveStatus.className = 'lvx-sync-save-note'; syncSaveStatus.setAttribute('aria-live', 'polite');
+  syncSaveStatus.textContent = 'Song-wide · saved per video';
+  offsetGroup.append(syncRetryButton, syncSaveStatus);
   const editGroup = document.createElement('span'); editGroup.className = 'lvx-hud-group lvx-editor-actions'; editGroup.append(quickSyncButton, editButton);
   const resetVideoButton=document.createElement('button');resetVideoButton.className='lvx-theme-btn';resetVideoButton.textContent='Reset video';resetVideoButton.setAttribute('aria-label','Reset video: reload lyrics and display, keep edits');resetVideoButton.onclick=()=>resetCurrentVideo();
   const endGroup = document.createElement('span'); endGroup.className = 'lvx-hud-group'; endGroup.append(helpButton, resetVideoButton, stopButton);
@@ -1034,7 +1043,7 @@
   // A stopped take and a take already used in the preview are still unsaved.
   // Keep this independent of tapPending(), which only gates editor operations.
   function hasUnsavedWork() {
-    return Boolean([...captureTracks.slots.values()].some(slot=>tapCount(slot.state.take)) || stageEdit?.fieldsDirty || stageEdit?.drag || timing.dirty || transcript.dirty || tapping.splitDirty || effectPending() ||
+    return Boolean(syncSave.pending || [...captureTracks.slots.values()].some(slot=>tapCount(slot.state.take)) || stageEdit?.fieldsDirty || stageEdit?.drag || timing.dirty || transcript.dirty || tapping.splitDirty || effectPending() ||
       tapping.take && (tapping.take.status === 'armed' || tapCount(tapping.take) || tapping.take.pendingStartMs != null) ||
       timing.draft && LvTimingVariant.hasChanges(timing.draft.score, state.score));
   }
@@ -1042,7 +1051,7 @@
   let navigationHold = null, navigationGestureUntil = 0;
   const navigationWork = () => JSON.stringify([timing.draft?.token, timing.draft?.previewRevision,
     timing.dirty && syncText.value, transcript.dirty && syncButton('transcript-text').value,
-    tapping.splitDirty && [syncButton('tap-spoken').value, syncButton('tap-split').value], tapping.take, [...captureTracks.slots], performanceTake.armed, performanceTake.marks]);
+    tapping.splitDirty && [syncButton('tap-spoken').value, syncButton('tap-split').value], tapping.take, [...captureTracks.slots], performanceTake.armed, performanceTake.marks, syncSave.pending]);
   const navigationSource = () => LvScore.mediaKey(timing.draft?.score.source || state.score?.source);
   function leavesEditedVideo(url) {
     const source = navigationSource();
@@ -3182,7 +3191,7 @@
     syncButton('close').disabled = timing.busy;
     root.classList.toggle('lvx-sync-open', !syncPanel.hidden);
     if(typeof timingWorkspace!=='undefined'&&timingWorkspace.tabs){const live=tapping.take?.status==='armed'||performanceTake.armed||countIn.active;for(const tab of timingWorkspace.tabs.children)tab.disabled=Boolean(live&&tab.dataset.workspace!==timingWorkspace.view);}
-    for (const control of [offsetInput, syncEarlier, syncLater]) control.disabled = Boolean(draft)||!hasBaselineTempo();
+    for (const control of [offsetInput, syncEarlier, syncLater]) control.disabled = Boolean(draft);
     syncButton('saved').setAttribute('aria-pressed', String(timing.view === 'saved'));
     syncButton('proposed').setAttribute('aria-pressed', String(timing.view === 'proposed'));
     syncButton('previous').disabled = timing.busy || !draft || timing.phraseIndex === 0;
@@ -3212,6 +3221,7 @@
   }
   async function openTimingReview() {
     if (timing.busy) return;
+    if (syncSave.pending) { setHud(syncSave.error ? 'Retry the unsaved song sync before opening the timing preview.' : 'Song sync is saving. Open Edit timing once it is saved.', Boolean(syncSave.error), true); return; }
     if(!state.score&&!state.plainLyrics?.text){await openTranscriptEditor();return;}
     if(stageEdit.active){closeStageEdit();if(stageEdit.active)return;}
     await loadTempo();
@@ -3848,7 +3858,11 @@
         state.trackTitle = [message.score.source.artist, message.score.source.title].filter(Boolean).join(' — ');
         state.trackDurationMs = message.score.source.durationMs;
         state.trackKey = message.mediaKey;
-        state.syncOffsetMs = message.score.offsetMs;
+        if (syncSave.pending && (syncSave.pending.key !== message.mediaKey || syncSave.pending.hash !== message.score.lyrics.contentHash)) {
+          syncSave.pending = null; syncSave.error = '';
+        }
+        state.syncOffsetMs = syncSave.pending?.offsetMs ?? message.score.offsetMs;
+        refreshSyncSaveStatus();
         if (!syncPanel.hidden) refreshTimingPanel();
         if ((switched||navigationEditorOpen) && !syncPanel.hidden){navigationEditorOpen=false;void openTimingReview();}
         stage.style.setProperty('--lvx-score-scale', state.fontScale);
@@ -5310,7 +5324,7 @@
     if(trackWatch?.loading()&&trackWatch?.status().generation>0)return;
     refreshRecordingTransport();
     if ((countIn.previewTake||tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete')) && timing.draft && !syncPanel.hidden && !stageEdit.active) {clearStagePerformance();renderCaptureScore();return;}
-    const score = syllableTakeScore() || (timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score);
+    const score = syncDisplayScore(syllableTakeScore() || (timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score));
     renderStagePerformance(score,mediaMs);
     const regionFrame=(score.stageRegions||[]).filter(r=>mediaMs>=r.startMs&&mediaMs<r.endMs).map(r=>({...r,rect:LvScore.resolveStageRegionRect(score,r)}));
     if(stageEdit.active&&stageEdit.subject!=='performance'&&stageEdit.drag){const p=stagePhrase(),area=selectedStageArea();if(area)for(const r of regionFrame)if(r.areaId===area.id)r.rect=stageEdit.drag.rect;if(p){const existing=regionFrame.findIndex(r=>r.target.id===p.id),draft={id:'drag',target:{kind:'phrase',id:p.id},rect:stageEdit.drag.rect};if(existing>=0)regionFrame[existing]=draft;else regionFrame.push(draft);}}
@@ -5980,12 +5994,63 @@
     setSyncOffset(state.syncOffsetMs + deltaMs);
   }
 
+  function syncDisplayScore(score) {
+    const pending = syncSave.pending;
+    if (!pending || !score || pending.key !== LvScore.mediaKey(score.source) || pending.hash !== score.lyrics.contentHash) return score;
+    if (syncSave.displayBasis !== score || syncSave.displayScore?.offsetMs !== pending.offsetMs) {
+      syncSave.displayBasis = score; syncSave.displayScore = { ...score, offsetMs: pending.offsetMs };
+    }
+    return syncSave.displayScore;
+  }
+
+  function refreshSyncSaveStatus() {
+    syncRetryButton.hidden = !syncSave.error || !syncSave.pending;
+    syncRetryButton.disabled = syncSave.running || Boolean(timing.draft);
+    syncSaveStatus.textContent = syncSave.error ? 'Not saved · retry' : syncSave.pending ? 'Saving song sync…' : 'Saved for this video';
+    syncSaveStatus.dataset.state = syncSave.error ? 'error' : syncSave.pending ? 'saving' : 'saved';
+  }
+
+  async function flushSyncOffset() {
+    if (syncSave.running || !syncSave.pending) return;
+    syncSave.running = true; refreshSyncSaveStatus();
+    try {
+      while (syncSave.pending) {
+        const pending = syncSave.pending, score = state.score;
+        if (!score || pending.key !== currentOffsetKey() || pending.key !== LvScore.mediaKey({url:location.href}) || pending.hash !== score.lyrics.contentHash) {
+          syncSave.pending = null; break;
+        }
+        if (timing.draft) throw Error('Close the timing preview before saving the song-wide offset. Your requested offset is retained.');
+        const result = await chrome.runtime.sendMessage({ type: 'LV_SCORE_OPERATION', mediaKey: pending.key, expectedRevision: score.revision, operation: { type: 'setOffset', offsetMs: pending.offsetMs } });
+        if (!result?.ok || !result.score) throw Error(result?.error?.message || 'No confirmation from the score service.');
+        // Responses from an earlier video must not change the current video's UI.
+        if (currentOffsetKey() !== pending.key || LvScore.mediaKey({url:location.href}) !== pending.key) {
+          if (syncSave.pending === pending) syncSave.pending = null;
+          continue;
+        }
+        if (result.score.revision >= state.score.revision) state.score = result.score;
+        if (syncSave.pending === pending) syncSave.pending = null;
+        state.syncOffsetMs = syncSave.pending?.offsetMs ?? state.score.offsetMs;
+        state.scoreSignature = '';
+      }
+      syncSave.error = '';
+      if (state.score) setHud(`Song sync ${formatOffset(state.syncOffsetMs)} · saved for this video and score exports`);
+    } catch (error) {
+      syncSave.error = error.message;
+      setHud(`Song sync not saved: ${error.message} Your requested offset is retained; Retry save.`, true, true);
+    } finally { syncSave.running = false; refreshSyncSaveStatus(); }
+  }
+
   function setSyncOffset(offsetMs) {
-    if (!Number.isSafeInteger(offsetMs) || offsetMs === state.syncOffsetMs) return;
+    if (!Number.isSafeInteger(offsetMs)) return;
+    if (offsetMs === state.syncOffsetMs && !syncSave.error) return;
     if (state.score) {
-      chrome.runtime.sendMessage({ type: 'LV_SCORE_OPERATION', mediaKey: LvScore.mediaKey(state.score.source), expectedRevision: state.score.revision, operation: { type: 'setOffset', offsetMs } }).then(result => {
-        if (!result?.ok) setHud(result?.error?.message || 'Timing edit failed', true, true);
-      }).catch(() => {});
+      if (timing.draft) { setSyncNotice('Use Song timing in the lightweight editor for this preview, or save and close the preview before changing the saved song sync.'); return; }
+      const key = currentOffsetKey();
+      if (key !== LvScore.mediaKey({url:location.href})) { setHud('Wait for the current video’s score before adjusting sync.', true, true); return; }
+      syncSave.pending = { key, hash: state.score.lyrics.contentHash, offsetMs };
+      syncSave.error = ''; state.syncOffsetMs = offsetMs; state.scoreSignature = '';
+      setHud(`Song sync ${formatOffset(offsetMs)} · saving…`);
+      refreshSyncSaveStatus(); void flushSyncOffset();
       return;
     }
     state.syncOffsetMs = offsetMs;

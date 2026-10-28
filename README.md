@@ -50,6 +50,17 @@ The filtered history keeps implementation and unit-test changes. It excludes pri
 
 This branch replaces the initial one-commit public snapshot. Existing clones should fetch and switch to the new origin/main history; do not merge the old snapshot or private development branches back into it. A branch rewrite does not guarantee that a hosting provider immediately removes previously published, now-unreferenced objects.
 
+## Song sync
+
+For a song that runs late, type an exact negative millisecond value in the sidebar's
+**SYNC** field, then press Enter or leave the field. For example, `-170` shows the
+lyrics 170 ms earlier. Positive values show them later. The status confirms when
+the song-wide offset is saved for that exact video; it is included in exported
+scores and does not rewrite word timings. Rapid changes remain responsive during
+playback. A failed save keeps the requested value and offers **Retry save**.
+No fixed recording-delay correction is enabled automatically. When a timing preview
+is open, use its lightweight editor's **Song timing** offset and **Save timings**.
+
 ## Releases
 
 The version format is `year.quarter.sprint.build` (for example `2026.4.2.0`).
