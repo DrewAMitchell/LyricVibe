@@ -19,6 +19,17 @@
       "program": "${workspaceFolder}/scripts/test.cjs",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal"
+    },
+    {
+      "name": "LyricVibe: verify and package release (public checkout)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/release.cjs",
+      "args": [
+        "package"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
     }
   ]
 }

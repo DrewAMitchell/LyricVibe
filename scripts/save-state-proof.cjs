@@ -2,7 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{chromium}=require('playwright');
 const root=path.resolve(__dirname,'..'),source='https://www.youtube.com/watch?v=TESTVIDEO01',next='https://www.youtube.com/watch?v=TESTVIDEO02';
 const ledger=process.env.LV_PROBE_LEDGER;
-const log=(state,pid)=>{if(ledger)fs.appendFileSync(ledger,`\n- ${new Date().toISOString()} ${state} LyricVibe save regression PID${pid}; finite Chrome proof; owner codex01a126ca.\n`);};
+const log=(state,pid)=>{if(ledger)fs.appendFileSync(ledger,`\n- ${new Date().toISOString()} ${state} LyricVibe save regression PID${pid}; finite Chrome proof; release verification.\n`);};
 log('START',process.pid);let server,browser;
 (async()=>{
   server=await chromium.launchServer({channel:'chrome',headless:true});console.log(JSON.stringify({browserPid:server.process().pid}));

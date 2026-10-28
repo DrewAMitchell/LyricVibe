@@ -49,3 +49,9 @@ The original 301 development commits from October 10–28, 2026 are retained in 
 The filtered history keeps implementation and unit-test changes. It excludes private project notes, song captures/exports, screenshots, demo recordings, local runtime details and live-session probe scripts. Identifiable song references in retained tests were replaced by synthetic fixtures. Upstream history and license attribution remain unchanged. The final packaging commit provides these public installation/privacy documents and safe launch targets.
 
 This branch replaces the initial one-commit public snapshot. Existing clones should fetch and switch to the new origin/main history; do not merge the old snapshot or private development branches back into it. A branch rewrite does not guarantee that a hosting provider immediately removes previously published, now-unreferenced objects.
+
+## Releases
+
+The version format is `year.quarter.sprint.build` (for example `2026.4.2.0`).
+See [the release process](RELEASING.md) for preparation, validation, publication
+and preserving local scores during upgrades.

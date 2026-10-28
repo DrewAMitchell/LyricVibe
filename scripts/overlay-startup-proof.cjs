@@ -1,7 +1,7 @@
 // Cold-start the complete production content script, without rewriting its source.
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{chromium}=require('playwright');
 const root=path.resolve(__dirname,'..'),ledger=process.env.LV_PROBE_LEDGER;
-const mark=(state,label,pid)=>{if(ledger)fs.appendFileSync(ledger,`\n- ${new Date().toISOString()} ${state} LyricVibe overlay startup ${label} PID${pid}; finite isolated browser regression; owner codex01a126ca.\n`);};
+const mark=(state,label,pid)=>{if(ledger)fs.appendFileSync(ledger,`\n- ${new Date().toISOString()} ${state} LyricVibe overlay startup ${label} PID${pid}; finite isolated browser regression; release verification.\n`);};
 mark('START','Node',process.pid);let server,browser,browserPid;
 (async()=>{
   server=await chromium.launchServer({channel:'chrome',headless:true});browserPid=server.process().pid;mark('START','Chrome',browserPid);browser=await chromium.connect(server.wsEndpoint());

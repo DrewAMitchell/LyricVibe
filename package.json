@@ -8,7 +8,10 @@
     "build": "node scripts/build.cjs",
     "build:open": "node scripts/build.cjs --open",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/test.cjs"
+    "test": "node scripts/test.cjs",
+    "release:version": "node scripts/release.cjs version",
+    "release:check": "node scripts/release.cjs check",
+    "release:package": "node scripts/release.cjs package"
   },
   "dependencies": {
     "@huggingface/transformers": "4.3.1",
