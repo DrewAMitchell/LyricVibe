@@ -1,7 +1,23 @@
 node_modules/
+dist/
+.verification/
 .env
 *.log
 *.err
-chrome-profile/
-chrome-profile-direct/
-extension-lite/
+__pycache__/
+native/.venv/
+extension/workspace/main.bundle.js
+# Local song data and generated evidence must stay outside the public source tree.
+*.lrc
+*.srt
+*.vtt
+*.wav
+*.mp3
+*.mp4
+*.webm
+*.mov
+*.flac
+*.score.json
+*.lyricvibe.json
+docs/*
+!docs/README.md

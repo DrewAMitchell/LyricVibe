@@ -1,0 +1,24 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Build extension and open output",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/build.cjs",
+      "args": [
+        "--open"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Run unit tests",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/test.cjs",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    }
+  ]
+}

@@ -1,16 +1,26 @@
 {
-  "name": "lyricvibe-development",
+  "name": "lyricvibe",
   "version": "0.5.0",
   "private": true,
-  "description": "Video-specific editable lyrics and browser audio alignment development fork",
+  "description": "Editable video lyrics with vocal tracks, timing capture and visual effects",
   "license": "MIT",
   "scripts": {
     "build": "node scripts/build.cjs",
     "build:open": "node scripts/build.cjs --open",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/test.cjs",
-    "verify:sync": "node scripts/sync-interaction-proof.cjs"
+    "test": "node scripts/test.cjs"
   },
-  "dependencies": { "@huggingface/transformers": "4.3.1", "react": "18.3.1", "react-dom": "18.3.1", "lucide-react": "0.468.0" },
-  "devDependencies": { "esbuild": "0.25.12", "playwright": "1.56.1", "typescript": "5.6.3", "@types/react": "18.3.12", "@types/react-dom": "18.3.1" }
+  "dependencies": {
+    "@huggingface/transformers": "4.3.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "lucide-react": "0.468.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "playwright": "1.56.1",
+    "typescript": "5.6.3",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1"
+  }
 }

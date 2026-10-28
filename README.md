@@ -1,88 +1,51 @@
-# LyricVibe 🎵
+# LyricVibe â€” editable video lyrics
 
-I was listening to music one day, reading along to lyrics on my phone, and it just felt... flat. Then I watched a Samay Raina YouTube special that had this really clean animated caption style at the end credits and thought — why don't lyrics ever feel like that? So I built this.
+A development fork of [riteshzz29/LyricVibe](https://github.com/riteshzz29/LyricVibe), licensed under MIT. It adds exact-video timing, separate vocal tracks, word and syllable recording, lyric editing, visual effects, and a local song library.
 
-https://github.com/user-attachments/assets/dbc143e8-2381-4ff2-99a5-8f47dbd6085d
+## Install from source
 
+1. Install Node.js 20 or later and Google Chrome (Chromium integration tests use Chrome).
+2. Run `npm ci` followed by `npm run build`.
+3. Open `chrome://extensions`, enable **Developer mode**, then **Load unpacked** and select `dist/lyricvibe`.
+4. Open a YouTube video and click the extension icon (or press Ctrl+Shift+L). The editing and exact-video score workflow targets YouTube.
 
-LyricVibe is a Chrome extension that overlays perfectly synced, word-by-word animated lyrics directly on your YouTube Music, Spotify, and SoundCloud tabs. No setup. Just play a song and hit `Ctrl+Shift+L`.
+The VS Code **Build extension and open output** launch target runs the same build and opens its output folder on Windows. After updating source, build again and reload the extension. Save your current work before reloading.
 
-**[Install from the Chrome Web Store →](https://chromewebstore.google.com/detail/lyricvibe-—-kinetic-lyric/iplhipppjgpeofmadbnkolnpigiachmn)**
+## Record and edit
 
----
+Open **Edit timing**, set a baseline BPM, and choose phrase, word, or syllable capture. Lyrics can be pasted or fetched through the configured providers. Lead and backing tracks have independent timings. Stop recording to apply lyric corrections. Completed marks are incorporated before those corrections.
 
-## 🆕 Latest update (v0.4.3)
+Changes remain in a local preview until **Save timings**. Save is disabled when the preview matches the saved score and enables again after a change. Completing the last recorded word or phrase does not silently save: unsaved work still triggers a navigation warning. Choose Cancel to stay and save. The library lists saved songs and valid previews with timing completeness, search, sorting, and filters.
 
-- added a new theme called flow which makes a reading experince great.
-- fixed lyrics fetching warning issue.
-- added a new sync button to automatically reset or sync lyrics speed and animation.
-- made a whole extension better.
+Display controls include typography, animation, word effects, emoji maps, stage layout, backing placement, and instrumental-gap behavior. Audio/model timing suggestions are experimental and require review; completeness measures authored timing coverage, not acoustic accuracy.
 
----
+## Data and privacy
 
-## What it does
+This repository distributes source code and short test fixtures. It contains no song lyric collection, recorded audio/video, exported song scores, local browser state, or development screenshots. The included CMU pronunciation dictionary and Unicode keyword data are general language resources with their licenses, not song lyrics.
 
-- Detects whatever song is playing and fetches synced lyrics automatically
-- Animates them word-by-word, locked to the beat
-- Works on **YouTube Music**, **Spotify Web Player**, and **SoundCloud**
-- Automatically catches the next track when a song changes — no need to retrigger it
-- 13 visual themes — press `T` to switch between them while listening
-- Remembers your sync preference per song so you only have to nudge it once
-- See-through mode (`B`) so the music video stays visible behind the lyrics
-- Adjust text size with `+` / `-`
-- Built-in shortcuts panel — no need to memorize anything
-- 100% free, no account, no tracking, no backend server
+Lyrics obtained or entered while using the extension are stored in your browser profile. The software license does not grant rights to third-party lyrics or recordings. See [PRIVACY.md](PRIVACY.md) for network requests, storage, exports, and optional capture behavior.
 
----
+The optional [native companion](native/README.md) handles local alignment and review. It is not needed for manual timing. Browser fallback analysis downloads model files on first use. No alignment accuracy guarantee is made.
 
-## Install
+## Development checks
 
-**One click:** [Chrome Web Store →](https://chromewebstore.google.com/detail/lyricvibe-—-kinetic-lyric/iplhipppjgpeofmadbnkolnpigiachmn)
+```sh
+npm test
+npm run typecheck
+npm run build
+node scripts/save-state-proof.cjs
+node scripts/unsaved-navigation-proof.cjs
+node scripts/overlay-startup-proof.cjs
+```
 
-Or manually from source:
+Unit tests exercise score operations, source/revision binding, previews, capture, and editor logic. The three browser proofs use isolated synthetic pages and mocked media/worker boundaries; they do not touch a personal browser profile or prove timing accuracy on real singing. Optional Python tests can be run with `python -m unittest discover -s tests -p "test_*.py"` after installing their dependencies.
 
-1. Download the ZIP from the green **Code** button → **Download ZIP**
-2. Extract it somewhere on your computer
-3. Go to `chrome://extensions/` (or `edge://extensions/` / `brave://extensions/`)
-4. Turn on **Developer mode** (top right toggle)
-5. Click **Load unpacked** → select the `extension` folder
-6. Pin it, open YouTube Music or Spotify, play a song, press `Ctrl+Shift+L`
+This is an unpacked development extension, not a Chrome Web Store release.
 
----
+## Published development history
 
-## Keyboard shortcuts
+The original 301 development commits from October 10–28, 2026 are retained in order, with their original author/committer dates and parent relationships. Their hashes changed because publication removes private development evidence and uses a GitHub noreply author address. Commits containing only excluded evidence remain as empty historical entries.
 
-| Key | What it does |
-|-----|-------------|
-| `Ctrl+Shift+L` | Toggle LyricVibe on/off |
-| `T` / `Shift+T` | Cycle themes forward / backward |
-| `[` / `]` | Nudge sync earlier or later (saved per song) |
-| `+` / `-` | Make text bigger or smaller |
-| `B` | See-through mode |
-| `Esc` | Close it |
+The filtered history keeps implementation and unit-test changes. It excludes private project notes, song captures/exports, screenshots, demo recordings, local runtime details and live-session probe scripts. Identifiable song references in retained tests were replaced by synthetic fixtures. Upstream history and license attribution remain unchanged. The final packaging commit provides these public installation/privacy documents and safe launch targets.
 
-(Also shown in-app via the help button — press it anytime to see this without leaving the tab.)
-
----
-
-## Themes
-
-13 themes: SAMAY (default), HYPE, SOFT, NEON, CLEAN, RETRO, GLASS, FIRE, ELEGANT, AURORA, MATRIX, VINYL, COSMIC
-
----
-
-## How it works
-
-Fully client-side — no server, no backend. The extension reads the song title and artist from the page, looks up synced lyrics from [LRCLIB](https://lrclib.net), and renders them directly in the tab. The only thing that ever leaves your browser is the song title and artist name (to fetch lyrics). No audio is recorded, no browsing history is collected.
-
-Permissions used: `activeTab`, `scripting`, `storage` — nothing else.
-
----
-
-## Works best on
-
-YouTube Music > SoundCloud > Spotify (Spotify doesn't expose a proper audio element so timing is slightly trickier, but it works well)
-
----
-
-MIT licensed · Lyrics from [LRCLIB](https://lrclib.net)
+This branch replaces the initial one-commit public snapshot. Existing clones should fetch and switch to the new origin/main history; do not merge the old snapshot or private development branches back into it. A branch rewrite does not guarantee that a hosting provider immediately removes previously published, now-unreferenced objects.
