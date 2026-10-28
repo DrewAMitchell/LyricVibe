@@ -385,3 +385,16 @@ test('doubled annotations are presentation edits on protected timings',()=>{
  const draft=variant.merge(base,base),p=base.phrases[0];const changed=variant.operate(draft,[{type:'setPhraseDoubled',phraseId:p.id,doubled:true},{type:'setWordDoubled',wordId:p.words[0].id,doubled:true}]);
  assert.equal(changed.score.phrases[0].doubled,true);assert.equal(changed.score.phrases[0].words[0].doubled,true);assert.deepEqual(changed.score.phrases[0].words.map(w=>[w.id,w.startMs,w.endMs,w.locked]),p.words.map(w=>[w.id,w.startMs,w.endMs,w.locked]));assert.equal(base.phrases[0].doubled,undefined);
 });
+
+
+test('save dirtiness ignores operation revisions and detects undo to saved content', () => {
+  const saved=make('[00:01.00]ONE TWO\n[00:05.00]');
+  const preview=variant.merge(saved,saved);
+  assert.equal(variant.hasChanges(preview.score,saved),false);
+  preview.score.offsetMs=50;
+  assert.equal(variant.hasChanges(preview.score,saved),true);
+  preview.score.offsetMs=saved.offsetMs;preview.score.revision+=5;
+  assert.equal(variant.hasChanges(preview.score,saved),false);
+  preview.score.phrases[0].words[0].text='CHANGED';
+  assert.equal(variant.hasChanges(preview.score,saved),true);
+});

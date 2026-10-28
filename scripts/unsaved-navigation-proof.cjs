@@ -18,7 +18,7 @@ let server,browser;
   let accept=false;const dialogs=[];page.on('dialog',async d=>{dialogs.push(d.type());await(accept?d.accept():d.dismiss());});
   assert.equal(await evaluate(()=>__qa.hasUnsavedWork()),false,'fresh preview is clean');
   await page.evaluate(()=>history.pushState({},'','/watch?v=TESTVIDEO01&t=2'));assert.equal(dialogs.length,0,'same-video params remain free');
-  const modes=[['armed',"q.tapping.take={status:'armed',cadence:'performance-events',events:[]}"],['raw-stopped',"q.tapping.take={status:'stopped',cadence:'performance-events',events:[{sourceMs:1234}]}"],['preview',"q.timing.draft.previewRevision=1"],['typed',"q.timing.dirty=true"],['lyrics',"q.transcript.dirty=true"],['effects',"q.performanceTake.marks=[{sourceMs:1234}]"],['syllables',"q.tapping.splitDirty=true"]];
+  const modes=[['armed',"q.tapping.take={status:'armed',cadence:'performance-events',events:[]}"],['raw-stopped',"q.tapping.take={status:'stopped',cadence:'performance-events',events:[{sourceMs:1234}]}"],['preview',"q.timing.draft.score.offsetMs+=25"],['typed',"q.timing.dirty=true"],['lyrics',"q.transcript.dirty=true"],['effects',"q.performanceTake.marks=[{sourceMs:1234}]"],['syllables',"q.tapping.splitDirty=true"]];
   for(const [name,change]of modes){
     await evaluate(`(()=>{const q=__qa;q.discardTimingLocal();q.transcript.dirty=false;q.timing.draft=__fresh();${change};})()`);
     assert.equal(await evaluate(()=>__qa.hasUnsavedWork()),true,name);
@@ -33,7 +33,7 @@ let server,browser;
   // the browser sees History API navigation. Cancel must stop that site event,
   // not merely cancel the later URL update while the handler keeps running.
   await page.evaluate(()=>{window.hostTransitions=0;document.body.addEventListener('yt-navigate',e=>{const id=e.detail.endpoint.watchEndpoint.videoId;history.pushState({},'','/watch?v='+id);window.hostTransitions++;document.body.dataset.loadedVideo=id;});});
-  await evaluate(()=>{__qa.discardTimingLocal();__qa.timing.draft=__fresh();__qa.timing.draft.previewRevision=1});
+  await evaluate(()=>{__qa.discardTimingLocal();__qa.timing.draft=__fresh();__qa.timing.draft.score.offsetMs+=25});
   const autoDialogs=dialogs.length;
   await page.evaluate(()=>document.body.dispatchEvent(new CustomEvent('yt-navigate',{bubbles:true,cancelable:true,detail:{endpoint:{watchEndpoint:{videoId:'TESTVIDEO02'}}}})));
   assert.equal(await page.evaluate(()=>hostTransitions),0,'Cancel stops automatic next before site transition');
@@ -52,27 +52,27 @@ let server,browser;
   const before=dialogs.length;await page.evaluate(()=>{location.href='https://www.youtube.com/feed/library'});await page.waitForTimeout(100);
   assert.equal(dialogs.at(-1),'beforeunload');assert.equal(dialogs.length,before+1);assert.equal(page.url(),source+'&t=2');
   // Explicit save failure leaves the protection active; success starts a clean preview.
-  await evaluate(()=>{const q=__qa;q.discardTimingLocal();q.transcript.dirty=false;q.timing.draft=__fresh();q.timing.draft.previewRevision=1;chrome.runtime.sendMessage=async m=>m.type==='LV_TIMING_APPLY'?{ok:false,error:{message:'fixture save failed'}}:{ok:true};});
+  await evaluate(()=>{const q=__qa;q.discardTimingLocal();q.transcript.dirty=false;q.timing.draft=__fresh();q.timing.draft.score.offsetMs+=25;chrome.runtime.sendMessage=async m=>m.type==='LV_TIMING_APPLY'?{ok:false,error:{message:'fixture save failed'}}:{ok:true};});
   await evaluate(()=>__qa.applyTimingReview());assert.equal(await evaluate(()=>__qa.hasUnsavedWork()),true);
   await evaluate(()=>{chrome.runtime.sendMessage=async m=>m.type==='LV_TIMING_APPLY'?{ok:true,score:{...__qa.timing.draft.score,revision:1}}:m.type==='LV_TIMING_PREPARE'?{ok:true,preview:__fresh()}:{ok:true};});
   await evaluate(()=>__qa.applyTimingReview());assert.equal(await evaluate(()=>__qa.hasUnsavedWork()),false);
   const savedDialogs=dialogs.length;await page.locator('#next').click();assert.equal(page.url(),next);assert.equal(dialogs.length,savedDialogs,'saved navigation is quiet');
   await page.evaluate(url=>history.pushState({},'',url),source);
-  await evaluate(()=>{__qa.timing.draft.previewRevision=1});
+  await evaluate(()=>{__qa.timing.draft.score.offsetMs+=25});
   const backDialogs=dialogs.length;await page.evaluate(()=>history.back());await page.waitForTimeout(100);
   assert.equal(page.url(),source,'Back can be cancelled in current Chrome');assert.equal(dialogs.length,backDialogs+1);
   await evaluate(()=>__qa.closeTimingReview());assert.equal(await evaluate(()=>__qa.hasUnsavedWork()),true,'closing Sync can be cancelled');
   // If a host bypasses cancellation, the new score must not wipe the old draft.
-  await evaluate(()=>{__qa.timing.draft.previewRevision=0});
+  await evaluate(()=>{__qa.timing.draft.score.offsetMs=__qa.state.score.offsetMs});
   await page.evaluate(url=>history.replaceState({},'',url),next);
-  const retained=await evaluate(()=>{const q=__qa;q.timing.draft.previewRevision=1;const before=JSON.stringify(q.timing.draft);const score=structuredClone(q.state.score);score.source.videoId='TESTVIDEO02';let reply;for(const fn of __messageListeners)fn({type:'LV_SCORE_UPDATED',mediaKey:'youtube:TESTVIDEO02',score},{},r=>reply=r);return {unchanged:before===JSON.stringify(q.timing.draft),code:reply?.error?.code};});
+  const retained=await evaluate(()=>{const q=__qa;q.timing.draft.score.offsetMs+=25;const before=JSON.stringify(q.timing.draft);const score=structuredClone(q.state.score);score.source.videoId='TESTVIDEO02';let reply;for(const fn of __messageListeners)fn({type:'LV_SCORE_UPDATED',mediaKey:'youtube:TESTVIDEO02',score},{},r=>reply=r);return {unchanged:before===JSON.stringify(q.timing.draft),code:reply?.error?.code};});
   assert.deepEqual(retained,{unchanged:true,code:'UNSAVED_SOURCE'});
   assert.equal(await evaluate(()=>{const q=__qa,before=JSON.stringify(q.timing.draft);for(const fn of __messageListeners)fn({type:'LV_TIMING_PREVIEW_CLOSED',mediaKey:'youtube:TESTVIDEO02'},{},()=>{});return before===JSON.stringify(q.timing.draft)}),true,'another video cannot close retained preview');
   await page.evaluate(url=>history.replaceState({},'',url),source);
   accept=true;await evaluate(()=>{__qa.transcript.dirty=true;return __qa.closeTimingReview()});
   assert.equal(await evaluate(()=>__qa.hasUnsavedWork()),false,'explicit discard clears typed lyrics too');
   // Explicit Leave is honored once, without a second prompt from the SPA navigate event.
-  await evaluate(()=>{__qa.timing.draft=__fresh();__qa.timing.draft.previewRevision=1});accept=true;
+  await evaluate(()=>{__qa.timing.draft=__fresh();__qa.timing.draft.score.offsetMs+=25});accept=true;
   const leaveDialogs=dialogs.length;await page.evaluate(url=>{document.querySelector('#next').href=url+'&list=fixture&index=2'},next);await page.locator('#next').click();assert.equal(page.url(),next);assert.equal(dialogs.length,leaveDialogs+1);
   const proof={observedAt:new Date().toISOString(),basis:'Actual content.js in Chrome isolated world; mocked source media/worker/storage; real navigation and native dialogs.',checks:['clean preview','same-video params','armed take','raw stopped take','used preview','typed times','lyrics','effects','syllable spelling','link blocked before host','ended auto-next blocked','native beforeunload cancel','failed save retained','successful save clean','Back cancelled','close Sync cancelled','unavoidable switch retains draft','other-video close ignored','explicit discard clears typed lyrics','explicit leave single prompt','automatic site transition blocked before handler','queued autoplay retries stay blocked','automatic play after Cancel paused','explicit playback resumes review','approved video survives playlist URL normalization'],dialogs};
   fs.writeFileSync(path.join(root,'docs/unsaved-navigation-proof.json'),JSON.stringify(proof,null,2)+'\n');console.log(JSON.stringify(proof));

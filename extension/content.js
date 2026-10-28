@@ -1036,7 +1036,7 @@
   function hasUnsavedWork() {
     return Boolean([...captureTracks.slots.values()].some(slot=>tapCount(slot.state.take)) || stageEdit?.fieldsDirty || stageEdit?.drag || timing.dirty || transcript.dirty || tapping.splitDirty || effectPending() ||
       tapping.take && (tapping.take.status === 'armed' || tapCount(tapping.take) || tapping.take.pendingStartMs != null) ||
-      timing.draft && (timing.draft.previewRevision > 0 || timing.draft.changedWords > 0));
+      timing.draft && LvTimingVariant.hasChanges(timing.draft.score, state.score));
   }
   let navigationApproval = null;
   let navigationHold = null, navigationGestureUntil = 0;
@@ -1164,7 +1164,8 @@
     if(!transcript.dirty&&draft&&transcript.shownFor!==binding){area.value=LvTranscriptText.toText(draft.score);transcript.shownFor=binding;transcript.laneEdits=[];}
     refreshTranscriptTracks();
     const sourceReady=Boolean(LvScore.mediaKey({url:location.href}));
-    syncButton('transcript-apply').disabled=timing.busy||!sourceReady||!transcript.dirty||!area.value.trim()||tapPending()||countIn.active||countIn.preparing;syncButton('transcript-apply').textContent=tapPending()?'Stop or keep the take before applying':draft?'Apply to preview':'Use pasted lyrics';syncButton('transcript-open').disabled=timing.busy||!sourceReady;area.disabled=timing.busy||!sourceReady;area.placeholder='Paste lyrics here, one phrase per line. No cloud lookup required.';
+    const recording=tapping.take?.status==='armed'||performanceTake.armed;
+    syncButton('transcript-apply').disabled=timing.busy||!sourceReady||!transcript.dirty||!area.value.trim()||recording||countIn.active||countIn.preparing;syncButton('transcript-apply').textContent=recording?'Stop recording before applying':draft?'Apply to preview':'Use pasted lyrics';syncButton('transcript-open').disabled=timing.busy||!sourceReady;area.disabled=timing.busy||!sourceReady;area.placeholder='Paste lyrics here, one phrase per line. No cloud lookup required.';
   }
   // Keep a re-spelled word's syllable timings: split the new text into the same count.
   async function respellSyllables(operations){
@@ -1211,7 +1212,14 @@
   async function applyTranscript(){
     if(timing.busy||!transcript.dirty)return;
     if(!timing.draft){await createPastedLyrics();return;}
-    if(tapPending()||captureTracks.slots.size||countIn.active||countIn.preparing){setSyncNotice('Keep or save the recorded tracks before applying lyric changes. Your text is retained.','warn');return;}
+    if(tapping.take?.status==='armed'||performanceTake.armed||countIn.active||countIn.preparing){setSyncNotice('Stop recording before applying lyric changes. Your text is retained.','warn');return;}
+    await finishStoppedTake();
+    if(performanceTake.marks.length)await useEffects();
+    if(timingTapPending()||effectPending()){setSyncNotice('The completed take could not be applied. Your marks and lyric text are retained; resolve the take before changing its words.','warn');return;}
+    // Parked tracks retain their original identities and remain recoverable even
+    // when a lyric edit changes the words they were recorded against.
+    try{for(const slot of captureTracks.slots.values())await backupTrackCapture(slot.state);}
+    catch(error){setSyncNotice('Capture backup failed; your lyric text is retained. '+error.message,'error');return;}
     let result=transcriptReview();if(!result)return;
     if(!result.operations.length){transcript.dirty=false;transcript.shownFor=null;refreshTimingPanel();return;}
     const binding=tapBinding(),text=syncButton('transcript-text').value;
@@ -1225,7 +1233,7 @@
       setSyncNotice(`Applying ${result.changes.length} lyric changes…`);
       const {extra,notes}=await respellSyllables(result.operations);
       const response=await timingRequest('LV_TIMING_TUNE',{operations:[...result.operations,...extra],allowProtected:true});
-      timing.draft=response.preview;timing.auditioned=false;state.scoreSignature='';
+      rebindRecording(response.preview);timing.draft=response.preview;timing.auditioned=false;state.scoreSignature='';
       if(!timingPhrase()?.words.some(w=>!w.excluded))selectInitialTimingPhrase();
       transcript.dirty=false;transcript.shownFor=null;transcriptDialog.close();
       setSyncNotice(`${result.changes.length} lyric changes are in the preview${extra.length?` · ${extra.length} words kept their syllable timings`:''}${notes.length?' · '+notes.join('; '):''}. Undo preview reverts; Save timings keeps them.`);
@@ -1476,6 +1484,7 @@
   async function finishStoppedTake(){
     let take=tapping.take;
     if(!take||!['stopped','complete'].includes(take.status)||timing.busy)return;
+    if(!tapCount(take)&&!take.actionHistory?.length&&take.pendingStartMs==null){discardTapTake();return;}
     if(!partRun&&take.cadence==='pairs'&&take.mode==='word'&&take.marks.length&&await adoptWordHolds())take=tapping.take;
     if(!take||tapping.take!==take)return;
     if(rawTake(take)){
@@ -3179,11 +3188,12 @@
     syncButton('previous').disabled = timing.busy || !draft || timing.phraseIndex === 0;
     syncButton('next').disabled = timing.busy || !draft || timing.phraseIndex >= draft.score.phrases.length - 1;
     for (const name of ['audition', 'tune', 'reset']) syncButton(name).disabled = timing.busy || !draft;
-    syncButton('apply').disabled = timing.busy || !draft || timing.dirty || tapping.splitDirty || tapping.take?.status==='armed' || performanceTake.armed || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source);
+    syncButton('apply').disabled = timing.busy || !draft || !hasUnsavedWork() || timing.dirty || tapping.splitDirty || tapping.take?.status==='armed' || performanceTake.armed || countIn.active || countIn.preparing || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source);
     const saveReason = countIn.active?'Counting in…':timing.busy ? 'Updating preview…' : !draft ? timing.openError||'Choose Prepare preview & open editor to start editing this video.' : LvScore.mediaKey({url:location.href})!==LvScore.mediaKey(state.score.source)?'Return to this preview’s video before saving.':timing.dirty?'Use your typed word times first: Exact word timings → Use these times.':tapping.splitDirty?'Use Set syllables for your typed spelling first.':tapping.take?.status==='armed'||performanceTake.armed?'Stop the recording pass before saving.':timing.saveError||(transcript.dirty?'Save will apply your pending Lyrics text corrections.':'')||captureSaveWarning()||'Ready to save this iteration. Unmatched capture remains backed up.';
-    syncButton('apply').setAttribute('aria-description', saveReason);
-    syncPanel.querySelector('.lvx-sync-save-status').textContent=saveReason;
-    const saveWrap=syncPanel.querySelector('.lvx-save-wrap'),blocked=syncButton('apply').disabled||Boolean(timing.saveError)||Boolean(captureSaveWarning());saveWrap.dataset.blocked=String(blocked);saveWrap.tabIndex=blocked?0:-1;saveWrap.setAttribute('aria-label',blocked?'Save needs attention: '+saveReason:'Save timings');syncPanel.querySelector('.lvx-save-tooltip').textContent=blocked?saveReason:'';
+    const currentSaveReason=draft&&!timing.busy&&!hasUnsavedWork()?'No changes to save.':saveReason;
+    syncButton('apply').setAttribute('aria-description', currentSaveReason);
+    syncPanel.querySelector('.lvx-sync-save-status').textContent=currentSaveReason;
+    const saveWrap=syncPanel.querySelector('.lvx-save-wrap'),blocked=syncButton('apply').disabled||Boolean(timing.saveError)||Boolean(captureSaveWarning());saveWrap.dataset.blocked=String(blocked);saveWrap.tabIndex=blocked?0:-1;saveWrap.setAttribute('aria-label',blocked?currentSaveReason:'Save timings');syncPanel.querySelector('.lvx-save-tooltip').textContent=blocked?currentSaveReason:'';
     const editorReason=timing.busy?'Updating preview…':timing.dirty?'Use your typed word times first.':tapping.splitDirty?'Use Set syllables for your typed spelling first.':effectPending()?'Use or discard your recorded effects first.':'';
     syncButton('light-editor').disabled=Boolean(editorReason);syncButton('light-editor').title=editorReason||'Open the editor for this video; resume or prepare its preview automatically.';
     syncButton('light-editor').textContent=draft?'↗ Open lightweight editor':'↗ Prepare preview & open editor';
@@ -3302,7 +3312,10 @@
   }
   async function applyTimingReview() {
     // Audition is recommended, not required: the preview lives only in session storage, and Save is undoable.
-    if (!timing.draft || timing.busy || timing.dirty || tapping.splitDirty || tapping.take?.status==='armed' || performanceTake.armed) return;
+    if (!timing.draft || timing.busy || !hasUnsavedWork() || timing.dirty || tapping.splitDirty || tapping.take?.status==='armed' || performanceTake.armed || countIn.active || countIn.preparing) return;
+    await finishStoppedTake();
+    if(performanceTake.marks.length)await useEffects();
+    if(timingTapPending()||effectPending())return;
     // Closing Lyrics text keeps its draft. Save must include those corrections,
     // or leave them intact if validation fails, never silently save older text.
     if(transcript.dirty){await applyTranscript();if(transcript.dirty||!timing.draft||timing.busy||tapPending())return;}

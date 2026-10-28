@@ -5,6 +5,11 @@
   root.LvTimingVariant = api;
 })(globalThis, function(core) {
   const clone = value => JSON.parse(JSON.stringify(value));
+  // Revision counts editing operations, not meaningful differences from saved data.
+  function hasChanges(score, saved) {
+    if (!score || !saved) return Boolean(score);
+    return JSON.stringify({ ...score, revision: 0 }) !== JSON.stringify({ ...saved, revision: 0 });
+  }
   const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
   const protectedWord = w => w.excluded === true || w.locked || w.provenance !== 'estimated' || (w.syllables || []).some(s => s.locked || s.provenance !== 'estimated');
   function merge(base, candidate) {
@@ -149,5 +154,5 @@
     const protectedIds = score.phrases.flatMap(p => p.words.filter(protectedWord).map(w => w.id));
     return { ...draft, score: core.validateScore(score), protectedIds, preservedPhraseIds: [], changedWords: score.phrases.reduce((n,p) => n+p.words.length,0) };
   }
-  return { merge, tune, operate, copyToRecording };
+  return { merge, tune, operate, copyToRecording, hasChanges };
 });
