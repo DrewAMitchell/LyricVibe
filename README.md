@@ -78,3 +78,14 @@ Your counts override dictionary suggestions. Raw input remains in the local
 recording when you undo or re-record. Capture speed and pitch events travel with
 saved syllable evidence; the speed weight is an estimate, not measured accuracy.
 Negative song sync displays the result earlier without rewriting captured times.
+
+
+### Correcting phrases while recording
+
+Use **Fix phrase** in the persistent recording bar to pause and replace words,
+ignore an extra phrase, insert a missing one, or move a phrase to another vocal
+track without changing its timing. After inserting, **Rewind & retime 3 phrases**
+repairs the surrounding phrases together. Red repairs must be recorded, explicitly
+confirmed with **Keep existing timing**, or ignored before **Save timings** unlocks.
+Ignored phrases can be restored. Save the preview before leaving the video; the
+extension guards navigation and warns on tab close, but cannot prevent a forced close.

@@ -244,5 +244,38 @@
     return { operations: [...prefix,...operations, ...inserts], changes:[...changesBefore,...changes] };
   }
 
-  return { toText, diff };
+  // A recording correction targets an exact phrase, never a fuzzy transcript match.
+  // Reuse the same word-edit operations so unchanged words retain their evidence.
+  function editPhrase(score, {phraseId, action, text, laneId, sourceMs} = {}) {
+    const index=score.phrases.findIndex(p=>p.id===phraseId),phrase=score.phrases[index];
+    if(!phrase)fail('UNKNOWN_ID','Choose a phrase to correct.');
+    if(action==='restore')return [...phrase.words.map(w=>({type:'setWordExcluded',wordId:w.id,excluded:false})),{type:'setPhraseTimingReview',phraseId,required:true}];
+    if(!visible(phrase).length)fail('UNKNOWN_ID','Restore this ignored phrase before correcting it.');
+    if(action==='resolve')return phrase.timingReviewRequired?[{type:'setPhraseTimingReview',phraseId,required:false}]:[];
+    const operations=[],changes=[];
+    if(action==='remove')return visible(phrase).map(w=>({type:'setWordExcluded',wordId:w.id,excluded:true}));
+    if(action==='move'){
+      if(!score.lanes.some(l=>l.id===laneId))fail('UNKNOWN_ID','Choose an existing vocal track.');
+      return laneId===phrase.laneId?[]:[{type:'setPhraseLane',phraseId,laneId}];
+    }
+    if(!['replace','insert-before','insert-after'].includes(action))fail('INVALID_OPERATION','Choose a phrase correction.');
+    if(typeof text!=='string'||!text.trim()||text.length>10000||/[\r\n]/.test(text))fail('INVALID_TEXT','Enter one nonempty phrase, on one line.');
+    const tokens=text.trim().split(/\s+/);
+    if(action==='replace'){wordEdits(phrase,1,tokens,operations,changes);return operations.length?[...operations,{type:'setPhraseTimingReview',phraseId,required:true}]:[];}
+    if(!Number.isSafeInteger(sourceMs)||sourceMs<0)fail('INVALID_TIME','Insertion needs the current source time.');
+    const duration=score.source.durationMs;
+    const startMs=Math.min(sourceMs,Math.max(0,duration-1)),endMs=Math.min(duration,startMs+2000);
+    if(endMs<=startMs)fail('INVALID_TIME','The song needs a positive duration for a new phrase.');
+    const insert={type:'insertPhrase',afterPhraseId:action==='insert-after'?phrase.id:score.phrases[index-1]?.id??null,laneId:phrase.laneId,text:tokens.join(' '),startMs,endMs};
+    const preview=core.applyOperation(score,insert,score.revision),added=preview.phrases.find(p=>!score.phrases.some(old=>old.id===p.id));
+    return [insert,...repairWindow(preview,added.id).map(id=>({type:'setPhraseTimingReview',phraseId:id,required:true}))];
+  }
+
+  function repairWindow(score, phraseId) {
+    const phrase=score.phrases.find(p=>p.id===phraseId&&visible(p).length);
+    if(!phrase)fail('UNKNOWN_ID','Choose the inserted phrase to retime.');
+    const lane=score.phrases.filter(p=>p.laneId===phrase.laneId&&visible(p).length),at=lane.indexOf(phrase);
+    return lane.slice(Math.max(0,at-1),at+2).map(p=>p.id);
+  }
+  return { toText, diff, editPhrase, repairWindow };
 });

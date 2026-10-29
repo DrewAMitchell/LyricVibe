@@ -332,6 +332,7 @@
     for (const phrase of score.phrases) {
       if (!phrase || typeof phrase.id !== "string" || !phrase.id || ids.has(phrase.id) || !laneMap.has(phrase.laneId)) bad("invalid phrase id or unknown lane");
       ids.add(phrase.id);
+      if(phrase.timingReviewRequired!==undefined&&typeof phrase.timingReviewRequired!=='boolean')bad('phrase timing review must be boolean');
       if(phrase.doubled!==undefined&&typeof phrase.doubled!=="boolean")bad("phrase doubled must be boolean");
       if (typeof phrase.startMs !== "number" || !Number.isFinite(phrase.startMs) || phrase.startMs < 0 || typeof phrase.endMs !== "number" || !Number.isFinite(phrase.endMs) || phrase.endMs < 0 || phrase.endMs < phrase.startMs || typeof phrase.endEstimated !== "boolean" || typeof phrase.fadeOutMs !== "number" || !Number.isFinite(phrase.fadeOutMs) || phrase.fadeOutMs < 0 || !Array.isArray(phrase.words)) bad("invalid phrase timing or fields");
       if(phrase.persistBeats!==undefined&&(!Number.isFinite(phrase.persistBeats)||phrase.persistBeats<0||phrase.persistBeats>64))bad('phrase persistence must be 0–64 beats');
@@ -593,13 +594,18 @@
       if (!phrase) fail("UNKNOWN_ID", `unknown phrase id: ${op.phraseId}`);
       if (!next.lanes.some(l => l.id === op.laneId)) fail("UNKNOWN_ID", `unknown lane id: ${op.laneId}`);
       phrase.laneId = op.laneId;
+    } else if (op.type === "setPhraseTimingReview") {
+      const phrase=next.phrases.find(p=>p.id===op.phraseId);
+      if(!phrase)fail('UNKNOWN_ID','Unknown phrase for timing review.');
+      if(typeof op.required!=='boolean')fail('INVALID_OPERATION','Timing review required must be boolean.');
+      if(op.required)phrase.timingReviewRequired=true;else delete phrase.timingReviewRequired;
     } else if (op.type === "setPhraseTiming") {
       const phrase = next.phrases.find(p => p.id === op.phraseId);
       if (!phrase) fail("UNKNOWN_ID", `unknown phrase id: ${op.phraseId}`);
       finiteNonnegative(op.startMs, "startMs"); finiteNonnegative(op.endMs, "endMs");
       if (op.endMs < op.startMs) fail("INVALID_TIME", "phrase end precedes start");
       const oldStart = phrase.startMs, oldEnd = phrase.endMs, oldSpan = oldEnd - oldStart, newSpan = op.endMs - op.startMs;
-      phrase.startMs = op.startMs; phrase.endMs = op.endMs; phrase.endEstimated = false;
+      phrase.startMs = op.startMs; phrase.endMs = op.endMs; phrase.endEstimated = false; delete phrase.timingReviewRequired;
       for (const word of phrase.words) {
         const oldWordStart = word.startMs, oldWordEnd = word.endMs;
         const relStart = oldSpan ? (word.startMs - oldStart) / oldSpan : 0;
@@ -908,5 +914,7 @@
     const hasLyrics=modes.some(m=>m.possible),complete=hasLyrics&&lanes.every(l=>Object.values(l.modes).every(m=>m.status==='complete'||m.status==='empty'));
     return {lanes,percent:!hasLyrics?null:complete?100:Math.min(99,Math.round(modes.reduce((n,m)=>n+m.ratio,0)/3*100))};
   }
-  return { VERSION, DISPLAY_CATALOG, validEmoji, stageRegionAt, resolveStageRegionRect, ScoreError, mediaKey, parseLrc, parseVocalText, doubledText, displayToken, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, phraseTimingCoverage, timingCoverage, timingCompleteness };
+  function pendingTimingReviews(score){return (score?.phrases||[]).filter(p=>p.timingReviewRequired&&p.words.some(w=>!w.excluded));}
+  function requireTimingResolved(score){const pending=pendingTimingReviews(score);if(pending.length)fail('TIMING_REVIEW_REQUIRED',`Resolve ${pending.length} affected phrase${pending.length===1?'':'s'} before saving: record, keep its existing timing explicitly, or ignore it.`);return score;}
+  return { pendingTimingReviews, requireTimingResolved, VERSION, DISPLAY_CATALOG, validEmoji, stageRegionAt, resolveStageRegionRect, ScoreError, mediaKey, parseLrc, parseVocalText, doubledText, displayToken, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, phraseTimingCoverage, timingCoverage, timingCompleteness };
 });

@@ -3204,3 +3204,44 @@
 #lvx-root .lvx-word-set-quick [data-set-inherit] { color:#dae6e5; border-color:#5c747d; background:#23353d; }
 
 #lvx-root .lvx-word-set-quick label { min-width:min(100%,180px); }
+
+/* Recording stays actionable while the timing panel scrolls. */
+#lvx-root .lvx-recording-playback{position:fixed;left:16px;bottom:18px;transform:none;z-index:80;justify-content:flex-start;width:min(760px,calc(100vw - 500px));max-width:none;box-sizing:border-box;padding:12px 14px;gap:10px;background:#10232b;border:2px solid #82b8bf;box-shadow:0 8px 32px #0009;color:#f0f9fc}
+#lvx-root .lvx-recording-status{flex:1 0 100%;font:700 12px/1.4 system-ui;letter-spacing:.03em;color:#bfe5e7}
+#lvx-root .lvx-recording-playback[data-state=recording]{border-color:#efaa83}
+#lvx-root .lvx-recording-playback[data-state=recording] .lvx-recording-status{color:#ffd0b4}
+#lvx-root .lvx-recording-primary{display:flex;flex:1 1 auto;gap:8px;flex-wrap:wrap}
+#lvx-root .lvx-recording-playback .lvx-recording-primary button{min-height:44px;font-size:13px;padding:10px 14px;background:#254550;border-color:#638b97;color:#f4fbfd}
+#lvx-root .lvx-recording-playback [data-record-toggle]{background:#d9edc1!important;color:#19251a!important;border-color:#d9edc1!important}
+#lvx-root .lvx-recording-playback [data-record-correct]{border-color:#b1d1dc}
+#lvx-root .lvx-recording-playback button:focus-visible,#lvx-root .lvx-phrase-correction :is(button,select,textarea):focus-visible{outline:3px solid #f6d282;outline-offset:3px}
+#lvx-root .lvx-recording-more{flex-basis:100%;font:12px system-ui}
+#lvx-root .lvx-recording-more summary{cursor:pointer;padding:2px 0;color:#b7cfd6}
+#lvx-root .lvx-recording-more>div{display:flex;gap:8px;flex-wrap:wrap;padding-top:8px}
+#lvx-root .lvx-phrase-correction{border:2px solid #83b4c1;background:#142c36;border-radius:12px;padding:14px;margin:8px 0 14px;scroll-margin:12px}
+#lvx-root .lvx-phrase-correction header{display:flex;justify-content:space-between;gap:10px;margin-bottom:8px}
+#lvx-root .lvx-phrase-correction header strong{font:700 18px system-ui;color:#f2f9fc}
+#lvx-root .lvx-phrase-correction p{font:12px/1.5 system-ui;color:#bcd3dd;margin:7px 0}
+#lvx-root .lvx-phrase-correction label{display:grid;gap:5px;font:600 12px system-ui;color:#d7e7ed;margin:10px 0}
+#lvx-root .lvx-phrase-correction :is(select,textarea){box-sizing:border-box;width:100%;min-width:0;background:#091a22;color:#edf7fa;border:1px solid #638592;padding:8px;font:14px/1.5 system-ui}
+#lvx-root .lvx-phrase-correction textarea{white-space:pre-wrap;min-height:76px;max-height:140px}
+#lvx-root .lvx-correction-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+#lvx-root .lvx-correction-actions button{min-height:40px;font:600 12px system-ui;padding:8px 10px}
+#lvx-root .lvx-correction-actions [data-correction=apply]{background:#d9edc1;color:#19251a}
+#lvx-root .lvx-phrase-correction [data-correction=status]{color:#edf7fa}
+@media(max-width:999px){
+ #lvx-root .lvx-recording-playback{left:8px;bottom:8px;width:calc(100vw - 16px);padding:10px;gap:7px}
+ #lvx-root.lvx-recording-visible .lvx-sync-panel{top:8px;bottom:auto;max-height:calc(100% - 188px)}
+ #lvx-root .lvx-recording-playback .lvx-recording-primary button{padding:9px 10px;font-size:12px}
+ #lvx-root .lvx-recording-primary{flex:1 0 100%}
+ #lvx-root .lvx-recording-more{flex:1 1 auto}
+}
+
+#lvx-root .lvx-phrase-repair-queue{padding:12px;border:1px solid #e68e86;border-radius:10px;margin:10px 0;background:#3a2026;color:#ffd6d2;font:13px/1.45 system-ui}
+#lvx-root .lvx-phrase-repair-queue p{margin:5px 0 8px;font-size:12px}
+#lvx-root .lvx-phrase-repair-queue button{display:block;width:100%;text-align:left;margin:6px 0;padding:8px;background:#492b32;color:#ffe3de;border-color:#ae6b71;font:12px/1.4 system-ui}
+#lvx-root .lvx-phrase-repair-queue details{margin-top:8px}
+#lvx-root .lvx-phrase-repair-queue summary{cursor:pointer}
+#lvx-root .lvx-capture-transcript[data-review=true]>p,#lvx-root .lvx-upcoming-phrases p[data-review=true]{color:#ffb9b2;border-left:3px solid #e58c82;padding-left:9px}
+
+#lvx-root .lvx-sync-panel [data-sync=apply]:disabled{opacity:.45;cursor:not-allowed}

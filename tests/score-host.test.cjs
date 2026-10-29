@@ -869,3 +869,15 @@ test('a separate editor cannot tune, undo, save or close a preview during captur
  h.setCopyBlocked(false);
  assert.equal((await h.dispatch({type:'LV_TIMING_TUNE',...envelope,operation:{type:'setOffset',offsetMs:100}},sender)).ok,true);
 });
+
+test('required phrase timing review survives worker restart and blocks saved writes until explicit resolution',async()=>{
+ const h=makeHarness(),score=await h.ensure();const sender={id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`};
+ const envelope={mediaKey:`youtube:${ID_A}`,expectedRevision:0,lyricsHash:score.lyrics.contentHash};const before=JSON.stringify(recordFor(h));
+ let r=await h.dispatch({type:'LV_TIMING_PREPARE',...envelope,fromSaved:true},sender);assert.equal(r.ok,true);
+ const token=r.preview.token,id=score.phrases[0].id;
+ r=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token,previewRevision:0,operation:{type:'setPhraseTimingReview',phraseId:id,required:true}},sender);assert.equal(r.ok,true,r.error?.message);
+ h.restartWorker();r=await h.dispatch({type:'LV_TIMING_CURRENT',...envelope},sender);assert.equal(r.preview.score.phrases[0].timingReviewRequired,true);
+ r=await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token,previewRevision:1},sender);assert.equal(r.error.code,'TIMING_REVIEW_REQUIRED');assert.equal(JSON.stringify(recordFor(h)),before);
+ r=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token,previewRevision:1,operations:[{type:'setPhraseTimingReview',phraseId:id,required:false},{type:'setOffset',offsetMs:10}]},sender);assert.equal(r.ok,true,r.error?.message);
+ r=await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token,previewRevision:2},sender);assert.equal(r.ok,true,r.error?.message);assert.equal(r.score.offsetMs,10);
+});

@@ -130,6 +130,7 @@ async function main(command, args) {
   await run(process.execPath, ['scripts/overlay-startup-proof.cjs'], source);
   await run(process.execPath, ['scripts/sync-offset-proof.cjs'], source);
   await run(process.execPath, ['scripts/performance-capture-proof.cjs'], source);
+  await run(process.execPath, ['scripts/recording-correction-proof.cjs'], source);
   await run('python', ['scripts/package-release.py', source, output, sha], source);
   console.log(`Candidate ${tag} verified and packaged in ${output}. Publish only this commit and its exact artifacts; release publication is a separate step.`);
 }
