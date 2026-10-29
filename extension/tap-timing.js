@@ -13,12 +13,16 @@
   // preceding phrase so parenthetical replies placed at its end stay with it.
   // A reply in the following rest stays with that phrase until the next main
   // entrance; tightening a recorded main end must not orphan its response.
-  function planOtherParts(score, phraseId, {scope = 'lane'} = {}) {
+  function planOtherParts(score, phraseId, {scope = 'lane', needsRecording = null} = {}) {
     const visible = score.phrases.filter(p => p.words.some(w => !w.excluded));
     const selected = visible.find(p => p.id === phraseId);
     if (!selected) return [];
     const mainLane=score.lanes.find(l=>l.id===selected.laneId);
-    if(mainLane?.role!=='lead')return [];
+    if(mainLane?.role!=='lead'){
+      if(!needsRecording)return [];
+      const phrases=(scope==='phrase'?[selected]:visible.filter(p=>p.laneId===selected.laneId).slice(visible.filter(p=>p.laneId===selected.laneId).indexOf(selected))).filter(needsRecording);
+      return phrases.length?[{laneId:selected.laneId,label:mainLane?.label||selected.laneId,phraseIds:phrases.map(p=>p.id),anchorId:phrases[0].id,other:false,gapPhrases:0,countIn:false}]:[];
+    }
     const primary = visible.filter(p => p.laneId === selected.laneId).sort((a,b)=>a.startMs-b.startMs);
     const anchors = scope === 'phrase' ? [selected] : primary.slice(primary.indexOf(selected));
     const groups = new Map(anchors.map(p=>[p.id,[]]));
@@ -30,7 +34,7 @@
       const owner = ownerOf(part);
       if (owner && groups.has(owner.id)) groups.get(owner.id).push(part);
     }
-    if (![...groups.values()].some(parts=>parts.length)) return [];
+    if (!needsRecording && ![...groups.values()].some(parts=>parts.length)) return [];
     const steps = []; let run = [];
     const step = (phrases, anchor, other) => {
       // Count complete Main phrases without this backing lane between entries.
@@ -54,7 +58,9 @@
       }
     }
     if (run.length) steps.push(step(run,run[0],false));
-    return steps;
+    // Keep all Main anchors while associating backing parts, even when Main is
+    // already recorded. Filter only the resulting targets, never the anchors.
+    return needsRecording ? steps.map(s=>({...s,phraseIds:s.phraseIds.filter(id=>needsRecording(visible.find(p=>p.id===id)))})).filter(s=>s.phraseIds.length) : steps;
   }
 
   // Lead-in guidance is derived from source-media time so pause, seek, and

@@ -871,7 +871,7 @@
       <div class="lvx-perform-cue"><small>READY</small><strong class="lvx-perform-phrase"></strong><div class="lvx-upcoming-phrases" aria-label="Upcoming lyrics"></div><span class="lvx-perform-instruction">Then start performing</span><p class="lvx-estimated-phrase" aria-live="off"></p><p class="lvx-cue-legend">Blue follows your recording cue</p><div class="lvx-live-recovery" hidden><button data-sync="tap-back">← Back one</button><button data-sync="tap-skip">Skip one →</button><button data-sync="tap-reassign-back">Last tap ← word</button><button data-sync="tap-reassign-next">Last tap → word</button><small>Left / Right moves the cue; Ctrl + Left / Right reassigns the last tap. The song keeps playing.</small></div></div>
       <label class="lvx-practice-speed">YouTube practice speed <select data-sync="tap-speed" aria-label="Practice playback speed"><option value="0.5">½× · Half speed</option><option value="0.25">¼× · Quarter speed</option><option value="0.75">¾× · Slower</option><option value="1">1× · Normal</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
       <label class="lvx-syllable-flow">Syllable pass <select data-sync="tap-syllable-flow"><option value="holds">Hold syllables · beginning and end</option><option value="events">Tap freely · assign afterward</option><option value="words">Word pass · hold each word over your syllable taps</option><option value="phrase-stream">Suggested word cursor · legacy</option><option value="continuous">Fixed word frames · optional</option><option value="phrase">Phrase practice · prepared spelling</option></select></label>
-      <div class="lvx-other-parts"><label><input type="checkbox" data-sync="record-other-parts"> Record other parts</label><small data-sync="other-parts-hint"></small></div><div class="lvx-tap-actions lvx-perform-actions"><button data-sync="tap-arm">▶ Start take</button><button data-sync="tap-stop">■ Stop</button><button data-sync="capture-restart" title="Play from 0:00; retain the current take">↶ Restart · 0:00</button><button data-sync="capture-phrase" title="Replay the selected phrase from its lead-in; keep recorded timing">↶ Replay phrase</button><button data-sync="capture-forward" title="Jump to the next lead-in without skipping a lyric (Shift+→)">⏩ Next lead-in</button><button data-sync="retime-flag" title="Flag the phrase you just performed for retiming (F)">⚑ Flag phrase · F</button><button data-sync="tap-mark">Next lyric · Space</button><button data-sync="tap-release">Release · Enter</button></div>
+      <div class="lvx-other-parts"><label><input type="checkbox" data-sync="record-other-parts"> Record unrecorded parts</label><small data-sync="other-parts-hint"></small></div><div class="lvx-tap-actions lvx-perform-actions"><button data-sync="tap-arm">▶ Start take</button><button data-sync="tap-stop">■ Stop</button><button data-sync="capture-restart" title="Play from 0:00; retain the current take">↶ Restart · 0:00</button><button data-sync="capture-phrase" title="Replay the selected phrase from its lead-in; keep recorded timing">↶ Replay phrase</button><button data-sync="capture-forward" title="Jump to the next lead-in without skipping a lyric (Shift+→)">⏩ Next lead-in</button><button data-sync="retime-flag" title="Flag the phrase you just performed for retiming (F)">⚑ Flag phrase · F</button><button data-sync="tap-mark">Next lyric · Space</button><button data-sync="tap-release">Release · Enter</button></div>
       <div class="lvx-tap-words" hidden aria-hidden="true"></div>
       <section class="lvx-phrase-syllables" hidden aria-label="Phrase syllable spelling"><details><summary>Syllable spelling <span>Edit cuts with |</span></summary><p class="lvx-sync-hint">One Space press per syllable entrance. Dictionary suggestions guide spelling, not audio alignment.</p><div class="lvx-phrase-syllable-fields"></div><button data-sync="phrase-suggest">Suggest phrase syllables</button></details><p class="lvx-phrase-syllable-hint" role="status"></p></section>
       <div class="lvx-tap-actions lvx-syllable-review" hidden><button data-sync="syllable-retake">↻ Retake phrase</button><button data-sync="syllable-hear">▶ Hear this take</button><button data-sync="syllable-next">✓ Keep phrase & next</button></div>
@@ -2133,23 +2133,23 @@
     finally{timing.busy=false;captureTracks.switching=false;refreshTimingPanel();}
   }
   function otherPartsSupported(){return syncButton('tap-mode').value!=='syllable'||!continuousPass();}
-  function otherPartsPlan(){return timing.draft&&timingPhrase()?LvTapTiming.planOtherParts(timing.draft.score,timingPhrase().id,{scope:syncButton('record-repeat').checked||syncButton('tap-mode').value==='syllable'?'phrase':syncButton('tap-scope').value}):[];}
+  function otherPartsPlan(){return timing.draft&&timingPhrase()?LvTapTiming.planOtherParts(timing.draft.score,timingPhrase().id,{scope:syncButton('record-repeat').checked||syncButton('tap-mode').value==='syllable'?'phrase':syncButton('tap-scope').value,needsRecording:p=>LvScore.phraseTimingCoverage(p)[syncButton('tap-mode').value].status!=='complete'}):[];}
   function refreshOtherParts(){
     const checkbox=syncButton('record-other-parts'),hint=syncButton('other-parts-hint');
     const supported=otherPartsSupported(),steps=partRun?.steps||(!tapPending()?otherPartsPlan():[]);
     checkbox.disabled=!supported||timing.busy||tapPending()||countIn.active||countIn.preparing;
     const names=[...new Set(steps.filter(s=>s.other).map(s=>s.label))];
-    const selected=timing.draft?.score.lanes.find(l=>l.id===timingPhrase()?.laneId);
+    const remaining=steps.reduce((n,s)=>n+s.phraseIds.length,0);
     hint.textContent=partRun?`${partRun.steps[partRun.index].label} · section ${partRun.index+1}/${partRun.steps.length}. Stop ends the run; completed timing stays in preview.`:
-      !supported?'Available for phrase/word takes and single-phrase syllable practice.':selected?.role==='backing'?'Recording the selected backing track directly. Automatic visits start from Main.':!checkbox.checked?'Off · stay on Main; no automatic backing recording or rewind.':names.length?`On · rewind and record ${names.join(', ')}, then return to Main.`:'On · no backing parts in this phrase range.';
+      !supported?'Available for phrase/word takes and single-phrase syllable practice.':!checkbox.checked?'Off · record the selected track, including existing timing.':remaining?`On · ${remaining} unfinished phrase${remaining===1?'':'s'} for ${syncButton('tap-mode').value} timing${names.length?`; includes ${names.join(', ')}`:''}. Completed phrases are skipped.`:'All parts in this range already have this timing. Nothing to record.';
   }
   async function advanceOtherParts(run){
     if(partRun!==run||timing.busy||tapping.take)return;
     const media=getMedia();media?.pause();
     if(!timing.draft||!media||tempoSourceKey()!==run.sourceKey){partRun=null;refreshTimingPanel();return;}
     run.index++;
-    if(run.index>=run.steps.length&&syncButton('record-repeat').checked){run.index=0;run.repeating=true;}
-    if(run.index>=run.steps.length){const mainId=run.steps.filter(s=>!s.other).at(-1)?.phraseIds.at(-1),mainIndex=timing.draft.score.phrases.findIndex(p=>p.id===mainId);if(mainIndex>=0){timing.phraseIndex=mainIndex;tapping.wordId=timingPhrase().words.find(w=>!w.excluded)?.id;}partRun=null;refreshTimingPanel();setSyncNotice('Main and selected backing parts are in the preview. Save timings when ready.');return;}
+    // An unrecorded-parts run ends once its remaining targets are recorded.
+    if(run.index>=run.steps.length){const mainId=run.steps.filter(s=>!s.other).at(-1)?.phraseIds.at(-1),mainIndex=timing.draft.score.phrases.findIndex(p=>p.id===mainId);if(mainIndex>=0){timing.phraseIndex=mainIndex;tapping.wordId=timingPhrase().words.find(w=>!w.excluded)?.id;}partRun=null;refreshTimingPanel();setSyncNotice('Unrecorded parts are now in the preview. Save timings when ready.');return;}
     const step=run.steps[run.index],score=timing.draft.score;
     const next=score.phrases.find(p=>p.id===step.phraseIds[0]);
     if(!next){partRun=null;setSyncNotice('The next part changed. Completed timing stays in preview.','error');return;}
@@ -2176,9 +2176,8 @@
       if(unplaced&&phrase.endEstimated&&mode==='syllable'&&!eventPass()&&!wordPass())throw Error('These lyrics have no reliable timing frames yet. Use freely recorded syllable holds, or record word/phrase timings first.');
       const syllableStart=mode==='syllable'&&!wordPass()&&!tapping.take&&tapping.syllableStartKey!==LvScore.mediaKey(state.score.source);
       if(syllableStart){word=phrase.words.find(w=>!w.excluded);tapping.wordId=word.id;}
-      if(mode==='syllable'&&!continuousPass()){discardTapTake(true);await preparePhraseSyllables();phrase=timingPhrase();word=phrase.words.find(w=>!w.excluded);tapping.wordId=word?.id;const unresolved=[...phraseSpellingState()].filter(([,e])=>e.requiresChoice);if(unresolved.length){syncPanel.querySelector('.lvx-phrase-syllables details').open=true;throw Error('Choose the sung syllable count in Syllable spelling for: '+unresolved.map(([id])=>phrase.words.find(w=>w.id===id)?.text).join(', ')+'. Then Start phrase take.');}}
       const retiming=wordTake(tapping.take)&&tapping.take.retime;
-      if(!keepPlayback&&mode!=='phrase'&&!partRun&&!retiming&&!syllableStart&&!unplaced){
+      if(!keepPlayback&&mode!=='phrase'&&!partRun&&!retiming&&!syllableStart&&!unplaced&&!syncButton('record-other-parts').checked){
         // Start and Continue both begin at the phrase you are listening to, never a stale selection or the take's old end.
         const now=Math.round(media.currentTime*1000)-timingOffsetMs(),lane=timing.draft.score.phrases.filter(p=>p.laneId===phrase.laneId&&p.words.some(w=>!w.excluded));
         const parked=now>=phrase.startMs-1500&&now<phrase.endMs;
@@ -2193,9 +2192,11 @@
         word=phrase.words.find(w=>!w.excluded&&now>=w.startMs&&now<w.endMs)||phrase.words.find(w=>!w.excluded&&w.startMs>=now)||phrase.words.find(w=>!w.excluded)||word;tapping.wordId=word.id;
       }
       if(!keepPlayback&&!partRun&&!tapping.take&&syncButton('record-other-parts').checked&&otherPartsSupported()){
-        let steps=otherPartsPlan();if(mode==='syllable')steps=steps.flatMap(step=>step.phraseIds.map((id,index)=>({...step,phraseIds:[id],countIn:step.countIn&&index===0})));if(steps.length)partRun={steps,index:0,mode,scope:syncButton('tap-scope').value,sourceKey:tempoSourceKey()};
+        let steps=otherPartsPlan();if(mode==='syllable')steps=steps.flatMap(step=>step.phraseIds.map((id,index)=>({...step,phraseIds:[id],countIn:step.countIn&&index===0})));if(!steps.length)throw Error('All parts in this range already have this timing. Turn off Record unrecorded parts to rerecord them.');partRun={steps,index:0,mode,scope:syncButton('tap-scope').value,sourceKey:tempoSourceKey()};
       }
       const partStep=partRun?.steps[partRun.index];
+      if(partStep){phrase=timing.draft.score.phrases.find(p=>p.id===partStep.phraseIds[0]);timing.phraseIndex=timing.draft.score.phrases.indexOf(phrase);word=phrase.words.find(w=>!w.excluded);tapping.wordId=word.id;}
+      if(mode==='syllable'&&!continuousPass()){discardTapTake(true);renderPhraseSyllableFields();await preparePhraseSyllables();phrase=timingPhrase();word=phrase.words.find(w=>!w.excluded);tapping.wordId=word?.id;const unresolved=[...phraseSpellingState()].filter(([,e])=>e.requiresChoice);if(unresolved.length){syncPanel.querySelector('.lvx-phrase-syllables details').open=true;throw Error('Choose the sung syllable count in Syllable spelling for: '+unresolved.map(([id])=>phrase.words.find(w=>w.id===id)?.text).join(', ')+'. Then Start phrase take.');}}
       const scopedPhrases=partStep?partStep.phraseIds.map(id=>timing.draft.score.phrases.find(p=>p.id===id)).filter(Boolean):syncButton('record-repeat').checked?[phrase]:null;
       const laneWords = (scopedPhrases?scopedPhrases.flatMap(p=>p.words):syncButton('tap-scope').value === 'lane' ? timing.draft.score.phrases.filter(p => p.laneId === phrase.laneId).flatMap(p => p.words) : phrase.words).filter(w=>!w.excluded);
       const selected = mode === 'word' ? laneWords : phraseSyllableUnits(phrase);
@@ -2203,6 +2204,7 @@
       const units = eventPass()||wordPass() ? await prepareStreamUnits(phrase,true,0) : phraseStream() ? await prepareStreamUnits(phrase) : continuousSyllables() ? timing.draft.score.phrases.slice(timing.phraseIndex).filter(p=>p.laneId===phrase.laneId).flatMap(p=>p.words.filter(w=>!w.excluded&&w.startMs>=word.startMs&&w.endMs>w.startMs).map(w=>({id:w.id,wordId:w.id,phraseId:p.id,text:w.text,minMs:w.startMs,maxMs:w.endMs,estimatedStartMs:w.startMs}))).sort((a,b)=>a.minMs-b.minMs) : mode === 'phrase' ? phrases.map(p=>({id:p.id,phraseId:p.id,wordId:p.words.find(w=>!w.excluded).id,text:p.words.filter(w=>!w.excluded).map(w=>w.text).join(' '),estimatedStartMs:p.startMs,estimatedEndMs:p.endMs,minMs:0,maxMs:timing.draft.score.source.durationMs})) : mode === 'word' ? wordTimingUnits(selected) : selected.map(item => ({ id: item.id, wordId: word.id,
         ...(mode === 'syllable' ? { syllableId: item.id,wordId:item.wordId,phraseId:phrase.id } : {}), text: item.text,
         minMs: mode === 'word' ? 0 : phrase.startMs, maxMs: mode === 'word' ? timing.draft.score.source.durationMs : phrase.endMs }));
+      if(partStep&&mode==='word'){const unfinished=units.filter(u=>{const w=timing.draft.score.phrases.flatMap(p=>p.words).find(w=>w.id===u.wordId);return !(w?.provenance==='manual'&&w.locked&&w.endMs>w.startMs);});units.splice(0,units.length,...unfinished);}
       for(const unit of units){const owner=timing.draft.score.phrases.find(p=>p.id===unit.phraseId||p.words.some(w=>w.id===unit.wordId));unit.timingEstimated=untimedPhrase(owner)||mode==='phrase'&&LvScore.phraseTimingCoverage(owner).phrase.status!=='complete';}
       if(syncButton('record-repeat').checked&&continuousPass())units.splice(0,units.length,...units.filter(u=>u.phraseId===phrase.id));
       // A raw take of the other kind (syllable taps vs word holds) is archived and becomes the source, not a continuation.
@@ -2799,7 +2801,7 @@
   syncButton('tap-mark').addEventListener('pointerup', () => { if (tapping.heldInput === 'pointer') markTapTime({release:true}); });
   syncButton('tap-mark').addEventListener('pointercancel', () => { if (tapping.heldInput === 'pointer') {listenToTake();refreshTimingPanel();} });
   syncButton('tap-release').addEventListener('click', () => markTapTime({release:true}));
-  syncButton('record-other-parts').addEventListener('change',()=>{refreshOtherParts();chrome.storage.local.set({lvxRecordOtherParts:syncButton('record-other-parts').checked}).catch(error=>setSyncNotice('Choice kept in this tab; preference could not save: '+error.message));});
+  syncButton('record-other-parts').addEventListener('change',()=>{refreshOtherParts();chrome.storage.local.set({lvxRecordUnrecordedParts:syncButton('record-other-parts').checked}).catch(error=>setSyncNotice('Choice kept in this tab; preference could not save: '+error.message));});
   syncButton('tap-stop').addEventListener('click', () => { stopTapTake(); getMedia()?.pause(); });
   syncButton('retime-flag').addEventListener('click', () => void flagPhraseForRetime());
   // The change list updates as you type; Apply is the only step.
@@ -3769,13 +3771,13 @@
 
   /* Load saved preferences (theme, font scale, lite mode) */
   if(!exportHost)try {
-    chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement','lvxBloomEnabled','lvxChoreography','lvxLinger','lvxRecordOtherParts','lvxBackingDisplay','lvxBackingLabels','lvxControlPlacement','lvxCaptureLeadInMs','lvxWordRules','lvxWordRuleSets'], (result) => {
+    chrome.storage.local.get(['lvxTheme', 'lvxFontScale', 'lvxLiteMode','lvxPlacement','lvxBloomEnabled','lvxChoreography','lvxLinger','lvxRecordUnrecordedParts','lvxBackingDisplay','lvxBackingLabels','lvxControlPlacement','lvxCaptureLeadInMs','lvxWordRules','lvxWordRuleSets'], (result) => {
       try{if(result?.lvxWordRuleSets){wordRuleSets=LvChoreography.validateWordRuleSets(result.lvxWordRuleSets);wordRules=wordRuleSets.sets.find(s=>s.id===wordRuleSets.activeId).rules;}else if(Array.isArray(result?.lvxWordRules)){wordRules=LvChoreography.validateWordRules(result.lvxWordRules);wordRuleSets={version:1,activeId:'default',sets:[{id:'default',name:'Default',rules:wordRules}]};}}catch(error){setHud('Saved word sets need review: '+error.message,true,true);}
       if(!captureLeadInEdited&&Number.isFinite(result?.lvxCaptureLeadInMs)){captureLeadInMs=clamp(result.lvxCaptureLeadInMs,0,30000);refreshLeadInControls();}
       const savedControls=result?.lvxControlPlacement;if(savedControls){controlPlacement={x:Number.isFinite(savedControls.x)?clamp(savedControls.x,0,1):0,y:Number.isFinite(savedControls.y)?clamp(savedControls.y,0,1):0,orientation:savedControls.orientation==='horizontal'?'horizontal':'vertical'};placeControls();}
       backingDisplay=LvChoreography.backingSettings(result?.lvxBackingDisplay);
       backingLabels=Object.fromEntries(Object.entries(result?.lvxBackingLabels||{}).filter(([key,value])=>['hidden','header','prefix'].includes(value)));
-      syncButton('record-other-parts').checked=result?.lvxRecordOtherParts===true;
+      syncButton('record-other-parts').checked=result?.lvxRecordUnrecordedParts===true;
       linger=LvBeatTrack.lingerSettings(result?.lvxLinger);
       if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={beatPulse:c.beatPulse!==false,landing:Object.hasOwn(LvChoreography.landingStyles,c.landing)?c.landing:'settle',dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic===true,autoFire:c.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,c.fireColor)?c.fireColor:'ember',fireSmoke:c.fireSmoke!==false,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:Object.hasOwn(LvChoreography.layoutOrigins,c.origin)?c.origin:'top-left'};}
       bloomEnabled=result?.lvxBloomEnabled!==false;

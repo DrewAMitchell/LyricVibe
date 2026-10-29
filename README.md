@@ -93,3 +93,17 @@ is also available beside the existing recording recovery controls. Stop applies
 removals and completed timing to the preview; **Save timings** persists them.
 There is no separate correction form or required repair queue. Phrase mode can
 still arm before estimated cues. Existing unsaved-work navigation protection remains.
+
+
+### Record unrecorded parts
+
+Enable **Record unrecorded parts** before Start to record unfinished phrases in
+the selected range and timing mode. From Main it includes nearby backing parts,
+even when Main is already recorded. Completed words in a partial word pass are
+also skipped. Estimates do not count as recorded timing. Turn it off to rerecord
+the selected track normally. An empty range does not start playback.
+
+Prepared syllable practice skips fully completed phrases; partial phrases keep
+its existing whole-phrase review. Free-running syllable capture is unchanged.
+The run stops when remaining targets are complete, even with Repeat enabled.
+Use Save timings to keep the preview. The new choice starts off and is remembered.

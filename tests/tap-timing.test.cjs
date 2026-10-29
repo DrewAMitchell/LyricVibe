@@ -1432,3 +1432,23 @@ test('one unknown count follows the recorded remainder after explicit human coun
  const p=tap.associateEvents(t,{counts:{a:1}}).phrases[0];assert.equal(p.ready,true);assert.deepEqual(p.counts.map(c=>[c.count,c.source]),[[1,'human'],[3,'recorded-remainder']]);
  assert.deepEqual(p.marks.map(m=>m.startMs),[100,200,300,400]);
 });
+
+
+test('unrecorded itinerary skips completed targets without losing backing anchors or single-track gaps', () => {
+  const core=require('../extension/score-core.js');
+  const p=(id,laneId,startMs,recorded=false)=>({id,laneId,startMs,endMs:startMs+1000,words:[{id:id+'w',startMs,endMs:startMs+1000,provenance:recorded?'manual':'estimated',locked:recorded}]});
+  const score={lanes:[{id:'main',role:'lead'},{id:'echo',role:'backing'}],phrases:[p('a','main',1000,true),p('b','main',5000),p('c','main',9000,true),p('reply','echo',2100),p('done','echo',6000,true)]};
+  const before=JSON.stringify(score),options={needsRecording:p=>core.phraseTimingCoverage(p).phrase.status!=='complete'};
+  assert.deepEqual(tap.planOtherParts(score,'a',options).map(s=>s.phraseIds),[['reply'],['b']]);
+  assert.equal(tap.planOtherParts(score,'a',options)[0].anchorId,'a','recorded Main still anchors an unfinished reply');
+  assert.deepEqual(tap.planOtherParts(score,'a',{...options,scope:'phrase'}).map(s=>s.phraseIds),[['reply']]);
+  assert.deepEqual(tap.planOtherParts(score,'reply',options).map(s=>s.phraseIds),[['reply']]);
+  assert.deepEqual(tap.planOtherParts(score,'done',options),[]);
+  const mainOnly={...score,phrases:score.phrases.filter(p=>p.laneId==='main')};
+  assert.deepEqual(tap.planOtherParts(mainOnly,'a',options).map(s=>s.phraseIds),[['b']]);
+  assert.deepEqual(tap.planOtherParts(mainOnly,'c',options),[]);
+  score.phrases[0].words[0].locked=false;
+  assert.deepEqual(tap.planOtherParts(score,'a',{needsRecording:p=>core.phraseTimingCoverage(p).word.status!=='complete'})[0].phraseIds,['a'],'recorded phrase frames do not count as recorded words');
+  score.phrases[0].words[0].locked=true;
+  assert.equal(JSON.stringify(score),before);
+});
