@@ -99,7 +99,19 @@ const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env
   assert.equal(await evaluate(()=>__qa.getPartRun()),null,'unrecorded run does not loop already completed parts');
   assert.equal(await evaluate(()=>__qa.tapping.take),null);
   assert.equal(await evaluate(()=>JSON.stringify(__qa.timing.draft.score.phrases[0])),await evaluate(()=>__syllableMain));
-  const checks=['Completed Main and backing phrases skipped; unfinished backing remains reachable through a completed Main anchor','Next unfinished Main phrase selected and run ends paused','Completed phrase bytes and saved score unchanged','No remaining targets does not arm or play; switch off allows rerecording','Partial word pass keeps completed word bytes unchanged','New preference persists independently of legacy tour preference','Syllable practice skips complete Main before spelling preparation, keeps its review step and ends even with Repeat enabled'];
+  await evaluate(()=>{
+    const q=__qa,s=q.timing.draft.score;for(const w of s.phrases[1].words){w.provenance='estimated';w.locked=false;}
+    q.timing.phraseIndex=0;q.tapping.wordId=s.phrases[0].words[0].id;document.querySelector('video').currentTime=1;document.querySelector('video').paused=true;
+    document.querySelector('[data-sync=tap-mode]').value='phrase';document.querySelector('[data-sync=tap-scope]').value='lane';document.querySelector('[data-sync=record-repeat]').checked=false;
+    q.refreshTimingPanel();window.__lastPhrase=JSON.stringify(s.phrases[2]);
+  });
+  await evaluate(async()=>__qa.armTapTake());
+  assert.deepEqual(await evaluate(()=>__qa.tapping.take.units.map(u=>u.phraseId)),['phrase-2']);
+  await page.keyboard.press('Backspace');
+  assert.equal(await evaluate(()=>__qa.tapping.take.units.some(u=>u.phraseId==='phrase-3')),false,'Backspace must not append completed phrases');
+  await evaluate(async()=>__qa.stopTapTake());
+  assert.equal(await evaluate(()=>JSON.stringify(__qa.timing.draft.score.phrases[2])),await evaluate(()=>__lastPhrase));
+  const checks=['Completed Main and backing phrases skipped; unfinished backing remains reachable through a completed Main anchor','Next unfinished Main phrase selected and run ends paused','Completed phrase bytes and saved score unchanged','No remaining targets does not arm or play; switch off allows rerecording','Partial word pass keeps completed word bytes unchanged','New preference persists independently of legacy tour preference','Backspace removes unfinished phrase without appending or changing completed phrases','Syllable practice skips complete Main before spelling preparation, keeps its review step and ends even with Repeat enabled'];
   fs.writeFileSync(path.join(root,'docs/unrecorded-parts-proof.json'),JSON.stringify({observedAt:new Date().toISOString(),basis:'Actual Chrome content UI and score host with synthetic media/storage; no human song edits.',checks},null,2)+'\n');
   console.log(JSON.stringify({checks}));
 })().catch(e=>{console.error(e);process.exitCode=1}).finally(async()=>{await browser?.close();await server?.close();probe('END');});

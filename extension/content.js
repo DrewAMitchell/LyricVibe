@@ -2475,7 +2475,7 @@
       // A one-phrase scope still needs the next cue to take the removed cue's
       // place. Expand this local continuation on the same track only.
       const last=score.phrases.findIndex(p=>p.id===take.units.at(-1).phraseId),excluded=new Set(take.removedPhraseIds||[]);
-      const following=score.phrases.slice(last+1).filter(p=>p.laneId===phrase.laneId&&p.words.some(w=>!w.excluded)&&!excluded.has(p.id)&&!take.units.some(u=>u.phraseId===p.id)).map(p=>({id:p.id,phraseId:p.id,wordId:p.words.find(w=>!w.excluded).id,text:p.words.filter(w=>!w.excluded).map(w=>w.text).join(' '),estimatedStartMs:p.startMs,estimatedEndMs:p.endMs,minMs:0,maxMs:score.source.durationMs,timingEstimated:true}));
+      const following=score.phrases.slice(last+1).filter(p=>p.laneId===phrase.laneId&&p.words.some(w=>!w.excluded)&&!excluded.has(p.id)&&(!syncButton('record-other-parts').checked||LvScore.phraseTimingCoverage(p).phrase.status!=='complete')&&!take.units.some(u=>u.phraseId===p.id)).map(p=>({id:p.id,phraseId:p.id,wordId:p.words.find(w=>!w.excluded).id,text:p.words.filter(w=>!w.excluded).map(w=>w.text).join(' '),estimatedStartMs:p.startMs,estimatedEndMs:p.endMs,minMs:0,maxMs:score.source.durationMs,timingEstimated:true}));
       tapping.take=LvTapTiming.removeCurrentPhrase({...take,units:[...take.units,...following]});
       // Undo must restore the actual prior scope, not the expanded temporary one.
       const {actionHistory,...prior}=take;tapping.take.actionHistory[tapping.take.actionHistory.length-1]=prior;
