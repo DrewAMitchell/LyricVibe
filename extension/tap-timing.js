@@ -931,9 +931,10 @@
 
   // Event capture deliberately stores only source-clock observations. Lexical
   // ownership and syllable segmentation are a later, reviewable operation.
-  function beginEvents(units, { kind = 'syllable-entrance', inputMode = 'tap' } = {}) {
+  function beginEvents(units, { kind = 'syllable-entrance', inputMode = 'tap', captureId } = {}) {
     if (!Array.isArray(units) || !units.length || units.length > 5000) fail('INVALID_UNITS', 'Provide 1–5000 event units.');
     if (typeof kind !== 'string' || !kind.trim()) fail('INVALID_KIND', 'Event kind must be a nonempty string.');
+    if(captureId!==undefined&&(typeof captureId!=='string'||!captureId||captureId.length>256))fail('INVALID_CAPTURE','Capture identity must be a bounded string.');
     if (!['tap','hold'].includes(inputMode)) fail('INVALID_INPUT_MODE','Syllable input must be tap or hold.');
     const ids = new Set();
     const safeUnits = units.map(unit => {
@@ -945,23 +946,46 @@
       }
       ids.add(unit.id); return clone(unit);
     });
-    return { status: 'armed', cadence: 'performance-events', mode: 'syllable', kind, inputMode,
-      units: safeUnits, events: [], marks: [], index: 0, pendingStartMs: null, lastMs: null, actionHistory: [] };
+    return { status: 'armed', cadence: 'performance-events', mode: 'syllable', kind, inputMode, ...(captureId?{captureId}:{}),
+      units: safeUnits, events: [], rawInputs: [], nextEventOrdinal: 1, marks: [], index: 0, pendingStartMs: null, lastMs: null, actionHistory: [] };
   }
-  function markEvent(take, scoreMs) {
+  // Raw input is append-only across interpretation Undo, punch-in and rewind.
+  // Playback rate scales source-time error, not the recorded timestamp.
+  function timingEvidence(event) {
+    const rate = event.playbackRate;
+    return { eventId: event.id, sourceMs: event.sourceMs, ...(event.captureId?{captureId:event.captureId}:{}),
+      ...(event.releaseMs === undefined ? {} : { releaseMs: event.releaseMs }),
+      playbackRate: rate ?? null, relativeWeight: rate == null ? null : 1 / (rate * rate),
+      basis: 'equal-input-error-speed-prior', calibrated: false };
+  }
+  function validateEventInput(take, scoreMs, playbackRate) {
     if (!take || take.cadence !== 'performance-events') fail('CADENCE_UNSUPPORTED', 'Expected a performance-events take.');
     if (take.status !== 'armed') fail('TAKE_CLOSED', 'Event take is not armed.');
     if (!integerTime(scoreMs)) fail('INVALID_TIME', 'Event time must be a nonnegative integer number of milliseconds.');
     if (take.lastMs !== null && scoreMs < take.lastMs) fail('NON_MONOTONIC_TIME', 'Events must follow source-time order.');
-    if (take.events.length >= 5000) fail('TAKE_LIMIT', 'An event take is limited to 5000 taps.');
-    const event = { id: `event-${take.events.length + 1}`, kind: take.kind, sourceMs: scoreMs };
+    if (playbackRate !== undefined && (typeof playbackRate !== 'number' || !Number.isFinite(playbackRate) || playbackRate <= 0 || playbackRate > 16)) fail('INVALID_RATE', 'Capture rate must be positive and at most 16.');
+    if (take.events.length >= 5000 || (take.rawInputs?.length || 0) >= 10000) fail('TAKE_LIMIT', 'Save this take before recording more input.');
+  }
+  function appendInput(take, event, action) {
+    return [...(take.rawInputs || []), { sequence: (take.rawInputs?.length || 0) + 1, eventId: event.id,
+      action, sourceMs: event.sourceMs, ...(event.playbackRate === undefined ? {} : { playbackRate: event.playbackRate }) }];
+  }
+  function markEvent(take, scoreMs, {kind = take?.kind, playbackRate} = {}) {
+    validateEventInput(take, scoreMs, playbackRate);
+    if (typeof kind !== 'string' || !kind.trim()) fail('INVALID_KIND', 'Event kind is required.');
+    const ordinal = take.nextEventOrdinal || take.events.length + 1;
+    const parent = (take.pendingStartMs!==null?take.pendingEvent:null) || [...take.events].reverse().find(e => e.kind === 'syllable-entrance');
+    const event = { id: `event-${ordinal}`, kind, sourceMs: scoreMs, ...(take.captureId?{captureId:take.captureId}:{}),
+      ...(playbackRate === undefined ? {} : {playbackRate}),
+      ...(kind === 'note-change' ? {parentEventId: parent?.id ?? null} : {}) };
     const snapshot = { events: take.events, index: take.index, lastMs: take.lastMs };
-    return { ...take, events: [...take.events, event], lastMs: scoreMs,
+    return { ...take, events: [...take.events, event], lastMs: scoreMs, nextEventOrdinal: ordinal + 1,
+      rawInputs: appendInput(take, event, kind),
       actionHistory: [...take.actionHistory, snapshot].slice(-128) };
   }
   function restoreEventRecording(packet) {
-    if(packet?.schema!=='lyricvibe-performance-events-v1'||!Array.isArray(packet.events)||!packet.events.length||packet.events.length>5000)fail('INVALID_RECORDING','Provide a saved syllable-event recording.');
-    const take=beginEvents(packet.referenceUnits,{inputMode:packet.inputMode||'tap'}),ids=new Set();
+    if(packet?.schema!=='lyricvibe-performance-events-v1'||!Array.isArray(packet.events)||(!packet.events.length&&!packet.rawInputs?.length)||packet.events.length>5000)fail('INVALID_RECORDING','Provide a saved syllable-event recording.');
+    const take=beginEvents(packet.referenceUnits,{inputMode:packet.inputMode||'tap',captureId:packet.captureId}),ids=new Set();
     for(let i=0;i<packet.events.length;i++){
       const e=packet.events[i],previous=packet.events[i-1];
       if(!e||typeof e.id!=='string'||!e.id.trim()||ids.has(e.id)||typeof e.kind!=='string'||!e.kind.trim()||!integerTime(e.sourceMs)||
@@ -970,28 +994,40 @@
     }
     if(packet.stoppedScoreMs!==undefined&&!integerTime(packet.stoppedScoreMs))fail('INVALID_RECORDING','Recorded stop time must be whole source milliseconds.');
     const events=clone(packet.events),last=events.at(-1);
-    return {...take,status:'stopped',events,lastMs:last.releaseMs??last.sourceMs,...(packet.stoppedScoreMs===undefined?{}:{stoppedScoreMs:packet.stoppedScoreMs})};
+    const rawInputs=packet.rawInputs===undefined?[]:clone(packet.rawInputs);
+    if(!Array.isArray(rawInputs)||rawInputs.length>10000||rawInputs.some((r,i)=>!r||r.sequence!==i+1||typeof r.eventId!=='string'||typeof r.action!=='string'||!r.action||!integerTime(r.sourceMs)||r.playbackRate!==undefined&&(!Number.isFinite(r.playbackRate)||r.playbackRate<=0||r.playbackRate>16)))fail('INVALID_RECORDING','Invalid raw input journal.');
+    for(const e of events)if(e.playbackRate!==undefined&&(!Number.isFinite(e.playbackRate)||e.playbackRate<=0||e.playbackRate>16)||e.kind==='note-change'&&e.parentEventId!==null&&typeof e.parentEventId!=='string')fail('INVALID_RECORDING','Invalid capture evidence.');
+    const nextEventOrdinal=Math.max(0,...[...events.map(e=>e.id),...rawInputs.map(r=>r.eventId)].map(id=>Number(/^event-(\d+)$/.exec(id)?.[1])||0))+1;
+    return {...take,status:'stopped',events,rawInputs,nextEventOrdinal,lastMs:events.length?Math.max(...events.map(e=>e.releaseMs??e.sourceMs)):null,...(packet.stoppedScoreMs===undefined?{}:{stoppedScoreMs:packet.stoppedScoreMs})};
   }
   function stopEvents(take) {
     if (!take || take.cadence !== 'performance-events') fail('CADENCE_UNSUPPORTED', 'Expected a performance-events take.');
     return take.status === 'stopped' ? take : { ...take, status: 'stopped', pendingStartMs:null };
   }
-  function pressEventHold(take, scoreMs) {
+  function pressEventHold(take, scoreMs, {playbackRate} = {}) {
     if(take?.inputMode!=='hold')fail('CADENCE_UNSUPPORTED','Expected syllable holds.');
     if(take.pendingStartMs!==null)fail('ALREADY_HELD','Release the current syllable first.');
-    markEvent(take,scoreMs); // Validate without committing an unfinished duration.
-    return {...take,pendingStartMs:scoreMs};
+    validateEventInput(take,scoreMs,playbackRate);
+    const ordinal=take.nextEventOrdinal||take.events.length+1;
+    const pendingEvent={id:`event-${ordinal}`,kind:'syllable-entrance',sourceMs:scoreMs,...(take.captureId?{captureId:take.captureId}:{}),...(playbackRate===undefined?{}:{playbackRate})};
+    return {...take,pendingStartMs:scoreMs,pendingEvent,nextEventOrdinal:ordinal+1,
+      rawInputs:appendInput(take,pendingEvent,'syllable-press')};
   }
-  function releaseEventHold(take, scoreMs) {
+  function releaseEventHold(take, scoreMs, {playbackRate} = {}) {
     if(take?.inputMode!=='hold')fail('CADENCE_UNSUPPORTED','Expected syllable holds.');
     if(take.pendingStartMs===null)fail('NOT_HELD','Press at the syllable beginning first.');
     if(!integerTime(scoreMs)||scoreMs<=take.pendingStartMs)fail('INVALID_TIME','Release must be after the syllable beginning.');
-    const next=markEvent({...take,pendingStartMs:null},take.pendingStartMs);
-    return {...next,lastMs:scoreMs,events:next.events.map((e,i)=>i===next.events.length-1?{...e,releaseMs:scoreMs}:e)};
+    validateEventInput(take,scoreMs,playbackRate);
+    const event={...take.pendingEvent,releaseMs:scoreMs};
+    const snapshot={events:take.events,index:take.index,lastMs:take.lastMs};
+    return {...take,pendingStartMs:null,pendingEvent:null,lastMs:scoreMs,
+      events:[...take.events,event].sort((a,b)=>a.sourceMs-b.sourceMs),
+      rawInputs:appendInput(take,{...event,sourceMs:scoreMs,playbackRate:playbackRate??event.playbackRate},'syllable-release'),
+      actionHistory:[...take.actionHistory,snapshot].slice(-128)};
   }
   function undoEvent(take) {
     if (!take || take.cadence !== 'performance-events') fail('CADENCE_UNSUPPORTED', 'Expected a performance-events take.');
-    if(take.pendingStartMs!==null)return {...take,pendingStartMs:null};
+    if(take.pendingStartMs!==null)return {...take,pendingStartMs:null,pendingEvent:null};
     if (!take.actionHistory?.length) return take;
     const previous = take.actionHistory.at(-1);
     return { ...take, events: previous.events, index: previous.index, lastMs: previous.lastMs,
@@ -1007,7 +1043,7 @@
     const events = take.events.filter(e => e.sourceMs < cutoff);
     const snapshot = { events: take.events, index: take.index, lastMs: take.lastMs };
     return { ...take, events, index: take.units.findIndex(u => u.phraseId === phraseId),
-      lastMs: events.length ? events.at(-1).releaseMs??events.at(-1).sourceMs : null,
+      lastMs: events.length ? Math.max(...events.map(e=>e.releaseMs??e.sourceMs)) : null,
       actionHistory: [...(take.actionHistory || []), snapshot].slice(-128) };
   }
   function associateEvents(take, { counts = {}, gapRatio = 2.5, gapMinMs = 450 } = {}) {
@@ -1030,7 +1066,12 @@
       const owners = bounded ? assigned.map(e => units.findIndex(u => e.sourceMs >= u.referenceStartMs && e.sourceMs < u.referenceEndMs)) : [];
       const observed = units.map((u,i) => owners.filter(owner => owner === i).length);
       const boundaryCounts = bounded && owners.every(i=>i>=0) && observed.every(n=>n>0) ? observed : null;
-      const unknownCounts = units.some(u=>u.expectedCount == null && counts[u.wordId] === undefined && !boundaryCounts);
+      const observedCounts = units.length===1 && assigned.length ? [assigned.length] : boundaryCounts;
+      const missing=units.map((u,i)=>counts[u.wordId]===undefined?i:-1).filter(i=>i>=0);
+      const inferredIndex=!observedCounts&&missing.length===1&&units[missing[0]].expectedCount==null&&units.length>1?missing[0]:-1;
+      const remainder=inferredIndex>=0?assigned.length-units.reduce((n,u,i)=>n+(i===inferredIndex?0:counts[u.wordId]),0):null;
+      const inferredCounts=inferredIndex>=0&&Number.isSafeInteger(remainder)&&remainder>0?units.map((u,i)=>i===inferredIndex?remainder:counts[u.wordId]):null;
+      const unknownCounts = units.some(u=>u.expectedCount == null && counts[u.wordId] === undefined && !observedCounts && !inferredCounts);
       const options = units.map(u => (u.countOptions || []).map(x => Number.isSafeInteger(x) ? x : x && x.count).filter(x => Number.isSafeInteger(x) && x > 0));
       if (assigned.length === 0 && ambiguous.length === 0) return { phraseId, eventCount: 0,
         expectedCount: expected.every(v=>v!=null)?expected.reduce((a,b)=>a+b,0):null,
@@ -1040,9 +1081,9 @@
       const supplied = units.map(u => counts[u.wordId]);
       const hasSupplied = supplied.some(v => v !== undefined);
       if (hasSupplied && supplied.some(v => v !== undefined && (!Number.isSafeInteger(v) || v < 1))) fail('INVALID_COUNTS', 'Edited counts must be positive integers.');
-      const chosen = units.map((u,i)=>supplied[i] ?? boundaryCounts?.[i] ?? expected[i] ?? 1);
+      const chosen = units.map((u,i)=>supplied[i] ?? observedCounts?.[i] ?? inferredCounts?.[i] ?? expected[i] ?? 1);
       if (!chosen.every(n=>Number.isSafeInteger(n)&&n>0) || chosen.reduce((a,b)=>a+b,0)!==assigned.length) {
-        const alternatives = units.map((u,i) => supplied[i] !== undefined ? [supplied[i]] : boundaryCounts ? [boundaryCounts[i]] : [...new Set([expected[i], ...options[i]].filter(n=>Number.isSafeInteger(n)&&n>0))]);
+        const alternatives = units.map((u,i) => supplied[i] !== undefined ? [supplied[i]] : observedCounts ? [observedCounts[i]] : [...new Set([expected[i], ...options[i]].filter(n=>Number.isSafeInteger(n)&&n>0))]);
         const states = new Map([[0, [[]]]]);
         for (const choices of alternatives) {
           const next = new Map();
@@ -1084,7 +1125,7 @@
             else endSource = next ? 'provisional-next-entrance' : 'provisional-phrase-end';
           }
           marks.push({ id: `${u.wordId}-syllable-${n+1}`, syllableId: `${u.wordId}-syllable-${n+1}`, wordId: u.wordId,
-            phraseId, startMs: e.sourceMs, endMs, endSource, eventId: e.id });
+            phraseId, startMs: e.sourceMs, endMs, endSource, eventId: e.id, captureEvidence:timingEvidence(e) });
         }});
       }
       // A long silence between entrances can be a held syllable or a rest. If
@@ -1118,12 +1159,14 @@
       if (matched && units.some((u,i) => u.expectedCount != null && finalCounts[i] !== u.expectedCount) && !issues.includes('count-squished')) issues.push('count-modified');
       return { phraseId, eventCount: assigned.length, expectedCount: expected.every(v=>v!=null)?expected.reduce((a,b)=>a+b,0):null,
         counts: units.map((u,i)=>({ wordId:u.wordId, text:u.text, count:matched?finalCounts[i]:null,
-          ...(needsReview ? { suggestedCount:suggested[i] } : {}), source:hasSupplied && supplied[i] !== undefined?'human':boundaryCounts?'manual-word-boundaries':finalCounts[i]!==expected[i]&&options[i].includes(finalCounts[i])?'dictionary-alternative':u.countSource||'dictionary',
-          changed: finalCounts[i] != null && finalCounts[i] !== u.expectedCount, uncertain: (u.expectedCount == null && !boundaryCounts && supplied[i] === undefined) || needsReview })),
+          ...(needsReview ? { suggestedCount:suggested[i] } : {}), source:hasSupplied && supplied[i] !== undefined?'human':inferredCounts?'recorded-remainder':units.length===1?'recorded-single-word':boundaryCounts?'manual-word-boundaries':finalCounts[i]!==expected[i]&&options[i].includes(finalCounts[i])?'dictionary-alternative':u.countSource||'dictionary',
+          changed: finalCounts[i] != null && finalCounts[i] !== u.expectedCount, uncertain: (u.expectedCount == null && !observedCounts && !inferredCounts && supplied[i] === undefined) || needsReview })),
         marks, gaps, issues, ready: !needsReview };
     });
+    for(const p of phrases)for(const m of p.marks){m.captureEvidence.noteEvents=take.events.filter(e=>e.kind==='note-change'&&e.parentEventId===m.eventId&&e.sourceMs>=m.startMs&&e.sourceMs<m.endMs).map(e=>({...timingEvidence(e),kind:'note-change'}));}
+    const attachedNotes=new Set(phrases.flatMap(p=>p.marks.flatMap(m=>m.captureEvidence.noteEvents.map(e=>e.eventId))));
     const inFrames = new Set(phrases.flatMap(p => take.events.filter(e => e.kind === 'syllable-entrance' && e.sourceMs >= Math.min(...take.units.filter(u=>u.phraseId===p.phraseId).map(u=>u.minMs)) && e.sourceMs < Math.max(...take.units.filter(u=>u.phraseId===p.phraseId).map(u=>u.maxMs))).map(e=>e.id)));
-    const unassigned = take.events.filter(e => !inFrames.has(e.id));
+    const unassigned = take.events.filter(e => !inFrames.has(e.id)&&!attachedNotes.has(e.id));
     const ready = phrases.every(p=>p.eventCount===0 || p.ready) && !unassigned.some(e=>e.kind==='syllable-entrance');
     return { phrases, unassigned, ready };
   }
@@ -1146,7 +1189,7 @@
         syllableEvents.some(e => !e || typeof e.id !== 'string' || !integerTime(e.sourceMs))) fail('INVALID_EVENTS', 'Syllable events need ids and whole-millisecond source times.');
     const events = clone(syllableEvents).filter(e => (e.kind ?? 'syllable-entrance') === 'syllable-entrance').sort((a, b) => a.sourceMs - b.sourceMs);
     return { status: 'armed', cadence: 'word-holds', mode: 'syllable', units: safeUnits, syllableEvents: events,
-      holds: [], marks: [], index: 0, pendingStartMs: null, lastMs: null, actionHistory: [] };
+      noteEvents:clone(syllableEvents).filter(e=>e.kind==='note-change'), holds: [], marks: [], index: 0, pendingStartMs: null, lastMs: null, actionHistory: [] };
   }
   function restoreWordHoldRecording(packet) {
     if(packet?.schema!=='lyricvibe-word-holds-v1'||!Array.isArray(packet.holds)||!packet.holds.length||packet.holds.length>5000)fail('INVALID_RECORDING','Provide a saved word-hold recording.');
@@ -1396,13 +1439,13 @@
         const entrances = own.length ? own : [{ id: `press-${u.wordId}`, sourceMs: hold.pressMs, synthetic: true }];
         entrances.forEach((e, i) => {
           const last = i === entrances.length - 1;
-          const startMs=Math.max(hold.pressMs,e.sourceMs);
+          const startMs=e.sourceMs;
           const bound=last?hold.releaseMs:Math.min(hold.releaseMs,Math.max(hold.pressMs,entrances[i+1].sourceMs));
-          const measured=Number.isSafeInteger(e.releaseMs)&&e.releaseMs>startMs&&e.releaseMs<=bound;
+          const measured=Number.isSafeInteger(e.releaseMs)&&e.releaseMs>startMs;
           const endMs=measured?e.releaseMs:bound,endSource=measured?'syllable-release':last?'word-release':'next-entrance';
           if(endMs<=startMs)wordIssues.push('collapsed-syllables');
           marks.push({ id: `${u.wordId}-syllable-${i + 1}`, syllableId: `${u.wordId}-syllable-${i + 1}`, wordId: u.wordId, phraseId,
-            startMs, endMs, endSource, eventId: e.synthetic ? null : e.id, startSource: e.synthetic ? 'word-press' : startMs!==e.sourceMs?'word-start-bound':'syllable-entrance' });
+            startMs, endMs, endSource, ...(e.synthetic?{}:{captureEvidence:{...timingEvidence(e),noteEvents:(take.noteEvents||[]).filter(n=>n.parentEventId===e.id&&n.sourceMs>=startMs&&n.sourceMs<endMs).map(n=>({...timingEvidence(n),kind:'note-change'}))}}), eventId: e.synthetic ? null : e.id, startSource: e.synthetic ? 'word-press' : startMs!==e.sourceMs?'word-start-bound':'syllable-entrance' });
         });
         wordIssues.forEach(i => issues.add(i));
         words.push({ wordId: u.wordId, text: u.text, held: true, pressMs: hold.pressMs, releaseMs: hold.releaseMs, count: own.length,
@@ -1413,6 +1456,7 @@
       // Legato releases often run into the next word; the next entrance wins and the trim is flagged.
       for (let i = 0; i + 1 < marks.length; i++) {
         if (marks[i].endMs <= marks[i + 1].startMs || marks[i + 1].startMs <= marks[i].startMs) continue;
+        if(marks[i].endSource==='syllable-release'){issues.add('recorded-syllables-overlap');continue;}
         marks[i].endMs = marks[i + 1].startMs;
         if (marks[i].endSource === 'word-release') {
           marks[i].endSource = 'word-release-trimmed';
@@ -1421,7 +1465,7 @@
           issues.add('release-overlaps-next');
         }
       }
-      const blocking = ['word-not-held', 'order-conflict','collapsed-syllables'];
+      const blocking = ['word-not-held', 'order-conflict','collapsed-syllables','recorded-syllables-overlap'];
       return { phraseId, heldCount: held.length, words, marks, issues: [...issues], ready: !blocking.some(b => issues.has(b)) };
     });
     const unclaimed = take.syllableEvents.filter(e => !claimed.has(e.id));
@@ -1472,7 +1516,7 @@
   }
 
   return { begin, mark, release, undo, stop, adjust, reposition, followPlayback, punchIn, moveCursor, reassignLast, restoreWordFrameTake, rewindToPhrase, restorePhraseStreamTake,
-    beginEvents, markEvent, pressEventHold, releaseEventHold, stopEvents, undoEvent, rewindEvents, associateEvents, restoreEventRecording,
+    beginEvents, markEvent, pressEventHold, releaseEventHold, stopEvents, undoEvent, rewindEvents, associateEvents, restoreEventRecording, timingEvidence,
     beginWordHolds, restoreWordHoldRecording, pressWord, releaseWord, skipWords, undoWordHold, stopWordHolds, rewindWordHolds, retimePhraseHolds, associateWordHolds, wordHoldsFromPairs, estimateTempo,
     planOtherParts, leadInProgress, captureProgress, validateTempoMap, tempoMapFromEstimate, setTempoPoint, removeTempoPoint, tempoAt, tempoTimeAtBeat };
 });

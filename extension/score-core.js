@@ -28,6 +28,19 @@
       this.code = code;
     }
   }
+  // Original source-clock observations are immutable provenance, not score-time
+  // animation keys. Retiming a score must not rewrite what was captured.
+  function validateCaptureEvidence(e, nested=false) {
+    if(!e||typeof e!=='object'||typeof e.eventId!=='string'||!e.eventId||e.eventId.length>256||e.captureId!==undefined&&(typeof e.captureId!=='string'||!e.captureId||e.captureId.length>256)||
+      !Number.isSafeInteger(e.sourceMs)||e.sourceMs<0||e.releaseMs!==undefined&&(!Number.isSafeInteger(e.releaseMs)||e.releaseMs<=e.sourceMs)||
+      e.basis!=='equal-input-error-speed-prior'||e.calibrated!==false||
+      !(e.playbackRate===null&&e.relativeWeight===null||typeof e.playbackRate==='number'&&Number.isFinite(e.playbackRate)&&e.playbackRate>0&&e.playbackRate<=16&&e.relativeWeight===1/(e.playbackRate*e.playbackRate)))
+      fail('INVALID_CAPTURE_EVIDENCE','Capture evidence needs exact source times and an uncalibrated speed prior.');
+    if(e.noteEvents!==undefined){
+      if(nested||!Array.isArray(e.noteEvents)||e.noteEvents.length>5000)fail('INVALID_CAPTURE_EVIDENCE','Invalid note-event evidence.');
+      const ids=new Set();for(const note of e.noteEvents){validateCaptureEvidence(note,true);if(note.kind!=='note-change'||ids.has(note.eventId)||note.sourceMs<e.sourceMs||e.releaseMs!==undefined&&note.sourceMs>=e.releaseMs)fail('INVALID_CAPTURE_EVIDENCE','Note event is outside its captured syllable.');ids.add(note.eventId);}
+    }
+  }
   function fail(code, message) { throw new ScoreError(code, message); }
   function validEmoji(value){return typeof value==='string'&&(value===''||value.length<=32&&/\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(value)&&!/[^\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Modifier}\u200d\ufe0f\u20e3\p{M}]/u.test(value)&&[...new Intl.Segmenter('en',{granularity:'grapheme'}).segment(value)].length===1);}
   function validReveal(reveal) {
@@ -341,6 +354,7 @@
           if (!Array.isArray(word.syllables) || word.syllables.some(syllable => !syllable || Object.prototype.hasOwnProperty.call(syllable, "syllables"))) bad("invalid syllables");
           if (word.syllables.length && word.syllables.map(syllable => typeof syllable.text === "string" ? syllable.text : "").join("") !== (word.spokenText || word.text)) bad("syllable text must concatenate exactly to the spoken word");
           for (const syllable of word.syllables) {
+            if(syllable.captureEvidence!==undefined)validateCaptureEvidence(syllable.captureEvidence);
             if (typeof syllable.id !== "string" || !syllable.id || ids.has(syllable.id) || typeof syllable.text !== "string" || !syllable.text) bad("invalid or duplicate syllable");
             ids.add(syllable.id);
             if (typeof syllable.startMs !== "number" || !Number.isFinite(syllable.startMs) || syllable.startMs < word.startMs || typeof syllable.endMs !== "number" || !Number.isFinite(syllable.endMs) || syllable.endMs < syllable.startMs || syllable.endMs > word.endMs || !["estimated", "manual", "aligned"].includes(syllable.provenance) || typeof syllable.locked !== "boolean" || !Array.isArray(syllable.effects)) bad("invalid syllable timing or fields");
@@ -635,6 +649,7 @@
         return {
           id: item.id, text: item.text, startMs: item.startMs, endMs: item.endMs,
           provenance, locked, effects: item.effects === undefined ? [] : clone(item.effects),
+          ...(item.captureEvidence===undefined?{}:{captureEvidence:clone(item.captureEvidence)}),
         };
       });
       if (children.length && children.map(item => item.text).join("") !== (spokenText || word.text)) fail("INVALID_SYLLABLES", "syllable text must concatenate exactly to the spoken word");
@@ -696,6 +711,7 @@
           const syllable = {
             ...(prior ? clone(prior) : {}), id: item.id, text: item.text, startMs: item.startMs, endMs: item.endMs,
             provenance: "manual", locked: true,
+            ...(item.captureEvidence===undefined?{}:{captureEvidence:clone(item.captureEvidence)}),
             effects: item.effects === undefined ? clone(prior?.effects || []) : clone(item.effects),
           };
           syllables.push(syllable); seenChildren.add(item.id); previousEndMs = item.endMs;

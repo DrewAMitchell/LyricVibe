@@ -30,6 +30,51 @@
       ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal"
+    },
+    {
+      "name": "LyricVibe: propose alignment for one phrase",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "${env:LOCALAPPDATA}/LyricVibe/analysis-venv/Scripts/python.exe",
+      "module": "native.phrase_alignment",
+      "args": [
+        "--score",
+        "${input:lyricvibeScorePath}",
+        "--media",
+        "${input:lyricvibeReviewMediaPath}",
+        "--phrase-id",
+        "${input:lyricvibeSinglePhraseId}",
+        "--output",
+        "${input:lyricvibeReceiptPath}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "lyricvibeSinglePhraseId",
+      "type": "promptString",
+      "description": "Exact phrase ID with explicit bounds (up to 12 seconds)",
+      "default": "phrase-1"
+    },
+    {
+      "id": "lyricvibeScorePath",
+      "type": "promptString",
+      "description": "Absolute path to the LyricVibe score JSON",
+      "default": ""
+    },
+    {
+      "id": "lyricvibeReceiptPath",
+      "type": "promptString",
+      "description": "Absolute path where the review receipt should be written",
+      "default": ""
+    },
+    {
+      "id": "lyricvibeReviewMediaPath",
+      "type": "promptString",
+      "description": "Absolute path to the original local media file",
+      "default": ""
     }
   ]
 }

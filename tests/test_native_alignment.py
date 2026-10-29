@@ -35,6 +35,16 @@ class _CountTorch:
 
 
 class NativeAlignmentMappingTests(unittest.TestCase):
+    def test_optional_character_frames_preserve_repeated_letter_identity(self):
+        words, warnings = _frame_words(_FrameTensor([[0, 2, 3, 0, 3, 0]]),
+                                     _FrameTensor([[2, 3, 3]]), [(0, 3, "all")], 0, 600,
+                                     include_characters=True)
+        self.assertEqual(warnings, [])
+        self.assertEqual(words[0]["characters"], [
+            {"characterIndex": 0, "startMs": 100, "endMs": 200},
+            {"characterIndex": 1, "startMs": 200, "endMs": 300},
+            {"characterIndex": 2, "startMs": 400, "endMs": 500}])
+
     def test_target_preserves_supplied_word_text_and_delimiters(self):
         torch = SimpleNamespace(int32=object(), tensor=lambda values, dtype: values)
         labels = ("-", "|", "A", "L", "I", "V", "E")

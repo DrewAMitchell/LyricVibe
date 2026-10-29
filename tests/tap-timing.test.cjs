@@ -1139,8 +1139,8 @@ test('word pass claims recorded syllables by press and ends the last syllable at
   const p=tap.associateWordHolds(take).phrases[0];
   assert.equal(p.ready,true); assert.deepEqual(p.issues,[]);
   assert.deepEqual(p.marks.map(m=>[m.wordId,m.startMs,m.endMs,m.endSource]),[
-    ['w1',160,400,'next-entrance'],['w1',400,820,'word-release'],
-    ['w2',1040,1300,'next-entrance'],['w2',1300,2100,'word-release']]);
+    ['w1',100,400,'next-entrance'],['w1',400,820,'word-release'],
+    ['w2',1000,1300,'next-entrance'],['w2',1300,2100,'word-release']]);
   // Raw syllable entrances never move.
   assert.deepEqual(take.syllableEvents.map(e=>e.sourceMs),[100,400,1000,1300]);
 });
@@ -1291,11 +1291,11 @@ test('tap tempo fits period and phase, tolerating jitter and a skipped beat', ()
   assert.throws(()=>tap.estimateTempo([1.5,2,3,4]),/whole milliseconds/);
 });
 
-test('word-held syllables stay inside the optional word bounds, preserve raw taps and reject collapsed starts',()=>{
+test('word-held syllables retain their actual onsets outside the earlier word bounds',()=>{
  const units=[{wordId:'oh',phraseId:'p',text:'Oh',minMs:0,maxMs:3000,expectedCount:1}],events=[80,180,600].map((sourceMs,i)=>({id:'e'+i,sourceMs}));
  let t=tap.beginWordHolds(units,events);t=tap.pressWord(t,100);t=tap.releaseWord(t,500);
- const r=tap.associateWordHolds(t),p=r.phrases[0];assert.ok(p.ready);assert.deepEqual(p.marks.map(m=>[m.startMs,m.endMs]),[[100,180],[180,500]]);assert.equal(p.marks[0].startSource,'word-start-bound');assert.deepEqual(r.unclaimed.map(e=>e.sourceMs),[600]);assert.deepEqual(t.syllableEvents,events);
- t={...t,syllableEvents:[{id:'a',sourceMs:60},{id:'b',sourceMs:90}]};const collapsed=tap.associateWordHolds(t).phrases[0];assert.equal(collapsed.ready,false);assert.ok(collapsed.issues.includes('collapsed-syllables'));
+ const r=tap.associateWordHolds(t),p=r.phrases[0];assert.ok(p.ready);assert.deepEqual(p.marks.map(m=>[m.startMs,m.endMs]),[[80,180],[180,500]]);assert.equal(p.marks[0].startSource,'syllable-entrance');assert.deepEqual(r.unclaimed.map(e=>e.sourceMs),[600]);assert.deepEqual(t.syllableEvents,events);
+ t={...t,syllableEvents:[{id:'a',sourceMs:60},{id:'b',sourceMs:90}]};const collapsed=tap.associateWordHolds(t).phrases[0];assert.equal(collapsed.ready,true);assert.deepEqual(collapsed.marks.map(m=>m.startMs),[60,90]);
 });
 
 test('reopening word-hold recordings preserves holds and syllable releases and rejects unbound or malformed evidence',()=>{
@@ -1381,4 +1381,54 @@ test('untimed pasted lyrics wait through an intro; recorded releases can guide l
     assert.equal(tap.followPlayback(take,40000,{rewind:true}).index,1,'next untimed word waits after a recorded release');
     assert.equal(tap.followPlayback(take,18500,{rewind:true}).index,0,'real recorded timing remains replayable');
   }
+});
+
+
+test('two syllables retain six pitch changes without consuming text; speed evidence and raw input survive rewind',()=>{
+  const units=[{id:'w',wordId:'w',phraseId:'p',text:'hello',minMs:0,maxMs:3000,expectedCount:1}];
+  let t=tap.beginEvents(units,{inputMode:'hold'});
+  t=tap.pressEventHold(t,100,{playbackRate:.5});
+  for(const ms of [200,300,400])t=tap.markEvent(t,ms,{kind:'note-change',playbackRate:.5});
+  t=tap.releaseEventHold(t,600,{playbackRate:.5});
+  t=tap.pressEventHold(t,700,{playbackRate:.75});
+  for(const ms of [800,900,1000])t=tap.markEvent(t,ms,{kind:'note-change',playbackRate:.75});
+  t=tap.releaseEventHold(t,1200,{playbackRate:.75});
+  const report=tap.associateEvents(tap.stopEvents(t));assert.equal(report.ready,true);assert.equal(report.unassigned.length,0);
+  const p=report.phrases[0];assert.equal(p.counts[0].count,2);assert.equal(p.counts[0].source,'recorded-single-word');
+  assert.deepEqual(p.marks.map(m=>m.captureEvidence.noteEvents.length),[3,3]);
+  assert.deepEqual(p.marks.map(m=>m.captureEvidence.relativeWeight),[4,1/(.75*.75)]);
+  assert.deepEqual(p.marks.map(m=>[m.startMs,m.endMs]),[[100,600],[700,1200]]);
+  const journal=structuredClone(t.rawInputs);assert.equal(journal.length,10);
+  t=tap.punchIn(t,50,{phraseId:'p'});assert.deepEqual(t.rawInputs,journal);assert.equal(t.events.length,0);
+  t=tap.pressEventHold(t,50,{playbackRate:1});t=tap.releaseEventHold(t,90,{playbackRate:1});
+  assert.equal(t.events[0].id,'event-9');assert.deepEqual(t.rawInputs.slice(0,10),journal);
+  const packet={schema:'lyricvibe-performance-events-v1',referenceUnits:units,events:t.events,rawInputs:t.rawInputs,inputMode:'hold'};
+  const restored=tap.restoreEventRecording(packet);assert.deepEqual(restored.rawInputs,t.rawInputs);assert.deepEqual(restored.events,t.events);
+  assert.throws(()=>tap.restoreEventRecording({...packet,rawInputs:[{...journal[0],playbackRate:0}]}),{code:'INVALID_RECORDING'});
+});
+
+test('unfinished raw press remains archived without fabricating an interval or recording speed',()=>{
+  const units=[{id:'w',wordId:'w',phraseId:'p',text:'unknown',minMs:0,maxMs:3000,expectedCount:null}];
+  let t=tap.beginEvents(units,{inputMode:'hold'});t=tap.pressEventHold(t,120,{playbackRate:.5});t=tap.stopEvents(t);
+  assert.equal(t.events.length,0);assert.equal(t.rawInputs[0].sourceMs,120);
+  const r=tap.restoreEventRecording({schema:'lyricvibe-performance-events-v1',referenceUnits:units,events:[],rawInputs:t.rawInputs,inputMode:'hold'});
+  assert.deepEqual(r.rawInputs,t.rawInputs);assert.equal(r.lastMs,null);
+  t=tap.beginEvents(units);t=tap.markEvent(t,150);t=tap.markEvent(t,250);
+  const p=tap.associateEvents(t).phrases[0];assert.equal(p.ready,true);assert.equal(p.counts[0].count,2);assert.equal(p.marks[0].captureEvidence.relativeWeight,null);
+});
+
+test('word review never trims a measured syllable release and blocks conflicting recorded intervals',()=>{
+  const units=[{wordId:'a',phraseId:'p',text:'a',minMs:0,maxMs:2000},{wordId:'b',phraseId:'p',text:'b',minMs:0,maxMs:2000}];
+  let t=tap.beginWordHolds(units,[{id:'a',kind:'syllable-entrance',sourceMs:80,releaseMs:700,playbackRate:.5},{id:'b',kind:'syllable-entrance',sourceMs:600,releaseMs:900,playbackRate:1}]);
+  t=tap.pressWord(t,100);t=tap.releaseWord(t,500);t=tap.pressWord(t,600);t=tap.releaseWord(t,1000);
+  const p=tap.associateWordHolds(t).phrases[0];assert.equal(p.ready,false);assert.ok(p.issues.includes('recorded-syllables-overlap'));
+  assert.deepEqual(p.marks.map(m=>[m.startMs,m.endMs]),[[80,700],[600,900]]);assert.equal(p.marks[0].captureEvidence.relativeWeight,4);
+});
+
+test('one unknown count follows the recorded remainder after explicit human counts; two unknown owners remain unresolved',()=>{
+ const units=['a','b'].map(id=>({id,wordId:id,phraseId:'p',text:id,minMs:0,maxMs:3000,expectedCount:null}));
+ let t=tap.beginEvents(units);for(const ms of [100,200,300,400])t=tap.markEvent(t,ms,{playbackRate:.5});
+ assert.equal(tap.associateEvents(t).ready,false);
+ const p=tap.associateEvents(t,{counts:{a:1}}).phrases[0];assert.equal(p.ready,true);assert.deepEqual(p.counts.map(c=>[c.count,c.source]),[[1,'human'],[3,'recorded-remainder']]);
+ assert.deepEqual(p.marks.map(m=>m.startMs),[100,200,300,400]);
 });

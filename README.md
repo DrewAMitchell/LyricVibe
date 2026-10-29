@@ -66,3 +66,15 @@ is open, use its lightweight editor's **Song timing** offset and **Save timings*
 The version format is `year.quarter.sprint.build` (for example `2026.4.2.0`).
 See [the release process](RELEASING.md) for preparation, validation, publication
 and preserving local scores during upgrades.
+
+
+### Recording syllables and pitch changes
+
+In **Hold syllables**, hold Space for each syllable and release during rests.
+Press **N** for a pitch change while holding. In **Tap freely**, Space records a
+syllable entrance; **N** or **Shift+Space** adds a pitch event without advancing
+text. Stop, open **Refine**, review word counts and use the assignments, then Save.
+Your counts override dictionary suggestions. Raw input remains in the local
+recording when you undo or re-record. Capture speed and pitch events travel with
+saved syllable evidence; the speed weight is an estimate, not measured accuracy.
+Negative song sync displays the result earlier without rewriting captured times.

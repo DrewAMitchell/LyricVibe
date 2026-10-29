@@ -143,6 +143,7 @@ def _frame_words(
     word_spans: list[tuple[int, int, str]],
     blank_id: int,
     duration_ms: float,
+    include_characters: bool = False,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Convert native CTC frame assignments into word intervals."""
     frame_tokens = aligned_tokens[0].tolist()
@@ -172,6 +173,9 @@ def _frame_words(
             "startMs": int(start_ms),
             "endMs": int(end_ms),
             "wordIndex": word_index,
+            **({"characters": [{"characterIndex": i, "startMs": int(round(min(frames) * frame_ms)),
+                                "endMs": int(round((max(frames) + 1) * frame_ms))}
+                               for i, frames in enumerate(target_frames[start_token:end_token])]} if include_characters else {}),
         })
     return output, warnings
 
@@ -264,7 +268,7 @@ def _greedy_consistency(
 
 
 def _align_waveform(waveform: Any, sample_rate: int, text: str, language: str, started: float,
-                    max_audio_seconds: int = MAX_AUDIO_SECONDS) -> dict[str, Any]:
+                    max_audio_seconds: int = MAX_AUDIO_SECONDS, include_characters: bool = False) -> dict[str, Any]:
     """Run the shared supplied-text CTC path on a normalized in-memory waveform."""
     import torch
     import torchaudio
@@ -340,7 +344,7 @@ def _align_waveform(waveform: Any, sample_rate: int, text: str, language: str, s
         blank=0,
     )
     forced_alignment_ms = round((time.perf_counter() - align_started) * 1000)
-    words, warnings = _frame_words(aligned_tokens, token_ids, word_spans, 0, duration_ms)
+    words, warnings = _frame_words(aligned_tokens, token_ids, word_spans, 0, duration_ms, include_characters)
     target_frames, _path_error = _target_frame_groups(aligned_tokens, token_ids, 0)
     greedy_consistency = _greedy_consistency(
         log_probs[0].argmax(dim=-1).tolist(),
@@ -375,7 +379,7 @@ def _align_waveform(waveform: Any, sample_rate: int, text: str, language: str, s
     }
 
 
-def align_samples(pcm: bytes, text: str, sample_rate_hz: int = 16_000, language: str = "en") -> dict[str, Any]:
+def align_samples(pcm: bytes, text: str, sample_rate_hz: int = 16_000, language: str = "en", include_characters: bool = False) -> dict[str, Any]:
     """Align supplied English lyrics to in-memory mono s16le PCM.
 
     This entry point is bounded to 12 seconds and never materializes an audio
@@ -390,7 +394,7 @@ def align_samples(pcm: bytes, text: str, sample_rate_hz: int = 16_000, language:
         ) from exc
     started = time.perf_counter()
     waveform, sample_rate = _load_pcm_samples(pcm, sample_rate_hz, torch, torchaudio)
-    return _align_waveform(waveform, sample_rate, text, language, started, MAX_PCM_ALIGNMENT_SECONDS)
+    return _align_waveform(waveform, sample_rate, text, language, started, MAX_PCM_ALIGNMENT_SECONDS, include_characters=include_characters)
 
 
 def align(audio_path: str, text: str, language: str = "en") -> dict[str, Any]:

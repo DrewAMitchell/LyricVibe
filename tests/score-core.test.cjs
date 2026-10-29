@@ -612,3 +612,15 @@ test('recorded word bounds remain authoritative while syllables occupy intervals
  const n=score.applyOperation(s,operation,s.revision),word=n.phrases[0].words[0];assert.deepEqual([word.startMs,word.endMs],[1100,2300]);assert.deepEqual(word.syllables.map(x=>[x.startMs,x.endMs]),[[1200,1500],[1800,2200]]);
  errorCode(()=>score.applyOperation(s,{...operation,words:[{...operation.words[0],startMs:1300}]},s.revision),'INVALID_TIME');
 });
+
+
+test('saved syllables retain source-bound note events and uncalibrated capture-speed evidence through export and retiming',()=>{
+ const base=makeScore('[00:01.00]hello\n[00:04.00]'),p=base.phrases[0],w=p.words[0];
+ const evidence={captureId:'capture-proof',eventId:'event-1',sourceMs:1100,releaseMs:2500,playbackRate:.5,relativeWeight:4,basis:'equal-input-error-speed-prior',calibrated:false,noteEvents:[{eventId:'event-2',sourceMs:1500,playbackRate:.5,relativeWeight:4,basis:'equal-input-error-speed-prior',calibrated:false,kind:'note-change'}]};
+ const op={type:'setPhraseSyllablePerformance',phraseId:p.id,words:[{wordId:w.id,syllables:[{id:'capture-s',text:'hello',startMs:1100,endMs:2500,captureEvidence:evidence}]}]};
+ const next=score.applyOperation(base,op,base.revision);assert.deepEqual(next.phrases[0].words[0].syllables[0].captureEvidence,evidence);
+ const serialized=JSON.parse(JSON.stringify(next));score.validateScore(serialized);
+ const moved=score.applyOperation(next,{type:'setSyllableTiming',syllableId:'capture-s',startMs:1200,endMs:2400},next.revision);
+ assert.deepEqual(moved.phrases[0].words[0].syllables[0].captureEvidence,evidence,'score editing never rewrites original observations');
+ const bad=structuredClone(op);bad.words[0].syllables[0].captureEvidence.relativeWeight=100;assert.throws(()=>score.applyOperation(base,bad,base.revision),/speed prior/);
+});
