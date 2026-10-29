@@ -82,10 +82,14 @@ Negative song sync displays the result earlier without rewriting captured times.
 
 ### Correcting phrases while recording
 
-Use **Fix phrase** in the persistent recording bar to pause and replace words,
-ignore an extra phrase, insert a missing one, or move a phrase to another vocal
-track without changing its timing. After inserting, **Rewind & retime 3 phrases**
-repairs the surrounding phrases together. Red repairs must be recorded, explicitly
-confirmed with **Keep existing timing**, or ignored before **Save timings** unlocks.
-Ignored phrases can be restored. Save the preview before leaving the video; the
-extension guards navigation and warns on tab close, but cannot prevent a forced close.
+During a **phrase take**, press **Backspace** to remove the current phrase from
+the recording sequence. The next phrase takes its place, later cues move up,
+and a held Space entrance carries over to the next phrase. Playback continues.
+**Ctrl+Z** (Command+Z on macOS) restores the removed cue; the existing Undo input
+button uses the same take history. Backspace keeps its normal behavior in text fields.
+
+The original controls and compact playback strip are retained. **Remove phrase · ⌫**
+is also available beside the existing recording recovery controls. Stop applies
+removals and completed timing to the preview; **Save timings** persists them.
+There is no separate correction form or required repair queue. Phrase mode can
+still arm before estimated cues. Existing unsaved-work navigation protection remains.

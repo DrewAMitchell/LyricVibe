@@ -551,6 +551,26 @@
     return take.cadence === 'flow' || take.actionHistory?.length ? withFlowHistory(take, next) : next;
   }
 
+  // Remove a mistaken live phrase without moving the media clock or losing a
+  // held entrance. Later cue identities inherit the preceding timing slots.
+  // The score is edited only when the retained take is applied to its preview.
+  function removeCurrentPhrase(take) {
+    if(!take||take.mode!=='phrase'||take.status!=='armed'||!take.units[take.index])fail('PHRASE_TAKE_REQUIRED','Remove a phrase during an active phrase take.');
+    const at=take.index,removed=take.units[at],units=take.units.filter((_,i)=>i!==at).map((unit,i)=>{
+      if(i<at)return unit;
+      const slot=take.units[i];
+      return {...unit,estimatedStartMs:slot.estimatedStartMs,estimatedEndMs:slot.estimatedEndMs,timingEstimated:true};
+    });
+    const marks=take.marks.flatMap(mark=>{
+      const index=take.units.findIndex(unit=>unit.id===mark.id);
+      if(index<at)return [mark];
+      const next=units[index];return next?[{...mark,id:next.id,wordId:next.wordId}]:[];
+    });
+    const ended=at>=units.length;
+    return withFlowHistory(take,{...take,units,marks,removedPhraseIds:[...(take.removedPhraseIds||[]),removed.phraseId||removed.id],
+      pendingStartMs:ended?null:take.pendingStartMs,status:ended?'stopped':'armed',lastMs:ended?marks.at(-1)?.endMs??null:take.lastMs});
+  }
+
   function undo(take) {
     if (!take || !['armed', 'complete', 'stopped'].includes(take.status)) fail('INVALID_TAKE', 'Provide a take returned by begin.');
     if (take.actionHistory && take.actionHistory.length) {
@@ -1515,7 +1535,7 @@
     return {...next,status:'armed'};
   }
 
-  return { begin, mark, release, undo, stop, adjust, reposition, followPlayback, punchIn, moveCursor, reassignLast, restoreWordFrameTake, rewindToPhrase, restorePhraseStreamTake,
+  return { begin, mark, release, removeCurrentPhrase, undo, stop, adjust, reposition, followPlayback, punchIn, moveCursor, reassignLast, restoreWordFrameTake, rewindToPhrase, restorePhraseStreamTake,
     beginEvents, markEvent, pressEventHold, releaseEventHold, stopEvents, undoEvent, rewindEvents, associateEvents, restoreEventRecording, timingEvidence,
     beginWordHolds, restoreWordHoldRecording, pressWord, releaseWord, skipWords, undoWordHold, stopWordHolds, rewindWordHolds, retimePhraseHolds, associateWordHolds, wordHoldsFromPairs, estimateTempo,
     planOtherParts, leadInProgress, captureProgress, validateTempoMap, tempoMapFromEstimate, setTempoPoint, removeTempoPoint, tempoAt, tempoTimeAtBeat };

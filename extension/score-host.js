@@ -303,7 +303,6 @@
           return { ok: true, preview: undone, tabId, mediaKey: key };
         }
         if (message.type !== 'LV_TIMING_APPLY') throw fail('MESSAGE_UNKNOWN', 'Unknown timing preview action.');
-        LvScore.requireTimingResolved(draft.score);
         await liveIdentity(tabId, key);
         record.history = [...(record.history || []), record.score].slice(-30);
         record.score = { ...draft.score, revision: record.score.revision + 1 };
@@ -365,7 +364,6 @@
       // no score edit, acceptance, import or undo intervenes.
       if (message.type !== 'LV_ALIGNMENT_PROPOSALS') { record.review = []; record.diagnostics = null; }
       if (message.type !== 'LV_SCORE_UNDO') record.history = [...(record.history || []), record.score].slice(-30);
-      LvScore.requireTimingResolved(next);
       record.score = next;
       await liveIdentity(tabId, key);
       await chrome.storage.local.set({ [keyFor(key)]: record });
