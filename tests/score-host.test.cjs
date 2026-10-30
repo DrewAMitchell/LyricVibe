@@ -53,7 +53,7 @@ function makeHarness() {
     },
     windows: { async create(options) { popupWindows.push(structuredClone(options)); return { id: popupWindows.length }; } },
   };
-  const context = vm.createContext({ chrome, crypto: webcrypto, TextEncoder, URL, AbortSignal, setTimeout, clearTimeout, console,
+  const context = vm.createContext({ LvYoutubeCaptions:require('../extension/youtube-captions.js'), chrome, crypto: webcrypto, TextEncoder, URL, AbortSignal, setTimeout, clearTimeout, console,
     LvAnalysis: { async analysisStatus() { return analysisStatus; }, async startAnalysis(args) { analysisCalls.push(args); return { state: 'capturing', engine: args.engine }; }, async stopAnalysis(scope) { analysisCalls.push({ stopScope: scope }); return { state: 'stopped' }; } },
   });
   vm.runInContext(scoreSource, context, { filename: 'score-core.js' });
@@ -868,4 +868,23 @@ test('a separate editor cannot tune, undo, save or close a preview during captur
  assert.equal((await h.dispatch({type:'LV_TIMING_CURRENT',...base},sender)).ok,true);
  h.setCopyBlocked(false);
  assert.equal((await h.dispatch({type:'LV_TIMING_TUNE',...envelope,operation:{type:'setOffset',offsetMs:100}},sender)).ok,true);
+});
+
+
+test('caption source cannot replace an existing edited score or its durable preview',async()=>{
+ const h=makeHarness();await h.ensure();let original=recordFor(h);
+ const edited=scoreCore.applyOperation(original.score,{type:'setWordTiming',wordId:original.score.phrases[0].words[0].id,startMs:1100,endMs:1800},original.score.revision);
+ // Exact private manual score and preview are the preservation boundary.
+ original.score=edited;h.values['lvTimingPreview:youtube:'+ID_A]={token:'kept',score:structuredClone(edited),baseRevision:edited.revision,baseHash:edited.lyrics.contentHash};
+ const before=JSON.stringify(edited),preview=JSON.stringify(h.values['lvTimingPreview:youtube:'+ID_A]);
+ const caption={videoId:ID_A,language:'en',kind:'automatic',cues:[{startMs:100,endMs:1000,text:'Different caption'}]};
+ const got=await h.ensure(1,ID_A,{caption,lyrics:{synced:'[00:00.100]Different caption\n[00:01.000]',provider:'YouTube captions'}});
+ assert.equal(JSON.stringify(got),before);assert.equal(JSON.stringify(h.values['lvTimingPreview:youtube:'+ID_A]),preview);
+ h.restartWorker();assert.equal(JSON.stringify(await h.context.LvScoreHost.packageFor(1,{videoId:ID_A})),before);
+});
+
+test('new caption score retains exact segment ends and estimated words through storage',async()=>{
+ const h=makeHarness(),caption={videoId:ID_A,language:'en',kind:'authored',cues:[{startMs:1000,endMs:2500,text:'(Literal) words'},{startMs:6000,endMs:9000,text:'After a gap'}]};
+ const score=await h.ensure(1,ID_A,{caption,lyrics:{synced:'[00:01.000](Literal) words\n[00:02.500]\n[00:06.000]After a gap\n[00:09.000]',provider:'YouTube captions'}});
+ assert.equal(score.lyrics.timingBasis,'caption-segments');assert.equal(score.phrases[0].endMs,2500);assert.equal(score.phrases[1].startMs,6000);assert.equal(score.lanes.length,1);assert.ok(score.phrases.every(p=>p.words.every(w=>w.provenance==='estimated'&&!w.locked)));h.restartWorker();assert.equal((await h.context.LvScoreHost.packageFor(1,{videoId:ID_A})).lyrics.captionSource.language,'en');
 });

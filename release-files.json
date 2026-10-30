@@ -60,5 +60,6 @@
   "workspace/main.tsx",
   "workspace/timeline.ts",
   "workspace/types.ts",
+  "youtube-captions.js",
   "youtube-media.js"
 ]

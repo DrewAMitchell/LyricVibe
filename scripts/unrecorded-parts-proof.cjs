@@ -2,7 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{chromium}=require('playwright');
 const root=path.resolve(__dirname,'..'),source='https://www.youtube.com/watch?v=TESTVIDEO01',next='https://www.youtube.com/watch?v=TESTVIDEO02';
 let server,browser,browserPid;
-const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env.LV_PROBE_LEDGER,`\n- ${new Date().toISOString()} ${state} LyricVibe unrecorded-parts proof Chrome PID${browserPid}; finite production UI verification, finally-close.\n`);};
+const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env.LV_PROBE_LEDGER,`\n- ${new Date().toISOString()} ${state} LyricVibe unrecorded-parts proof Node PID${process.pid}, Chrome PID${browserPid}; finite production UI verification, finally-close.\n`);};
 (async()=>{
   server=await chromium.launchServer({channel:'chrome',headless:true});browserPid=server.process().pid;probe('START');console.log(JSON.stringify({browserPid}));
   browser=await chromium.connect(server.wsEndpoint());
@@ -14,7 +14,7 @@ const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env
   const evaluate=async value=>{const expression=typeof value==='function'?'('+value.toString()+')()':value;const r=await session.send('Runtime.evaluate',{expression,contextId:executionContextId,awaitPromise:true,returnByValue:true,userGesture:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
   await evaluate(()=>{window.__messageListeners=[];window.__store={};window.chrome={runtime:{id:'fixture',getManifest:()=>({version:'fixture'}),onMessage:{addListener(fn){__messageListeners.push(fn)}},sendMessage:async()=>({ok:true})},storage:{local:{get:async(keys,cb)=>{cb?.(__store);return __store},set:async data=>Object.assign(__store,data)}}};const v=document.querySelector('video');Object.defineProperties(v,{currentTime:{value:2,writable:true},duration:{value:30},paused:{value:true,writable:true},playbackRate:{value:1,writable:true}});v.pause=()=>{v.paused=true};v.play=async()=>{v.paused=false};});
   for(const name of ['score-core','tap-timing','beat-track','choreography','transcript-text','timing-variant'])await evaluate(fs.readFileSync(path.join(root,'extension',name+'.js'),'utf8'));
-  await evaluate(fs.readFileSync(path.join(root,'extension/content.js'),'utf8').replace(/\}\)\(\);\s*$/,'window.__qa={state,timing,tapping,transcript,performanceTake,syncPanel,hasUnsavedWork,applyTimingReview,discardTimingLocal,closeTimingReview,refreshTimingPanel,armTapTake,markTapTime,stopTapTake,seekCapture,rewindCapturePhrase,refreshPerformClock,renderScore,tapBinding,useEventAssignments,listenToTake,root,stage,bounds,tempo,themePicker,toggleThemePicker,setLinger,buildThemePicker,setTimingWorkspace,timingWorkspace,refreshTempoGate,controlsNotice,teardown,stageEdit,stagePanel,stageSurface,openStageEdit,refreshStageEdit,closeStageEdit,timingRequest,placement,refreshBeatPulse,tempoButton,sidebarDownbeat,beatClick,tapTempo,refreshCompletion,jumpUnfinished,phraseAuthoring,authoringProgress,startLoop,cancelLoop,repeatCapture,getPartRun:()=>partRun,countIn,useTapTake,keepSyllableAndNext,setLyricsOnly,refreshRecordingTransport,finishMissingParts,nextMissingPart};})();'));
+  await evaluate(fs.readFileSync(path.join(root,'extension/content.js'),'utf8').replace(/\}\)\(\);\s*$/,'window.__qa={state,timing,tapping,transcript,performanceTake,syncPanel,plainTimingNotice,wordTimingUnits,hasUnsavedWork,applyTimingReview,discardTimingLocal,closeTimingReview,refreshTimingPanel,armTapTake,markTapTime,stopTapTake,seekCapture,rewindCapturePhrase,refreshPerformClock,renderScore,tapBinding,useEventAssignments,listenToTake,root,stage,bounds,tempo,themePicker,toggleThemePicker,setLinger,buildThemePicker,setTimingWorkspace,timingWorkspace,refreshTempoGate,controlsNotice,teardown,stageEdit,stagePanel,stageSurface,openStageEdit,refreshStageEdit,closeStageEdit,timingRequest,placement,refreshBeatPulse,tempoButton,sidebarDownbeat,beatClick,tapTempo,refreshCompletion,jumpUnfinished,phraseAuthoring,authoringProgress,startLoop,cancelLoop,repeatCapture,getPartRun:()=>partRun,countIn,useTapTake,keepSyllableAndNext,setLyricsOnly,refreshRecordingTransport,finishMissingParts,captureTarget};})();'));
 
   page.setDefaultTimeout(5000);
   await page.addStyleTag({content:'body{margin:0;min-height:100vh;background:#060c10}#activate,#next{position:fixed;left:-999px}video{display:none}'});
@@ -120,19 +120,57 @@ const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env
   await evaluate(()=>{document.querySelector('video').currentTime=3.1;window.__didLoop=__qa.repeatCapture();});
   assert.equal(await evaluate(()=>__didLoop),true,'unfinished phrase loops without overwriting it');
   assert.ok(await evaluate(()=>document.querySelector('video').currentTime<1));
-  await evaluate(()=>__qa.refreshRecordingTransport());
+  await evaluate(()=>{const q=__qa,v=document.querySelector('video');q.timing.phraseIndex=0;v.currentTime=.1;v.paused=false;q.refreshTimingPanel();q.refreshRecordingTransport();window.__forwardTake=JSON.stringify(q.tapping.take);});
   assert.equal(await page.locator('[data-record-forward]').isDisabled(),false);
+  assert.match(await page.locator('[data-record-forward]').textContent(),/Next lead-in/);
   await page.locator('[data-record-forward]').click();
-  await waitFor(()=>__qa.timing.draft.score.phrases[__qa.timing.phraseIndex].id==='phrase-3'&&__qa.tapping.take?.status==='armed'&&!__qa.timing.busy);
-  assert.equal(await evaluate(()=>__qa.timing.draft.score.phrases[__qa.timing.phraseIndex].id),'phrase-3');
+  assert.equal(await evaluate(()=>__qa.timing.draft.score.phrases[__qa.timing.phraseIndex].id),'phrase-1','lead-in navigation keeps the selected capture phrase');
+  assert.equal(await evaluate(()=>JSON.stringify(__qa.tapping.take)),await evaluate(()=>__forwardTake),'lead-in navigation leaves the full take and cursor unchanged');
+  assert.equal(await evaluate(()=>document.querySelector('video').currentTime),.2,'missing-only mode still jumps to the configured lead-in before the next lyric');
   assert.equal(await evaluate(()=>JSON.stringify(__qa.timing.draft.score.phrases[1])),await evaluate(()=>__finishedMiddle));
-  await evaluate(()=>__qa.refreshPerformClock(10000));
-  assert.match(await page.locator('[data-sync=capture-forward]').textContent(),/Next unrecorded part/);
+  await page.locator('[data-sync=tap-mark]').focus();await page.keyboard.press('Shift+ArrowRight');
+  assert.equal(await evaluate(()=>document.querySelector('video').currentTime),.2,'Shift+Right remains a lead-in shortcut in missing-only mode');
   await page.getByRole('button',{name:'Close error details',exact:true}).click();
   await page.screenshot({path:path.join(root,'docs/unrecorded-recovery-loop.png')});
-  await evaluate(()=>{__qa.tapping.take={...__qa.tapping.take,pendingStartMs:10000};__qa.refreshPerformClock(10000);});
-  assert.equal(await page.locator('[data-sync=capture-forward]').isDisabled(),true,'held input cannot be truncated by Forward');
-  const checks=['Completed Main and backing phrases skipped; unfinished backing remains reachable through a completed Main anchor','Next unfinished Main phrase selected and run ends paused','Completed phrase bytes and saved score unchanged','No remaining targets does not arm or play; switch off allows rerecording','Partial word pass keeps completed word bytes unchanged','New preference persists independently of legacy tour preference','Backspace removes unfinished phrase without appending or changing completed phrases','Syllable practice skips complete Main before spelling preparation, keeps its review step and ends even with Repeat enabled','Finish missing parts enables looping and unrecorded-only','unfinished phrase repeats','Forward skips completed phrase and reaches next incomplete phrase','Forward disabled during held input'];
+  await evaluate(()=>{
+    const q=__qa,s=q.timing.draft.score,v=document.querySelector('video'),previous=s.phrases.find(p=>p.id==='phrase-1'),current=s.phrases.find(p=>p.id==='phrase-3');
+    for(const w of previous.words){w.provenance='manual';w.locked=true;}
+    window.__previousTiming=JSON.stringify(previous);
+    document.querySelector('[data-sync=record-other-parts]').checked=true;document.querySelector('[data-sync=record-repeat]').checked=true;document.querySelector('[data-sync=tap-mode]').value='word';
+    q.timing.phraseIndex=s.phrases.indexOf(current);q.tapping.wordId=current.words[0].id;
+    const units=current.words.filter(w=>!w.excluded).map(w=>({id:w.id,wordId:w.id,phraseId:current.id,text:w.text,minMs:0,maxMs:s.source.durationMs,referenceStartMs:w.startMs,estimatedStartMs:w.startMs}));
+    q.tapping.take=LvTapTiming.beginWordHolds(units,[]);q.tapping.binding=q.tapBinding();q.tapping.take.index=0;q.tapping.take.status='armed';
+    v.currentTime=10.5;v.paused=false;q.refreshTimingPanel();
+  });
+  await page.keyboard.press('ArrowLeft');await page.keyboard.press('ArrowLeft');
+  assert.equal(await evaluate(()=>__qa.timing.draft.score.phrases[__qa.timing.phraseIndex].id),'phrase-1','second Back reaches the completed previous phrase in missing-only mode');
+  assert.ok(await evaluate(()=>__qa.tapping.take.units.some(u=>u.phraseId==='phrase-1')),'previous phrase targets are added to the active take');
+  assert.equal(await evaluate(()=>JSON.stringify(__qa.timing.draft.score.phrases[0])),await evaluate(()=>__previousTiming),'navigation alone preserves completed timing');
+  await evaluate(()=>{const q=__qa,v=document.querySelector('video');v.currentTime=1.2;v.paused=false;q.markTapTime();v.currentTime=1.5;q.markTapTime({release:true});});
+  assert.ok(await evaluate(()=>__qa.tapping.take.holds.some(h=>h.phraseId==='phrase-1')),'new capture is accepted for the completed phrase instead of being filtered out');
+  assert.equal(await evaluate(()=>JSON.stringify(__qa.timing.draft.score.phrases[0])),await evaluate(()=>__previousTiming),'retake timing is staged in the take until its normal save path');
+  await evaluate(()=>{
+    const q=__qa,s=q.timing.draft.score,v=document.querySelector('video'),previous=s.phrases.find(p=>p.id==='phrase-1'),current=s.phrases.find(p=>p.id==='phrase-3');
+    previous.words[0].text='H-Town';window.__hyphenScoreBefore=JSON.stringify(previous);
+    const currentUnits=q.wordTimingUnits(current.words).map(u=>({...u,phraseId:current.id}));
+    let take=LvTapTiming.begin(currentUnits,{mode:'word',cadence:'pairs'});take=LvTapTiming.mark(take,10500);take=LvTapTiming.mark(take,10600);
+    q.timing.phraseIndex=s.phrases.indexOf(current);q.tapping.wordId=current.words[0].id;q.tapping.take=take;q.tapping.binding=q.tapBinding();
+    document.querySelector('[data-sync=record-other-parts]').checked=true;document.querySelector('[data-sync=record-repeat]').checked=true;document.querySelector('[data-sync=tap-mode]').value='word';
+    window.__wordBefore=JSON.stringify(take);window.__hyphenExpected=JSON.stringify(q.wordTimingUnits(previous.words.slice(0,1)));v.currentTime=10.5;v.paused=false;q.refreshTimingPanel();
+  });
+  await page.keyboard.press('ArrowLeft');await page.keyboard.press('ArrowLeft');
+  assert.equal(await evaluate(()=>__qa.timing.draft.score.phrases[__qa.timing.draft.score.phrases.findIndex(p=>p.id==='phrase-1')].id),'phrase-1','ordinary word take reaches the prior completed phrase');
+  assert.equal(await evaluate(()=>JSON.stringify(__qa.tapping.take.units.filter(u=>u.wordId===__qa.timing.draft.score.phrases[0].words[0].id))),await evaluate(()=>__hyphenExpected),'hyphenated retake keeps word subpart ids, spelling and estimated timing fields');
+  assert.ok(await evaluate(()=>__qa.tapping.take.units[__qa.tapping.take.index]?.id===JSON.parse(__hyphenExpected)[0].id),'inserting earlier units keeps the active cursor on the retake target');
+  assert.equal(await evaluate(()=>JSON.stringify(__qa.tapping.take.marks)),await evaluate(()=>JSON.stringify(JSON.parse(__wordBefore).marks)),'existing future marks remain attached to their original unit ids');
+  assert.equal(await evaluate(()=>JSON.stringify(__qa.timing.draft.score.phrases[0])),await evaluate(()=>__hyphenScoreBefore),'adding hyphenated retake units does not change score timing');
+  await evaluate(()=>{const q=__qa,v=document.querySelector('video');v.currentTime=1.2;v.paused=false;q.markTapTime();v.currentTime=1.5;q.markTapTime({release:true});});
+  assert.ok(await evaluate(()=>__qa.tapping.take.marks.some(m=>m.id===JSON.parse(__hyphenExpected)[0].id)),'the retake accepts a new boundary through the normal word-timing path');
+  assert.equal(await evaluate(()=>JSON.stringify(__qa.timing.draft.score.phrases[0])),await evaluate(()=>__hyphenScoreBefore),'captured retake marks stay out of score timing until the existing Apply/Save path');
+  await evaluate(()=>{const q=__qa,score=q.timing.draft.score;score.lyrics.timingBasis='caption-segments';score.lyrics.captionSource={kind:'automatic',language:'en'};q.refreshTimingPanel();});
+  assert.equal(await evaluate(()=>__qa.plainTimingNotice.textContent),'YouTube captions (automatic, en) · Imported segment times; review words.');
+  assert.equal(await evaluate(()=>__qa.plainTimingNotice.hidden),false,'caption provenance remains visible after word timing is recorded');
+  const checks=['Completed Main and backing phrases skipped; unfinished backing remains reachable through a completed Main anchor','Next unfinished Main phrase selected and run ends paused','Completed phrase bytes and saved score unchanged','No remaining targets does not arm or play; switch off allows rerecording','Partial word pass keeps completed word bytes unchanged','New preference persists independently of legacy tour preference','Backspace removes unfinished phrase without appending or changing completed phrases','Syllable practice skips complete Main before spelling preparation, keeps its review step and ends even with Repeat enabled','Finish missing parts enables looping and unrecorded-only','unfinished phrase repeats','Next lead-in button and Shift+Right remain forward-only in missing-only mode without changing capture state','second Back exposes a completed phrase for retake without changing score until new inputs','hyphenated word retake preserves the existing subpart unit schema and future mark ids','caption origin remains visible with imported segment times after recording'];
   fs.writeFileSync(path.join(root,'docs/unrecorded-parts-proof.json'),JSON.stringify({observedAt:new Date().toISOString(),basis:'Actual Chrome content UI and score host with synthetic media/storage; no human song edits.',checks},null,2)+'\n');
   console.log(JSON.stringify({checks}));
 })().catch(e=>{console.error(e);process.exitCode=1}).finally(async()=>{await browser?.close();await server?.close();probe('END');});

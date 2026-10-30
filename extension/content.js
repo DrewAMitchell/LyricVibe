@@ -815,9 +815,9 @@
     recordingTransport.querySelector('[data-record-restart]').disabled=timing.busy||countIn.active||countIn.preparing||!getMedia();
     recordingTransport.querySelector('[data-record-phrase]').disabled=blocked;
     const now=getMediaTimeMs()-timingOffsetMs(),target=captureTarget(now);
-    const forward=recordingTransport.querySelector('[data-record-forward]'),missing=missingLoopMode();
-    forward.textContent=missing?'Next unrecorded part →':'Next lead-in →';
-    forward.disabled=blocked||take?.status!=='armed'||!missing&&(!target||target.startMs<=now);
+    const forward=recordingTransport.querySelector('[data-record-forward]');
+    forward.textContent='Next lead-in →';
+    forward.disabled=blocked||take?.status!=='armed'||!target||target.startMs<=now;
   }
 
   /* Next-line preview (bottom center) */
@@ -1942,13 +1942,12 @@
       if(counting){text(countdown.querySelector('span'),'Starts in '+(remaining.remainingMs/1000).toFixed(1)+'s');countdown.querySelector('i').style.transform='scaleX('+(1-remaining.progress)+')';}
       if(host===cue){let hint=host.querySelector('.lvx-idle-hint');if(!hint){hint=document.createElement('p');hint.className='lvx-idle-hint';host.append(hint);}visible(hint,idle);text(hint,eventTake(take)?'Space: tap · ← back · Shift+← 5s':'Space: hold · ← back · → skip');hint.title=captureGuidanceText();}
     }
-    const forward=syncButton('capture-forward'),missing=missingLoopMode();forward.hidden=!take||take.status!=='armed';
-    forward.textContent=missing?'⏩ Next unrecorded part':'⏩ Next lead-in';forward.title=missing?'Keep completed marks and loop the next incomplete phrase (Shift+→)':'Jump to the next lead-in without skipping a lyric (Shift+→)';
-    forward.disabled=timing.busy||!take||take.status!=='armed'||take.pendingStartMs!==null||!missing&&(!target||target.startMs<=now);
+    const forward=syncButton('capture-forward');forward.hidden=!take||take.status!=='armed';
+    forward.textContent='⏩ Next lead-in';forward.title='Jump to the next lead-in without skipping a lyric (Shift+→)';
+    forward.disabled=timing.busy||!take||take.status!=='armed'||take.pendingStartMs!==null||!target||target.startMs<=now;
   }
   function jumpCaptureLeadIn(){
     const take=tapping.take;if(!take||take.status!=='armed'||take.pendingStartMs!==null||timing.busy)return;
-    if(missingLoopMode()){void nextMissingPart();return;}
     const now=getMediaTimeMs()-timingOffsetMs(),target=captureTarget(now);if(!target||target.startMs<=now)return;
     const lead=Math.min(target.startMs,Math.max(now,phraseLeadInMs(target.phrase),target.startMs-captureLeadInMs));
     rewindPlaybackForTake(lead+timingOffsetMs());noteCaptureInput();setSyncNotice('Jumped to the next lead-in. Your recording cursor and completed inputs are unchanged.');
@@ -2217,15 +2216,6 @@
     getMedia()?.pause();if(getMedia())getMedia().currentTime=Math.max(0,phraseLeadInMs(timingPhrase())+timingOffsetMs())/1000;
     partRun=null;refreshTimingPanel();await armTapTake();
   }
-  async function nextMissingPart(){
-    const current=timingPhrase()?.id,order=missingPartSteps(true).map(s=>s.phraseIds[0]);
-    await stopTapTake();if(!await parkUnfinishedTake()||tapPending()||timing.busy||!timing.draft)return;
-    const steps=missingPartSteps(),after=order.indexOf(current),step=steps.find(s=>order.indexOf(s.phraseIds[0])>after)||steps[0];
-    if(!step){getMedia()?.pause();setSyncNotice('All unrecorded parts are now in preview. Save timings when ready.');return;}
-    timing.phraseIndex=timing.draft.score.phrases.findIndex(p=>p.id===step.phraseIds[0]);tapping.wordId=timingPhrase().words.find(w=>!w.excluded)?.id;
-    getMedia()?.pause();if(getMedia())getMedia().currentTime=Math.max(0,phraseLeadInMs(timingPhrase())+timingOffsetMs())/1000;
-    refreshTimingPanel();await armTapTake();
-  }
   function refreshOtherParts(){
     const checkbox=syncButton('record-other-parts'),hint=syncButton('other-parts-hint');
     const supported=otherPartsSupported(),steps=partRun?.steps||(!tapPending()?otherPartsPlan():[]);
@@ -2441,7 +2431,25 @@
   function rewindCapturePhrase(restartOnly=false) {
     let take=tapping.take;if(!take||timing.busy||restartOnly===true&&(take.pendingStartMs!==null||tapping.binding!==tapBinding()||isAdvertisement()||youtubeMediaState()?.clockUsable===false))return;
     take=completePhraseScope(take);tapping.take=take;
-    const lane=timing.draft.score.phrases.filter(p=>p.laneId===timingPhrase()?.laneId&&capturePhraseUnits(take,p).length);
+    const scorePhrases=timing.draft.score.phrases.filter(p=>p.laneId===timingPhrase()?.laneId&&p.words.some(w=>!w.excluded));
+    const selectedId=restartOnly!==true&&tapping.rewindPhraseId&&tapping.backAnchorMs!==null&&getMediaTimeMs()<tapping.backAnchorMs+1000?tapping.rewindPhraseId:timingPhrase()?.id;
+    const selectedAt=scorePhrases.findIndex(p=>p.id===selectedId),targetPhrase=scorePhrases[Math.max(0,selectedAt-(selectedId===tapping.rewindPhraseId?1:0))];
+    // In missing-only mode, completed phrases are absent from the take. A
+    // deliberate Back can still expose the immediately previous phrase for
+    // retake; its existing timing remains until the next recorded press.
+    if(missingLoopMode()&&(wordTake(take)||take.mode==='word')&&targetPhrase&&!capturePhraseUnits(take,targetPhrase).length){
+      const raw=wordTake(take),score=timing.draft.score;
+      const units=raw?targetPhrase.words.filter(w=>!w.excluded).map(w=>{
+        const authored=w.syllables?.length>1&&w.syllables.some(s=>s.locked||s.provenance==='manual'),unframed=untimedPhrase(targetPhrase);
+        return {id:w.id,wordId:w.id,phraseId:targetPhrase.id,text:w.text,timingEstimated:unframed,parts:w.syllables?.map(s=>s.text)||[w.spokenText||w.text],expectedCount:authored?w.syllables.length:null,countOptions:[],countSource:authored?'authored':'unknown',referenceStartMs:w.startMs+timingOffsetMs(),referenceEndMs:w.endMs+timingOffsetMs(),referenceManual:w.provenance==='manual',minMs:unframed?0:targetPhrase.startMs+timingOffsetMs(),maxMs:unframed?score.source.durationMs:targetPhrase.endMs+timingOffsetMs(),estimatedStartMs:targetPhrase.startMs};
+      }):wordTimingUnits(targetPhrase.words);
+      const orderUnits=scorePhrases.flatMap(p=>raw?p.words.filter(w=>!w.excluded).map(w=>({id:w.id,wordId:w.id})):wordTimingUnits(p.words));
+      const order=new Map(orderUnits.map((u,i)=>[u.id,i])),activeId=take.units[take.index]?.id,known=new Set(take.units.map(u=>u.id));
+      const combined=[...take.units,...units.filter(u=>!known.has(u.id))].sort((a,b)=>(order.get(a.id)??Infinity)-(order.get(b.id)??Infinity)),first=combined.findIndex(u=>targetPhrase.words.some(w=>!w.excluded&&w.id===u.wordId)),activeIndex=combined.findIndex(u=>u.id===activeId);
+      take={...take,units:combined,index:activeIndex<0?take.index:activeIndex,repeatRange:{phraseId:targetPhrase.id,index:first,startMs:Math.max(0,targetPhrase.startMs+timingOffsetMs()-800),endMs:targetPhrase.endMs+timingOffsetMs()}};
+      tapping.take=take;
+    }
+    const lane=scorePhrases.filter(p=>capturePhraseUnits(take,p).length);
     if(!lane.length)return;
     const repeated=restartOnly!==true&&tapping.rewindPhraseId&&tapping.backAnchorMs!==null&&getMediaTimeMs()<tapping.backAnchorMs+1000;
     const selected=lane.findIndex(p=>p.id===(repeated?tapping.rewindPhraseId:timingPhrase()?.id));
@@ -3334,7 +3342,9 @@
   function unplacedWords(score=timing.draft?.score||state.score){return score?.lyrics.timingBasis==='plain-text'?score.phrases.flatMap(p=>p.words).filter(w=>!w.excluded&&w.provenance==='estimated'&&!w.locked):[];}
   function refreshTimingPanel() {
     const draft = timing.draft, phrase = timingPhrase();
-    const unplaced=unplacedWords();plainTimingNotice.hidden=!unplaced.length;plainTimingNotice.textContent=`${unplaced.length} words still need timing. Initial positions are placeholders. Hold Space for each word, then refine syllables. Your input controls the next word.`;
+    const unplaced=unplacedWords(),score=draft?.score||state.score,captionSource=score?.lyrics?.captionSource;
+    const captionNote=score?.lyrics?.timingBasis==='caption-segments'?`YouTube captions (${captionSource?.kind||'imported'}${captionSource?.language?`, ${captionSource.language}`:''}) · Imported segment times; review words.`:'';
+    plainTimingNotice.hidden=!unplaced.length&&!captionNote;plainTimingNotice.textContent=captionNote||`${unplaced.length} words still need timing. Initial positions are placeholders. Hold Space for each word, then refine syllables. Your input controls the next word.`;
     syncPanel.setAttribute('aria-busy', String(timing.busy));
     refreshTempoMeter();
     syncButton('close').disabled = timing.busy;

@@ -177,6 +177,20 @@ backups. The backup is retained after restoration.
 **Save timings** also stores an unfinished prepared-syllable take without requiring
 the phrase to be complete. **Finish missing parts · loop** enables unrecorded-only
 capture and repeat, preferring a partial word that was just saved. In that mode,
-**Next unrecorded part / Shift+Right** preserves current marks and advances across
-phrases and vocal parts; completed timing is skipped. An unfinished phrase loops
-until you complete it, advance, or stop. Forward waits for any held key release.
+**Next lead-in / Shift+Right**moves playback forward to the next cue's lead-in
+without skipping a lyric or moving your recording cursor. An unfinished phrase
+loops until you complete it or stop. **Back** returns to this phrase's lead-in;
+press it again near that lead-in to return to the previous phrase, including a
+completed phrase you want to retake. Its existing timing stays until new inputs
+replace it through the normal preview and Save flow. Plain Right Arrow still
+skips a word; it does not jump to another unfinished phrase.
+
+
+Saved lyrics and timing always win. For a video without a saved score, LyricVibe
+tries its YouTube captions before the lyrics providers. It prefers the selected
+caption language, then the page language, with human-written captions preferred
+over automatic captions in that language. Empty, unavailable or invalid captions
+fall back to the normal lyrics lookup. Record labels the caption source: segment
+times come from YouTube, while word times are estimates until you record them.
+Caption text may include dialogue or sound descriptions; review it like any other
+imported text. Loading captions never replaces your saved lyrics or timing.

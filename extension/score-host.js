@@ -125,7 +125,8 @@
         const { hints: currentHints } = await liveIdentity(tabId, key);
         return refreshDuration(key, record, currentHints);
       }
-      const score = LvScore.createScore({ platform: 'youtube', videoId: key.slice(8), title: payload.track.title || '', artist: payload.track.artist || '', durationMs: Math.round((hints.duration || 0) * 1000) }, raw,
+      const source={ platform: 'youtube', videoId: key.slice(8), title: payload.track.title || '', artist: payload.track.artist || '', durationMs: Math.round((hints.duration || 0) * 1000) };
+      const score = payload.caption ? root.LvYoutubeCaptions.createScore(LvScore,source,payload.caption,hash) : LvScore.createScore(source, raw,
         { provider: payload.lyrics.provider || 'LRCLIB', entryId: payload.match?.id == null ? null : String(payload.match.id), contentHash: hash });
       const fresh = { score, history: [], review: [] };
       await liveIdentity(tabId, key);

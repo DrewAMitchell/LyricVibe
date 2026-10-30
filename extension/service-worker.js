@@ -1,4 +1,4 @@
-importScripts('lookup-policy.js', 'score-core.js', 'timing-variant.js', 'pronunciation.js', 'analysis/controller.js', 'score-host.js', 'background-stage.js', 'choreography.js', 'emoji-map-history.js', 'emoji-map-host.js', 'song-library-host.js');
+importScripts('youtube-captions.js', 'lookup-policy.js', 'score-core.js', 'timing-variant.js', 'pronunciation.js', 'analysis/controller.js', 'score-host.js', 'background-stage.js', 'choreography.js', 'emoji-map-history.js', 'emoji-map-host.js', 'song-library-host.js');
 const LRCLIB_BASE = 'https://lrclib.net/api';
 const sessions = new Map();
 const pausedTabs = new Set(), deferredDetections = new Set();
@@ -483,6 +483,8 @@ async function _detectAndSyncInner(tabId,prevKey,detectStart,job={trace:[],count
       if(score){sendToTab(tabId,{type:'LV_SCORE_UPDATED',score,mediaKey:LvScore.mediaKey(score.source),tabId},job);retryAttempts.delete(tabId);return;}
     }catch(error){LvLookupPolicy.check(job);if(error.code==='LOOKUP_CANCELLED')throw error;}
   }
+  const caption=await youtubeCaptionLyrics(tabId,hints,job);await lookupStillCurrent(tabId,job);
+  if(caption){await handleRecognitionResult(tabId,caption,job);return;}
   // One settled metadata snapshot, one bounded search. DOM events never fan out retries.
   const result=await recognize({mode:'metadata',hints,job});await lookupStillCurrent(tabId,job);
   if(result?.ok&&hasUsableLyrics(result)){await handleRecognitionResult(tabId,result,job);return;}
@@ -490,6 +492,20 @@ async function _detectAndSyncInner(tabId,prevKey,detectStart,job={trace:[],count
     sendToTab(tabId,{type:'LV_API_ERROR',text:LvLookupPolicy.failureMessage(job.trace),canRetry:true},job);
     scheduleAutoRetry(tabId);
   }else sendToTab(tabId,{type:'LV_ERROR',text:result?.message||'No lyrics found for this video.'},job);
+}
+
+async function youtubeCaptionLyrics(tabId,hints,job={trace:[],counts:{}}){
+  const key=LvScore.mediaKey(hints);if(!key||typeof LvYoutubeCaptions==='undefined')return null;
+  LvLookupPolicy.check(job);
+  try{
+    const results=await chrome.scripting.executeScript({target:{tabId,frameIds:[0]},world:'MAIN',func:LvYoutubeCaptions.readFromPage,args:[key.slice(8)]});
+    LvLookupPolicy.check(job);
+    const packet=results?.[0]?.result,caption=LvYoutubeCaptions.decode(packet,key.slice(8),secondsToMs(hints.duration));
+    job.trace?.push({provider:'youtube-captions',reason:caption?'AVAILABLE':String(packet?.state||'unavailable').toUpperCase()});
+    if(!caption)return null;
+    const track=trackFromHints(normalizeHints(hints))||{title:'',artist:''};
+    return {ok:true,hints,track,caption,lyrics:{synced:LvYoutubeCaptions.lrc(caption),plain:caption.cues.map(c=>c.text).join('\n'),provider:`YouTube captions (${caption.kind}, ${caption.language})`},match:{id:caption.videoId+':'+caption.language+':'+caption.kind,duration:hints.duration},message:'YouTube caption segments loaded; word timing is estimated.'};
+  }catch(error){LvLookupPolicy.check(job);return null;}
 }
 
 async function _tryOfflineRescue(tabId) {

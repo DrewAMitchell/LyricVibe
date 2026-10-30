@@ -11,7 +11,7 @@ function harness() {
   const data = {}, sessionData = {}, calls = [];
   const store = data => ({ get: async key => key == null ? structuredClone(data) : { [key]: structuredClone(data[key]) }, set: async value => Object.assign(data, structuredClone(value)), remove: async () => {} });
   const event = { addListener() {} };
-  const context = vm.createContext({ console, URL, URLSearchParams, AbortSignal, AbortController, setTimeout, clearTimeout, LvLookupPolicy:require('../extension/lookup-policy.js'), LvScore: core, importScripts() {}, chrome: { storage: { local: store(data), session: store(sessionData) }, action: { onClicked: event }, runtime: { onMessage: event }, tabs: { onRemoved: event, sendMessage: async()=>({ok:true,version:1,enabled:true,active:true}) } }, fetch: async url => {
+  const context = vm.createContext({ console, URL, URLSearchParams, AbortSignal, AbortController, setTimeout, clearTimeout, LvLookupPolicy:require('../extension/lookup-policy.js'), LvYoutubeCaptions:require('../extension/youtube-captions.js'), LvScore: core, importScripts() {}, chrome: { storage: { local: store(data), session: store(sessionData) }, action: { onClicked: event }, runtime: { onMessage: event }, tabs: { onRemoved: event, sendMessage: async()=>({ok:true,version:1,enabled:true,active:true}) } }, fetch: async url => {
     calls.push(url);
     const u = new URL(url);
     const result = u.pathname.endsWith('/get-cached') ? entry(111, 166, '00.26') : entry(222, 166, '23.19');
@@ -252,4 +252,25 @@ test('a delayed saved-score reply cannot publish after the video changes',async(
  const lookup=h.run('_detectAndSyncLocked(7)');await new Promise(r=>setImmediate(r));h.context.want=VIDEO;
  release({source:MUSIC});await lookup;
  assert.equal(messages.filter(m=>m.type==='LV_SCORE_UPDATED'||m.type==='LV_ERROR').length,0);assert.equal(h.calls.length,0);
+});
+
+
+test('saved scores bypass captions; new videos try captions before lyric providers',async()=>{
+ const h=harness(),captions=require('../extension/youtube-captions.js'),messages=[];h.context.want=MUSIC;
+ const saved=core.createScore({platform:'youtube',videoId:MUSIC.videoId,durationMs:134901},'[00:01]My corrected text',{provider:'Manual paste',contentHash:'a'.repeat(64)});
+ let captionCalls=0,ensured=0;
+ h.context.chrome.scripting={executeScript:async()=>{captionCalls++;return [{result:{state:'available',videoId:MUSIC.videoId,language:'en',kind:'authored',format:'json3',body:JSON.stringify({events:[{tStartMs:2500,dDurationMs:1700,segs:[{utf8:'Caption words'}]}]})}}];}};
+ h.context.chrome.tabs.sendMessage=async(_id,m)=>{messages.push(m);return {ok:true,version:1,active:true,enabled:true};};
+ h.context.LvScoreHost={packageFor:async()=>saved,ensure:async(_id,p)=>{ensured++;return captions.createScore(core,{videoId:MUSIC.videoId,durationMs:134901},p.caption,'b'.repeat(64));}};
+ h.run('getPageHints=async()=>({...want,navigationToken:want.videoId})');
+ await h.run('_detectAndSyncLocked(7)');assert.equal(captionCalls,0);assert.equal(h.calls.length,0);assert.equal(ensured,0);assert.equal(messages.find(m=>m.type==='LV_SCORE_UPDATED').score.lyrics.provider,'Manual paste');
+ messages.length=0;h.context.LvScoreHost.packageFor=async()=>null;await h.run('_detectAndSyncLocked(7)');assert.equal(captionCalls,1);assert.equal(h.calls.length,0);assert.equal(ensured,1);assert.match(messages.find(m=>m.type==='LV_SCORE_UPDATED').score.lyrics.provider,/YouTube captions/);
+});
+
+test('unavailable or malformed captions fall back once; navigation while reading cannot save old captions',async()=>{
+ const h=harness();h.context.want=MUSIC;let saves=0;h.context.LvScoreHost={packageFor:async()=>null,ensure:async()=>{saves++;return null;}};
+ h.context.chrome.scripting={executeScript:async()=>[{result:{state:'available',videoId:MUSIC.videoId,format:'json3',body:'broken'}}]};
+ h.run('getPageHints=async()=>({...want,navigationToken:want.videoId})');await h.run('_detectAndSyncLocked(7)');assert.ok(h.calls.length>0);const prior=saves;
+ let release;h.context.chrome.scripting.executeScript=()=>new Promise(r=>release=r);const pending=h.run('_detectAndSyncLocked(7)');await new Promise(r=>setImmediate(r));h.context.want=VIDEO;
+ release([{result:{state:'available',videoId:MUSIC.videoId,language:'en',kind:'automatic',format:'json3',body:JSON.stringify({events:[{tStartMs:1000,dDurationMs:2000,segs:[{utf8:'Stale captions'}]}]})}}]);await pending;assert.equal(saves,prior);
 });
