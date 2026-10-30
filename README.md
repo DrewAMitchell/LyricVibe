@@ -126,3 +126,17 @@ Open **Layers** to select or remove an individual effect or placement.
 preview edit. Base effects are labeled separately. Stop with **Enter**, then
 **Save**. Failed saves retain the take for retry. Advanced maps, presets, beat
 editing and region keyframes remain in their existing tools outside Stage live.
+
+
+### Shape a word or syllable's path
+
+In **Stage live**, choose a word from the left lyric rail. Enable **Syllables**
+to work with authored syllables. Drag the grip before its text onto the stage to
+set its destination. Drag **Start**, **Bend**, or **Land** to shape the motion;
+arrow keys nudge a focused handle, with Shift for a finer step. Timing stays fixed.
+
+For a performed gesture, select **Record motion**, then drag the selected word
+or its Land handle. The song plays from that unit's cue; release to finish, or let
+it stop at the unit's end. Escape cancels. One Undo restores the prior path.
+**Save** keeps the result. **Follow song** follows the playhead again; the arrow
+beside Lyrics collapses the rail when you need the full stage.

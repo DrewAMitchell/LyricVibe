@@ -476,5 +476,16 @@
     const particles=(count,smoke)=>Array.from({length:count},(_,i)=>{const seed=i+(smoke?47:11),period=(smoke?3100:1700)+hash(seed,3)*1900,age=((time+hash(seed,9)*period)%period)/period;return {x:(hash(seed,4)-.5)*2.5+Math.sin(age*4+seed)*.13,y:(smoke?.15:.55)-age*(smoke?.65:.95),alpha:(smoke?.12:.8)*Math.sin(Math.PI*age),size:smoke?.06+.07*age:.025};});
     return {width,height,time,palette:firePalettes[color]||firePalettes.ember,pixels,embers:reduced?[]:particles(4,false),smoke:reduced?[]:particles(3,true)};
   }
-  const api={emojiMapDelta,applyEmojiMapDelta,resolveWordSet,validateEmojiMap,parseEmojiMap,formatEmojiMap,wordSetFor,coinSpin,stagePerformanceAt,layoutOrigins,landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,validateWordRuleSets,wordRuleAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
+  // Paths follow the target's authored interval. Seeks and playback rate need no timers.
+  function pathPosition(layer,progress,reduced=false){
+    const path=layer.path,t=clamp(progress);if(!path||reduced)return {...layer.position};
+    if(path.kind==='quadratic'){
+      const u=t*t*(3-2*t),v=1-u;
+      return {x:v*v*path.start.x+2*v*u*path.control.x+u*u*layer.position.x,y:v*v*path.start.y+2*v*u*path.control.y+u*u*layer.position.y};
+    }
+    const points=path.points;let i=1;while(i<points.length-1&&points[i].t<t)i++;
+    const a=points[i-1],b=points[i],u=clamp((t-a.t)/(b.t-a.t));
+    return {x:a.x+(b.x-a.x)*u,y:a.y+(b.y-a.y)*u};
+  }
+  const api={pathPosition,emojiMapDelta,applyEmojiMapDelta,resolveWordSet,validateEmojiMap,parseEmojiMap,formatEmojiMap,wordSetFor,coinSpin,stagePerformanceAt,layoutOrigins,landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,validateWordRuleSets,wordRuleAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

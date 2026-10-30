@@ -3256,3 +3256,46 @@
 
 #lvx-root.lvx-live-stage .lvx-sidebar{display:none!important}
 #lvx-root .lvx-live-dock summary::before{display:none}
+
+/* The lyric rail stays legible; time is encoded below text, never by squeezing it. */
+#lvx-root .lvx-lyric-rail{position:absolute;z-index:76;left:14px;top:18px;width:234px;max-width:42%;box-sizing:border-box;padding:13px 10px 10px;border:1px solid #54756f;border-radius:12px;background:#101c21ed;box-shadow:0 8px 28px #0005;color:#e6f0ec;pointer-events:auto;font:12px/1.35 system-ui;text-align:left;text-transform:none;letter-spacing:normal}
+#lvx-root .lvx-lyric-rail[hidden],#lvx-root .lvx-path-controls[hidden]{display:none!important}
+#lvx-root .lvx-lyric-rail header{display:flex;justify-content:space-between;align-items:center;gap:8px}
+#lvx-root .lvx-lyric-rail header>strong{font-size:10px;letter-spacing:.14em;color:#b8d8a2}
+#lvx-root .lvx-lyric-rail label{display:flex;align-items:center;gap:4px;font-size:11px;white-space:nowrap}
+#lvx-root .lvx-lyric-rail input{accent-color:#cce5b5}
+#lvx-root .lvx-lyric-rail button{border:1px solid #486467;border-radius:5px;background:#1b3035;color:#eaf3ef;font:11px/1.3 system-ui;min-height:30px;cursor:pointer;padding:5px 7px}
+#lvx-root .lvx-lyric-rail button:disabled{opacity:.4;cursor:default}
+#lvx-root .lvx-rail-actions{display:flex;gap:6px;margin-top:10px}
+#lvx-root .lvx-rail-actions button{flex:1}
+#lvx-root .lvx-lyric-rail button[aria-pressed=true]{background:#394f36;border-color:#b9da9e;color:#edf5e3}
+#lvx-root [data-rail-hint]{font:10px/1.45 system-ui;color:#a8c2c7;min-height:43px;margin:10px 0 7px}
+#lvx-root .lvx-rail-unit{position:relative;display:flex;align-items:stretch;min-height:54px;border-left:2px solid transparent;border-radius:5px;margin-bottom:3px}
+#lvx-root .lvx-rail-unit[data-current=true]{border-left-color:#d9edc1;background:#26382c}
+#lvx-root .lvx-rail-unit .lvx-rail-grip{flex:0 0 21px;padding:0;border:0;background:transparent;color:#91b0ac;font-size:17px;cursor:grab;touch-action:none}
+#lvx-root .lvx-rail-unit .lvx-rail-word{flex:1;min-width:0;position:relative;border-color:transparent;background:transparent;text-align:left;padding:6px 6px 10px;overflow:hidden}
+#lvx-root .lvx-rail-word strong{display:block;font:600 14px/1.2 system-ui;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#lvx-root .lvx-rail-word small{display:block;font:10px/1.4 system-ui;color:#a8c2c7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#lvx-root .lvx-rail-duration{position:absolute;bottom:4px;left:6px;height:2px;max-width:calc(100% - 12px);background:#86bcb0;border-radius:2px}
+#lvx-root .lvx-lyric-rail footer{display:flex;align-items:center;gap:6px;margin-top:9px;padding-top:8px;border-top:1px solid #395052}
+#lvx-root .lvx-lyric-rail footer output{font-size:10px;white-space:nowrap}
+#lvx-root [data-rail-pages]{min-width:20px;width:100%;flex:1;height:15px}
+#lvx-root .lvx-path-controls{position:absolute;z-index:74;pointer-events:none;font:11px/1.3 system-ui;color:#e9f3e0;text-align:left}
+#lvx-root .lvx-path-controls svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+#lvx-root [data-path-line]{fill:none;stroke:#d9edc1;stroke-width:2;vector-effect:non-scaling-stroke;stroke-dasharray:7 5}
+#lvx-root [data-path-guide]{fill:none;stroke:#9db6ab66;stroke-width:1;vector-effect:non-scaling-stroke}
+#lvx-root .lvx-path-controls[data-recording=true] [data-path-line]{stroke:#ffb49e}
+#lvx-root [data-path-handle]{position:absolute;transform:translate(-50%,-50%);pointer-events:auto;touch-action:none;cursor:grab;border:1px solid #d9edc1;border-radius:16px;background:#24382bf5;color:#eff8e9;padding:5px 10px;min-width:42px;min-height:30px;font:600 10px/1.2 system-ui;box-shadow:0 2px 8px #0007}
+#lvx-root [data-path-handle=control]{border-style:dashed;background:#172d33f5;color:#b7d9de}
+#lvx-root [data-path-handle]:active{cursor:grabbing}
+#lvx-root [data-path-caption]{position:absolute;transform:translate(-50%,22px);padding:4px 8px;border-radius:5px;background:#102027df;white-space:nowrap;font-size:10px}
+#lvx-root [data-path-ghost]{position:absolute;transform:translate(-50%,-130%);color:#e4f2d9;white-space:nowrap;font:bold 24px/1 system-ui;text-shadow:0 2px 8px #000;opacity:.8}
+#lvx-root [data-path-ghost][hidden]{display:none}
+#lvx-root .lvx-lyric-rail :focus-visible,#lvx-root [data-path-handle]:focus-visible{outline:2px solid #e0efb8;outline-offset:3px}
+#lvx-root .lvx-lyric-rail button,#lvx-root [data-path-handle]{transition:background .14s ease,border-color .14s ease}
+@media(prefers-reduced-motion:reduce){#lvx-root .lvx-lyric-rail button,#lvx-root [data-path-handle]{transition:none}}
+
+#lvx-root .lvx-lyric-rail[data-collapsed=true]{width:auto;padding:7px 10px}
+#lvx-root .lvx-lyric-rail[data-collapsed=true]>:not(header),#lvx-root .lvx-lyric-rail[data-collapsed=true] header label{display:none}
+#lvx-root [data-rail-collapse]{min-width:24px;padding:3px;font-size:17px}
+#lvx-root [data-path-caption]{max-width:240px;overflow:hidden;text-overflow:ellipsis}

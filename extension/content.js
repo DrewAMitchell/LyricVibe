@@ -1049,7 +1049,7 @@
   // A stopped take and a take already used in the preview are still unsaved.
   // Keep this independent of tapPending(), which only gates editor operations.
   function hasUnsavedWork() {
-    return Boolean(liveStage.ops.length || liveStage.armed || syncSave.pending || [...captureTracks.slots.values()].some(slot=>tapCount(slot.state.take)) || stageEdit?.fieldsDirty || stageEdit?.drag || timing.dirty || transcript.dirty || tapping.splitDirty || effectPending() ||
+    return Boolean(liveStage.drag || liveStage.ops.length || liveStage.armed || syncSave.pending || [...captureTracks.slots.values()].some(slot=>tapCount(slot.state.take)) || stageEdit?.fieldsDirty || stageEdit?.drag || timing.dirty || transcript.dirty || tapping.splitDirty || effectPending() ||
       tapping.take && (tapping.take.status === 'armed' || tapCount(tapping.take) || tapping.take.pendingStartMs != null) ||
       timing.draft && LvTimingVariant.hasChanges(timing.draft.score, state.score));
   }
@@ -1057,7 +1057,7 @@
   let navigationHold = null, navigationGestureUntil = 0;
   const navigationWork = () => JSON.stringify([timing.draft?.token, timing.draft?.previewRevision,
     timing.dirty && syncText.value, transcript.dirty && syncButton('transcript-text').value,
-    tapping.splitDirty && [syncButton('tap-spoken').value, syncButton('tap-split').value], tapping.take, [...captureTracks.slots], performanceTake.armed, performanceTake.marks, syncSave.pending,liveStage.ops]);
+    tapping.splitDirty && [syncButton('tap-spoken').value, syncButton('tap-split').value], tapping.take, [...captureTracks.slots], performanceTake.armed, performanceTake.marks, syncSave.pending,liveStage.ops,liveStage.drag&&{target:liveStage.drag.target.target,layer:liveStage.drag.layer}]);
   const navigationSource = () => LvScore.mediaKey(timing.draft?.score.source || state.score?.source);
   function leavesEditedVideo(url) {
     const source = navigationSource();
@@ -5365,7 +5365,6 @@
   const liveDock=document.createElement('section');liveDock.className='lvx-live-dock';liveDock.hidden=true;liveDock.setAttribute('aria-label','Live choreography controls');
   liveDock.innerHTML=`<div class="lvx-live-target"><strong>STAGE LIVE</strong><output data-live-target>No active word</output><span data-live-status role="status"></span></div><div class="lvx-live-controls">
     <button type="button" data-live-arm>Arm · Enter</button><button type="button" data-live-play>Play · Space</button>
-    <label>Target<select data-live-scope aria-label="Live choreography target"><option value="word">Word</option><option value="syllable">Syllable</option></select></label>
     <label>Mode<select data-live-mode aria-label="Live choreography mode"><option value="effects">Effects · 1–9</option><option value="placement">Place · click stage</option></select></label>
     <details data-live-pop="look"><summary>Look & motion</summary><div class="lvx-live-pop"><label>Vocal track<select data-live-lane aria-label="Live vocal track"></select></label><label>Look<select data-live-look aria-label="Live display look"></select></label><label>Layout<select data-live-layout aria-label="Live layout"><option value="classic">Classic</option><option value="fall">Falling</option><option value="puzzle">Puzzle</option><option value="vinyl">Vinyl</option></select></label><label>Word dance<select data-live-dance aria-label="Live word dance"></select></label><label><input type="checkbox" data-live-auto> Automatic expression</label><label>Word look<select data-live-word-look aria-label="Selected word look"></select></label><label>Word emoji<input data-live-emoji aria-label="Selected word emoji" maxlength="32" placeholder="Emoji or blank"></label><button type="button" data-live-emoji-apply>Apply emoji to word</button><small>Word changes stay in this song’s preview until Save.</small></div></details>
     <details data-live-pop="effects"><summary>Effects</summary><div class="lvx-live-pop lvx-live-effect-grid"></div></details>
@@ -5391,7 +5390,7 @@
     liveStage.backup=(liveStage.backup||Promise.resolve()).catch(()=>{}).then(()=>chrome.storage.local.set({['lvChoreographyTake:'+liveStage.mediaKey]:packet})).catch(error=>liveMessage('Recovery backup failed: '+error.message+' · keep this window open.'));
   }
   function queueLiveOperation(operation){
-    if(timing.busy||!liveStage.active||!timing.draft)return false;
+    if(timing.busy||liveStage.drag||!liveStage.active||!timing.draft)return false;
     if(LvScore.mediaKey({url:location.href})!==liveStage.mediaKey||timing.draft.token!==liveStage.token||timing.draft.previewRevision!==liveStage.revision){liveStage.armed=false;liveMessage('The song or preview changed. Your take is retained; reopen after resolving it.');return false;}
     if(liveStage.ops.length>=256){liveStage.armed=false;liveMessage('Take is full. Save or stop before continuing.');return false;}
     try{const before=liveScore(),next=LvScore.applyOperation(before,operation,before.revision);liveStage.history.push({score:liveStage.preview,ops:liveStage.ops.length,selected:liveStage.selected});liveStage.preview=next;liveStage.ops.push(operation);state.scoreSignature='';backupLiveStage();refreshLiveStage();renderScore(getMediaTimeMs());return true;}catch(error){liveMessage(error.message);return false;}
@@ -5410,14 +5409,14 @@
       if(!timing.draft){const current=await timingRequest('LV_TIMING_CURRENT');timing.draft=(current.preview?current:await timingRequest('LV_TIMING_PREPARE',{fromSaved:true})).preview;}
       const key=LvScore.mediaKey(timing.draft.score.source);
       if(liveStage.ops.length&&(liveStage.mediaKey!==key||liveStage.token!==timing.draft.token||liveStage.revision!==timing.draft.previewRevision))throw Error('A retained choreography take belongs to another preview. Its recovery copy is intact.');
-      liveStage.mediaKey=key;liveStage.token=timing.draft.token;liveStage.revision=timing.draft.previewRevision;liveStage.active=true;liveStage.armed=false;liveStage.laneId=timingPhrase()?.laneId||timing.draft.score.lanes.find(l=>l.role==='lead')?.id;liveStage.pinned=null;
+      liveStage.mediaKey=key;liveStage.token=timing.draft.token;liveStage.revision=timing.draft.previewRevision;liveStage.active=true;liveStage.armed=false;liveStage.laneId=timingPhrase()?.laneId||timing.draft.score.lanes.find(l=>l.role==='lead')?.id;liveStage.pinned=null;railState.follow=true;railState.recordReady=false;
       timing.view='proposed';syncPanel.hidden=true;stageEdit.active=false;stagePanel.hidden=true;stageSurface.hidden=true;root.classList.remove('lvx-stage-editing','lvx-sync-open','lvx-tempo-required');toggleThemePicker(false);stopEffectPreview();liveDock.hidden=false;root.classList.add('lvx-live-stage');
       liveOptions(liveControl('lane'),Object.fromEntries(timing.draft.score.lanes.map(l=>[l.id,l.label])),liveStage.laneId);liveControl('look').value=state.theme;liveControl('layout').value=choreography.mode;liveControl('dance').value=choreography.dance;liveControl('auto').checked=choreography.automatic;
       liveMessage('Stage follows the song. Arm to perform; click a lyric to select it while stopped.');
     }catch(error){setHud(error.message,true,true);}finally{timing.busy=false;refreshLiveStage();syncSidebarState();state.scoreSignature='';if(state.score)renderScore(getMediaTimeMs());}
   }
   async function commitLiveStage(save=false){
-    if(timing.busy||!timing.draft)return false;liveStage.armed=false;
+    if(timing.busy||liveStage.drag||!timing.draft)return false;liveStage.armed=false;
     if(liveStage.ops.length){
       if(liveStage.token!==timing.draft.token||liveStage.revision!==timing.draft.previewRevision){liveMessage('Preview changed; the take is retained.');return false;}
       timing.busy=true;refreshLiveStage();
@@ -5429,7 +5428,7 @@
     state.scoreSignature='';refreshLiveStage();return true;
   }
   async function undoLiveStage(){
-    if(timing.busy)return;
+    if(timing.busy||liveStage.drag)return;
     if(liveStage.history.length){const previous=liveStage.history.pop();liveStage.preview=previous.score;liveStage.ops.length=previous.ops;liveStage.selected=previous.selected;backupLiveStage();}
     else if(!liveStage.ops.length&&timing.draft?.undoScores?.length){timing.busy=true;try{timing.draft=(await timingRequest('LV_TIMING_UNDO')).preview;liveStage.token=timing.draft.token;liveStage.revision=timing.draft.previewRevision;}catch(error){liveMessage(error.message);}finally{timing.busy=false;}}
     state.scoreSignature='';liveMessage('Last choreography edit undone.');refreshLiveStage();renderScore(getMediaTimeMs());
@@ -5445,11 +5444,11 @@
   }
   function removeLiveLayer(id=liveStage.selected){const row=liveLayerRows().find(r=>r.id===id);if(!row){liveMessage('Select a layer in Layers first; nothing was cleared.');return;}if(queueLiveOperation(row.operation)){liveStage.selected=null;liveMessage(row.label+' removed · Undo restores it.');refreshLiveStage();}}
   function refreshLiveStage(){
-    if(!liveStage.active)return;const target=liveTarget(),media=getMedia();liveDock.dataset.armed=String(liveStage.armed);root.classList.toggle('lvx-live-placing',liveStage.armed&&liveStage.mode==='placement');
+    if(!liveStage.active)return;liveDock.inert=Boolean(liveStage.drag);refreshLyricRail();refreshPathControls();const target=liveTarget(),media=getMedia();liveDock.dataset.armed=String(liveStage.armed);root.classList.toggle('lvx-live-placing',liveStage.armed&&liveStage.mode==='placement');
     liveControl('target').textContent=target?(target.target.kind==='syllable'?target.word.text+' / ':'')+target.unit.text:'No active '+liveStage.scope;
     liveControl('arm').textContent=liveStage.armed?'Stop · Enter':'Arm · Enter';liveControl('play').textContent=media?.paused?'Play · Space':'Pause · Space';
-    for(const key of ['scope','mode','save','close','arm'])liveControl(key).disabled=timing.busy;
-    liveControl('save').disabled=timing.busy||liveStage.armed||!hasUnsavedWork();liveControl('undo').disabled=timing.busy||!liveStage.history.length&&!timing.draft?.undoScores?.length;
+    for(const key of ['mode','save','close','arm'])liveControl(key).disabled=timing.busy||Boolean(liveStage.drag);
+    liveControl('save').disabled=timing.busy||Boolean(liveStage.drag)||liveStage.armed||!hasUnsavedWork();liveControl('undo').disabled=timing.busy||Boolean(liveStage.drag)||!liveStage.history.length&&!timing.draft?.undoScores?.length;
     const targetKey=target?.word.id+':'+(liveScore()?.revision||0);
     if(liveDock.dataset.target!==targetKey){liveDock.dataset.target=targetKey;liveControl('word-look').value=target?.word.appearance?.look||'';if(document.activeElement!==liveControl('emoji'))liveControl('emoji').value=target?.word.appearance?.emoji||'';}
     for(const name of ['word-look','emoji','emoji-apply'])liveControl(name).disabled=timing.busy||!target;
@@ -5457,8 +5456,10 @@
     const key=JSON.stringify([rows,liveStage.page,liveStage.selected]);if(liveDock.__layersKey!==key){liveDock.__layersKey=key;const list=liveControl('layers');list.replaceChildren();for(const row of rows.slice(liveStage.page*6,liveStage.page*6+6)){const item=document.createElement('div'),select=document.createElement('button'),remove=document.createElement('button');item.className='lvx-live-layer';select.type=remove.type='button';select.textContent=row.label;select.dataset.layerId=row.id;select.setAttribute('aria-pressed',String(row.id===liveStage.selected));select.onclick=()=>{liveStage.selected=row.id;refreshLiveStage();};remove.textContent='×';remove.setAttribute('aria-label','Remove '+row.label);remove.onclick=()=>removeLiveLayer(row.id);item.append(select,remove);list.append(item);}if(!rows.length)list.textContent='No recorded layers on this target.';}
     liveControl('page').textContent=(liveStage.page+1)+' / '+pages;liveControl('rail').max=String(pages-1);liveControl('rail').value=String(liveStage.page);liveControl('prev').disabled=liveStage.page===0;liveControl('next').disabled=liveStage.page===pages-1;
   }
-  async function toggleLiveArmed(){if(timing.busy)return;if(liveStage.armed){getMedia()?.pause();await commitLiveStage();}else{if(isAdvertisement()||youtubeMediaState()?.clockUsable===false)return;liveStage.pinned=null;liveStage.armed=true;try{await getMedia()?.play();liveMessage('Performing · 1–9 add effects; placement clicks follow the current target.');}catch(error){liveStage.armed=false;liveMessage(error.message);}}refreshLiveStage();}
+  async function toggleLiveArmed(){if(timing.busy||liveStage.drag)return;railState.recordReady=false;if(liveStage.armed){getMedia()?.pause();await commitLiveStage();}else{if(isAdvertisement()||youtubeMediaState()?.clockUsable===false)return;liveStage.pinned=null;liveStage.armed=true;try{await getMedia()?.play();liveMessage('Performing · 1–9 add effects; placement clicks follow the current target.');}catch(error){liveStage.armed=false;liveMessage(error.message);}}refreshLiveStage();}
   function handleLiveStageKeys(event){
+    if(event.key==='Escape'&&(liveStage.drag||railState.recordReady)){event.preventDefault();event.stopImmediatePropagation();if(event.type==='keydown'){cancelPathDrag();railState.recordReady=false;refreshLiveStage();}return;}
+    if(liveStage.drag){event.preventDefault();event.stopImmediatePropagation();return;}
     const typing=event.target?.matches?.('input,textarea,select')||event.target?.isContentEditable;if(typing||event.altKey)return;
     const undo=(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z',space=event.code==='Space'||event.key===' ',number=/^[1-9]$/.test(event.key),owned=undo||space||number||event.key==='Enter'||event.key==='Backspace';
     if(!owned||!undo&&(event.ctrlKey||event.metaKey))return;
@@ -5467,28 +5468,176 @@
     if(undo)void undoLiveStage();else if(space)liveControl('play').click();else if(event.key==='Enter')void toggleLiveArmed();else if(event.key==='Backspace')removeLiveLayer();else if(number)addLiveEffect(liveEffects[Number(event.key)-1]);
   }
   liveControl('arm').onclick=()=>void toggleLiveArmed();liveControl('play').onclick=()=>{const media=getMedia();if(media?.paused)void media.play().catch(e=>liveMessage(e.message));else media?.pause();refreshLiveStage();};
-  liveControl('lane').onchange=e=>{liveStage.laneId=e.target.value;liveStage.pinned=null;refreshLiveStage();};
-  liveControl('scope').onchange=e=>{liveStage.scope=e.target.value;liveStage.pinned=null;refreshLiveStage();};liveControl('mode').onchange=e=>{liveStage.mode=e.target.value;refreshLiveStage();};
+  liveControl('lane').onchange=e=>{liveStage.laneId=e.target.value;liveStage.pinned=null;railState.page=0;railState.follow=true;refreshLiveStage();};
+  liveControl('mode').onchange=e=>{liveStage.mode=e.target.value;refreshLiveStage();};
   liveControl('look').onchange=e=>applyTheme(e.target.value);liveControl('layout').onchange=e=>{setChoreography({...choreography,mode:e.target.value});state.scoreSignature='';};liveControl('dance').onchange=e=>setChoreography({...choreography,dance:e.target.value});liveControl('auto').onchange=e=>setChoreography({...choreography,automatic:e.target.checked});
   const changeLiveWord=change=>{const t=liveTarget();if(!t)return;const appearance={...t.word.appearance,...change};for(const key of Object.keys(appearance))if(appearance[key]===null)delete appearance[key];if(queueLiveOperation({type:'setWordAppearance',wordId:t.word.id,appearance:Object.keys(appearance).length?appearance:null}))liveMessage('Word appearance updated in this song’s preview.');};
   liveControl('word-look').onchange=e=>changeLiveWord({look:e.target.value||null});liveControl('emoji-apply').onclick=()=>changeLiveWord({emoji:liveControl('emoji').value.trim()});
   liveControl('all').onchange=e=>{liveStage.all=e.target.checked;liveStage.page=0;refreshLiveStage();};liveControl('prev').onclick=()=>{liveStage.page=Math.max(0,liveStage.page-1);refreshLiveStage();};liveControl('next').onclick=()=>{liveStage.page++;refreshLiveStage();};liveControl('rail').oninput=e=>{liveStage.page=Number(e.target.value);refreshLiveStage();};
   liveControl('rail').onpointerdown=e=>{const rect=e.currentTarget.getBoundingClientRect(),max=Number(e.currentTarget.max);if(!max)return;const at=(e.clientX-rect.left)/rect.width,current=liveStage.page/max;if(Math.abs(at-current)>.05){e.preventDefault();liveStage.page=Math.max(0,Math.min(max,liveStage.page+(at>current?1:-1)));refreshLiveStage();}};
-  liveControl('undo').onclick=()=>void undoLiveStage();liveControl('save').onclick=()=>void commitLiveStage(true);liveControl('close').onclick=async()=>{if(!await commitLiveStage())return;liveStage.active=false;liveDock.hidden=true;root.classList.remove('lvx-live-stage','lvx-live-placing');syncSidebarState();};
+  liveControl('undo').onclick=()=>void undoLiveStage();liveControl('save').onclick=()=>void commitLiveStage(true);liveControl('close').onclick=async()=>{if(!await commitLiveStage())return;liveStage.active=false;liveDock.hidden=true;lyricRail.hidden=true;pathControls.hidden=true;railState.recordReady=false;root.classList.remove('lvx-live-stage','lvx-live-placing');syncSidebarState();};
   stage.addEventListener('pointerdown',event=>{
-    if(!liveStage.active||event.button!==0)return;
+    if(!liveStage.active||event.button!==0||event.defaultPrevented)return;
     if(liveStage.armed&&liveStage.mode==='placement'){
       event.preventDefault();event.stopPropagation();const target=liveTarget();if(!target){liveMessage('No single timed target at this moment.');return;}const rect=stage.getBoundingClientRect(),layer={id:'choreo-'+crypto.randomUUID(),kind:'placement',target:target.target,position:{x:Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width)),y:Math.max(0,Math.min(1,(event.clientY-rect.top)/rect.height))},landing:liveControl('landing').value,motion:liveControl('motion').value,recordedAtMs:Math.round(getMediaTimeMs())};if(queueLiveOperation({type:'setChoreographyLayer',layer})){liveStage.selected=layer.id;liveMessage('Landing placed for '+target.unit.text+' · timing unchanged.');refreshLiveStage();}
     }else if(!liveStage.armed){const syllable=event.target.closest('[data-syllable]'),word=event.target.closest('[data-word]');if(!word)return;event.preventDefault();liveStage.pinned=syllable&&liveStage.scope==='syllable'?{kind:'syllable',id:syllable.dataset.syllable}:{kind:'word',id:word.dataset.word};refreshLiveStage();}
   });
-  function paintLivePlacements(line,words,clock){
-    const place=(node,unit,wordNode)=>{const layer=unit._staging;if(!layer)return;const rect=stage.getBoundingClientRect(),landing=LvChoreography.landingAt(clock,unit.startMs,{style:layer.landing,reduced:bloomMotion.matches});let x=line.offsetLeft+wordNode.offsetLeft+wordNode.offsetWidth/2,y=line.offsetTop+wordNode.offsetTop+wordNode.offsetHeight/2;
-      if(node!==wordNode){x=line.offsetLeft+wordNode.offsetLeft+node.offsetLeft+node.offsetWidth/2;y=line.offsetTop+wordNode.offsetTop+node.offsetTop+node.offsetHeight/2;}
-      const dx=layer.position.x*rect.width-x,dy=layer.position.y*rect.height-y;node.style.translate=`calc(${dx.toFixed(3)}px + ${landing.x.toFixed(4)}em) calc(${dy.toFixed(3)}px + ${landing.y.toFixed(4)}em)`;node.dataset.choreographyPlacement=layer.id;
-    };
-    words.forEach((word,i)=>{const node=line.children[i];if(!node)return;place(node,word,node);for(const part of node.querySelectorAll('[data-syllable]')){const unit=word.syllables?.find(s=>s.id===part.dataset.syllable);if(unit)place(part,unit,node);}});
-    if(words.some(w=>w._staging||w.syllables?.some(s=>s._staging)))line.style.overflow='visible';
+  const railState={page:0,follow:true,recordReady:false,collapsed:false,key:''};
+  const lyricRail=document.createElement('aside');lyricRail.className='lvx-lyric-rail';lyricRail.hidden=true;lyricRail.setAttribute('aria-label','Timed lyric rail');
+  lyricRail.innerHTML=`<header><strong>LYRICS</strong><label><input type="checkbox" data-rail-syllables> Syllables</label><button type="button" data-rail-collapse aria-label="Collapse lyrics" aria-expanded="true">‹</button></header>
+    <div class="lvx-rail-actions"><button type="button" data-rail-follow>Follow song</button><button type="button" data-rail-record>Record motion</button></div>
+    <p data-rail-hint>Choose a word. Drag its leading grip onto the stage.</p><div data-rail-words></div>
+    <footer><button type="button" data-rail-prev aria-label="Previous lyric page">‹</button><output data-rail-page></output><input type="range" data-rail-pages aria-label="Lyric page" min="0" max="0" value="0"><button type="button" data-rail-next aria-label="Next lyric page">›</button></footer>`;
+  const railControl=name=>lyricRail.querySelector('[data-rail-'+name+']');
+  const pathControls=document.createElement('div');pathControls.className='lvx-path-controls';pathControls.hidden=true;pathControls.setAttribute('aria-label','Selected lyric motion path');
+  pathControls.innerHTML=`<svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true"><path data-path-line></path><path data-path-guide></path></svg>
+    <button type="button" data-path-handle="start" aria-label="Move path start">Start</button><button type="button" data-path-handle="control" aria-label="Bend motion path">Bend</button><button type="button" data-path-handle="end" aria-label="Move destination">Land</button>
+    <span data-path-caption></span><span data-path-ghost></span>`;
+  viewport.append(lyricRail,pathControls);
+  const normalizedPoint=(x,y)=>({x:Math.max(0,Math.min(1,x)),y:Math.max(0,Math.min(1,y))});
+  function railUnits(){const score=liveScore();return (score?.phrases||[]).filter(p=>p.laneId===liveStage.laneId).flatMap(p=>p.words.filter(w=>!w.excluded).flatMap(w=>(liveStage.scope==='syllable'?w.syllables||[]:[w]).map(unit=>({phrase:p,word:w,unit,target:{kind:liveStage.scope,id:unit.id}})))).sort((a,b)=>a.unit.startMs-b.unit.startMs);}
+  function selectRailTarget(target,seek=true){
+    if(timing.busy||liveStage.drag||isAdvertisement())return false;
+    const found=LvScore.choreographyTarget(liveScore(),target);if(!found)return false;
+    const media=getMedia();media?.pause();liveStage.armed=false;liveStage.pinned=target;railState.follow=false;
+    if(seek&&media)media.currentTime=Math.max(0,(found.unit.startMs+liveScore().offsetMs+Math.min(100,(found.unit.endMs-found.unit.startMs)*.15))/1000);
+    state.scoreSignature='';refreshLiveStage();renderScore(getMediaTimeMs());return true;
   }
+  function refreshLyricRail(){
+    lyricRail.hidden=!liveStage.active;if(lyricRail.hidden)return;lyricRail.dataset.collapsed=String(railState.collapsed);railControl('collapse').textContent=railState.collapsed?'›':'‹';railControl('collapse').setAttribute('aria-label',railState.collapsed?'Expand lyrics':'Collapse lyrics');railControl('collapse').setAttribute('aria-expanded',String(!railState.collapsed));
+    const units=railUnits(),size=Math.max(1,Math.min(8,Math.floor((viewport.clientHeight-340)/57))),pages=Math.max(1,Math.ceil(units.length/size));
+    const current=LvScore.choreographyTargetAt(liveScore(),getMediaTimeMs(),liveStage.scope,liveStage.laneId),selected=liveStage.pinned?.id;
+    if(railState.follow&&current&&!liveStage.drag)railState.page=Math.floor(Math.max(0,units.findIndex(t=>t.unit.id===current.unit.id))/size);
+    railState.page=Math.max(0,Math.min(pages-1,railState.page));
+    const key=JSON.stringify([liveScore()?.revision,liveStage.scope,liveStage.laneId,railState.page,size,units.length]);
+    if(railState.key!==key&&!liveStage.drag){
+      railState.key=key;const list=railControl('words');list.replaceChildren();
+      for(const target of units.slice(railState.page*size,(railState.page+1)*size)){
+        const row=document.createElement('div'),grip=document.createElement('button'),button=document.createElement('button');row.className='lvx-rail-unit';row.dataset.railUnit=target.unit.id;
+        grip.type=button.type='button';grip.className='lvx-rail-grip';grip.textContent='⠿';grip.setAttribute('aria-label','Drag '+target.unit.text+' to stage');grip.title='Drag to set destination';
+        button.className='lvx-rail-word';button.setAttribute('aria-label','Select '+target.unit.text);const text=document.createElement('strong'),time=document.createElement('small'),bar=document.createElement('span');
+        text.textContent=target.unit.text;button.title=target.unit.text;time.textContent=(Math.max(0,target.unit.startMs+liveScore().offsetMs)/1000).toFixed(2)+'–'+(Math.max(0,target.unit.endMs+liveScore().offsetMs)/1000).toFixed(2)+'s'+(liveStage.scope==='syllable'?' · '+target.word.text:'');bar.className='lvx-rail-duration';bar.style.width=Math.max(8,Math.min(100,(target.unit.endMs-target.unit.startMs)/30))+'%';button.append(text,time,bar);
+        button.onclick=()=>selectRailTarget(target.target);grip.onclick=()=>selectRailTarget(target.target);grip.onpointerdown=e=>{if(e.button!==0||!selectRailTarget(target.target))return;beginPathDrag(e,'end',target,true);};
+        row.append(grip,button);list.append(row);
+      }
+      if(!units.length){const empty=document.createElement('p');empty.textContent=liveStage.scope==='syllable'?'No authored syllables on this track. Switch off Syllables to use words.':'No timed words on this track.';list.append(empty);}
+    }
+    for(const row of lyricRail.querySelectorAll('[data-rail-unit]')){row.dataset.current=String(row.dataset.railUnit===current?.unit.id);row.querySelector('.lvx-rail-word').setAttribute('aria-pressed',String(row.dataset.railUnit===selected));}
+    railControl('syllables').checked=liveStage.scope==='syllable';railControl('syllables').disabled=timing.busy||Boolean(liveStage.drag);
+    railControl('follow').setAttribute('aria-pressed',String(railState.follow));railControl('follow').disabled=Boolean(liveStage.drag);
+    railControl('record').textContent=liveStage.drag?.record?'Recording…':railState.recordReady?'Cancel motion':'Record motion';railControl('record').setAttribute('aria-pressed',String(railState.recordReady));railControl('record').disabled=timing.busy||Boolean(liveStage.drag)||!liveStage.pinned;
+    railControl('hint').textContent=railState.recordReady?'Drag the selected word or Land handle. Playback starts at its cue; release to finish. Esc cancels.':'Choose a word. Drag its leading grip onto the stage. Arrow keys move path handles.';
+    railControl('page').textContent=(railState.page+1)+' / '+pages;railControl('pages').max=String(pages-1);railControl('pages').value=String(railState.page);
+    railControl('prev').disabled=railState.page===0||Boolean(liveStage.drag);railControl('next').disabled=railState.page>=pages-1||Boolean(liveStage.drag);railControl('pages').disabled=Boolean(liveStage.drag);
+  }
+  railControl('collapse').onclick=()=>{railState.collapsed=!railState.collapsed;refreshLiveStage();};
+  railControl('syllables').onchange=e=>{liveStage.scope=e.target.checked?'syllable':'word';liveStage.pinned=null;railState.page=0;railState.recordReady=false;refreshLiveStage();};
+  railControl('follow').onclick=()=>{railState.follow=!railState.follow;if(railState.follow){liveStage.pinned=null;railState.recordReady=false;}refreshLiveStage();};
+  railControl('record').onclick=()=>{if(liveStage.drag||!liveStage.pinned)return;railState.recordReady=!railState.recordReady;liveStage.armed=false;getMedia()?.pause();refreshLiveStage();};
+  for(const [name,step]of [['prev',-1],['next',1]])railControl(name).onclick=()=>{railState.follow=false;railState.page+=step;refreshLiveStage();};
+  railControl('pages').oninput=e=>{railState.follow=false;railState.page=Number(e.target.value);refreshLiveStage();};
+  railControl('pages').onpointerdown=e=>{const node=e.currentTarget,rect=node.getBoundingClientRect(),max=Number(node.max);if(!max)return;const at=(e.clientX-rect.left)/rect.width;if(Math.abs(at-railState.page/max)>.05){e.preventDefault();railState.follow=false;railState.page+=at>railState.page/max?1:-1;refreshLiveStage();}};
+  function targetStagePoint(target){
+    const word=[...stage.querySelectorAll('[data-word]')].find(n=>n.dataset.word===target.word.id),node=target.target.kind==='syllable'?[...word?.querySelectorAll('[data-syllable]')||[]].find(n=>n.dataset.syllable===target.unit.id):word;
+    if(!node)return {x:.55,y:.5};const r=node.getBoundingClientRect(),s=stage.getBoundingClientRect();return normalizedPoint((r.left+r.width/2-s.left)/s.width,(r.top+r.height/2-s.top)/s.height);
+  }
+  function selectedPlacement(target){return [...liveScore().choreographyLayers||[]].reverse().find(l=>l.kind==='placement'&&l.target.kind===target.target.kind&&l.target.id===target.unit.id);}
+  function editablePlacement(target){
+    const existing=selectedPlacement(target);if(existing)return structuredClone(existing);
+    return {id:'choreo-'+crypto.randomUUID(),kind:'placement',target:target.target,position:targetStagePoint(target),landing:liveControl('landing').value,motion:liveControl('motion').value,recordedAtMs:Math.max(0,Math.round(getMediaTimeMs()))};
+  }
+  function pathHandles(layer){const end=layer.position,start=layer.path?.kind==='recorded'?layer.path.points[0]:layer.path?.start||normalizedPoint(end.x-.12,end.y-.14),control=layer.path?.kind==='quadratic'?layer.path.control:layer.path?.kind==='recorded'?LvChoreography.pathPosition(layer,.5):normalizedPoint((start.x+end.x)/2,Math.min(start.y,end.y)-.08);return {start,control,end};}
+  function movePathHandle(layer,handle,point){
+    const handles=pathHandles(layer);
+    if(layer.path?.kind==='recorded'){
+      if(handle==='control'){const dx=point.x-handles.control.x,dy=point.y-handles.control.y;layer.path.points=layer.path.points.map(p=>p.t===0||p.t===1?{...p}:({...p,...normalizedPoint(p.x+dx*Math.sin(Math.PI*p.t),p.y+dy*Math.sin(Math.PI*p.t))}));}
+      else {const index=handle==='start'?0:layer.path.points.length-1;Object.assign(layer.path.points[index],point);if(handle==='end')layer.position={...point};}
+    }else{const start=!layer.path&&handle==='end'?{...layer.position}:{x:handles.start.x,y:handles.start.y},control=!layer.path&&handle==='end'?normalizedPoint((start.x+point.x)/2,Math.min(start.y,point.y)-.08):{...handles.control};layer.path={kind:'quadratic',start,control};if(handle==='end')layer.position={...point};else layer.path[handle]={...point};}
+    return layer;
+  }
+  function refreshPathControls(){
+    pathControls.hidden=!liveStage.active||liveStage.armed||!liveStage.pinned;if(pathControls.hidden)return;
+    const target=liveTarget();if(!target){pathControls.hidden=true;return;}
+    const drag=liveStage.drag;if(drag?.record)capturePathSample(drag,drag.last);const layer=drag?.layer||editablePlacement(target),handles=pathHandles(layer),r=stage.getBoundingClientRect(),v=viewport.getBoundingClientRect();
+    Object.assign(pathControls.style,{left:r.left-v.left+'px',top:r.top-v.top+'px',width:r.width+'px',height:r.height+'px'});
+    const xy=p=>(p.x*1000).toFixed(2)+' '+(p.y*1000).toFixed(2);
+    pathControls.querySelector('[data-path-line]').setAttribute('d',layer.path?.kind==='recorded'?layer.path.points.map((p,i)=>(i?'L':'M')+xy(p)).join(' '):'M'+xy(handles.start)+' Q'+xy(handles.control)+' '+xy(handles.end));
+    pathControls.querySelector('[data-path-guide]').setAttribute('d','M'+xy(handles.start)+' L'+xy(handles.control)+' L'+xy(handles.end));
+    pathControls.dataset.recording=String(Boolean(drag?.record));pathControls.dataset.authored=String(Boolean(layer.path));
+    for(const node of pathControls.querySelectorAll('[data-path-handle]')){const point=handles[node.dataset.pathHandle];node.style.left=point.x*100+'%';node.style.top=point.y*100+'%';node.disabled=timing.busy||Boolean(drag&&node!==drag.source);}
+    const caption=pathControls.querySelector('[data-path-caption]');caption.textContent=target.unit.text+' · '+(layer.path?.kind==='recorded'?'Recorded motion':layer.path?'Motion path':'Drag a handle to shape motion');caption.style.left=handles.end.x*100+'%';caption.style.top=handles.end.y*100+'%';
+    const ghost=pathControls.querySelector('[data-path-ghost]');ghost.hidden=!drag;ghost.textContent=target.unit.text;if(drag){const point=drag.record?drag.last:layer.position;ghost.style.left=point.x*100+'%';ghost.style.top=point.y*100+'%';}
+    if(drag?.record&&(drag.invalid||getMediaTimeMs()>=drag.target.unit.endMs+liveScore().offsetMs))finishPathDrag();
+  }
+  function pointerStagePoint(event){const rect=stage.getBoundingClientRect();return normalizedPoint((event.clientX-rect.left)/rect.width,(event.clientY-rect.top)/rect.height);}
+  function beginPathDrag(event,handle,target,fromRail=false){
+    if(event.button!==0||timing.busy||liveStage.drag||liveStage.armed)return;
+    event.preventDefault();event.stopImmediatePropagation();liveStage.pinned=target.target;railState.follow=false;
+    const media=getMedia();if(!media)return;const layer=editablePlacement(target),record=railState.recordReady&&!fromRail,point=fromRail?layer.position:pointerStagePoint(event);
+    const drag={target,layer,original:structuredClone(layer),handle,record,fromRail,moved:false,pointerId:event.pointerId,source:event.currentTarget,down:{x:event.clientX,y:event.clientY},last:point,mediaTime:media?.currentTime,paused:media?.paused,token:liveStage.token,revision:liveStage.revision,mediaKey:liveStage.mediaKey};
+    liveStage.drag=drag;try{drag.source.setPointerCapture(event.pointerId);}catch{}
+    if(record){layer.path={kind:'recorded',points:[{t:0,...point},{t:1,...point}]};layer.position={...point};media.currentTime=Math.max(0,(target.unit.startMs+liveScore().offsetMs)/1000);void media.play().catch(error=>{if(liveStage.drag===drag){cancelPathDrag();liveMessage(error.message);}});liveMessage('Recording motion · release to finish · Esc cancels.');}
+    else media?.pause();
+    refreshLiveStage();
+  }
+  function samplePathDrag(event){
+    const drag=liveStage.drag;if(!drag||event.pointerId!==drag.pointerId)return;event.preventDefault();
+    if(Math.hypot(event.clientX-drag.down.x,event.clientY-drag.down.y)>3)drag.moved=true;
+    const point=pointerStagePoint(event);drag.last=point;
+    if(drag.record)capturePathSample(drag,point);else drag.layer=movePathHandle(structuredClone(drag.original),drag.handle,point);
+    refreshPathControls();renderScore(getMediaTimeMs());
+  }
+  function capturePathSample(drag,point){
+    const t=Math.max(0,Math.min(1,(getMediaTimeMs()-liveScore().offsetMs-drag.target.unit.startMs)/Math.max(1,drag.target.unit.endMs-drag.target.unit.startMs)));
+    if(t<(drag.progress||0)-.01){drag.invalid='Playback moved backwards; motion was not applied.';return;}
+    drag.progress=t;const points=drag.layer.path.points;points.pop();
+    if(t>points.at(-1).t+.003&&t<1)points.push({t,...point});
+    if(points.length>126)drag.layer.path.points=points.filter((p,i)=>i===0||i%2===0);
+    drag.layer.path.points.push({t:1,...point});drag.layer.position={...point};
+  }
+  function releasePathPointer(drag){try{if(drag.source.hasPointerCapture(drag.pointerId))drag.source.releasePointerCapture(drag.pointerId);}catch{}}
+  function finishPathDrag(event){
+    const drag=liveStage.drag;if(!drag||event&&event.pointerId!==drag.pointerId)return;
+    if(event&&drag.fromRail){const rect=stage.getBoundingClientRect();drag.outside=event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom||lyricRail.contains(document.elementFromPoint(event.clientX,event.clientY))||liveDock.contains(document.elementFromPoint(event.clientX,event.clientY));}
+    liveStage.drag=null;releasePathPointer(drag);if(drag.record)getMedia()?.pause();railState.recordReady=false;
+    if(drag.token!==timing.draft?.token||drag.revision!==timing.draft?.previewRevision||drag.mediaKey!==LvScore.mediaKey({url:location.href}))drag.invalid='The source or preview changed; this gesture was not applied.';
+    if(drag.moved&&!drag.outside&&!drag.invalid&&(!drag.record||drag.progress>0)){if(queueLiveOperation({type:'setChoreographyLayer',layer:drag.layer})){liveStage.selected=drag.layer.id;liveMessage((drag.record?'Motion recorded':'Path updated')+' · timing unchanged · Undo restores it.');}}
+    else liveMessage(drag.invalid||'No path change. Drag onto the stage to place this lyric.');
+    state.scoreSignature='';refreshLiveStage();renderScore(getMediaTimeMs());
+  }
+  function cancelPathDrag(){
+    const drag=liveStage.drag;if(!drag)return;liveStage.drag=null;releasePathPointer(drag);
+    if(drag.record&&LvScore.mediaKey({url:location.href})===drag.mediaKey){const media=getMedia();media.pause();media.currentTime=drag.mediaTime;if(!drag.paused)void media.play().catch(()=>{});}
+    railState.recordReady=false;state.scoreSignature='';liveMessage('Motion edit cancelled; previous path retained.');refreshLiveStage();if(state.score)renderScore(getMediaTimeMs());
+  }
+  document.addEventListener('pointermove',samplePathDrag,true);document.addEventListener('pointerup',finishPathDrag,true);document.addEventListener('pointercancel',()=>cancelPathDrag(),true);window.addEventListener('blur',()=>cancelPathDrag());
+  for(const node of pathControls.querySelectorAll('[data-path-handle]')){
+    node.onpointerdown=e=>{const target=liveTarget();if(target)beginPathDrag(e,node.dataset.pathHandle,target);};
+    node.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)||timing.busy||liveStage.drag)return;e.preventDefault();e.stopPropagation();const target=liveTarget();if(!target)return;const layer=editablePlacement(target),handle=node.dataset.pathHandle,p=pathHandles(layer)[handle],step=e.shiftKey?.001:.01;movePathHandle(layer,handle,normalizedPoint(p.x+(e.key==='ArrowLeft'?-step:e.key==='ArrowRight'?step:0),p.y+(e.key==='ArrowUp'?-step:e.key==='ArrowDown'?step:0)));if(queueLiveOperation({type:'setChoreographyLayer',layer})){liveStage.selected=layer.id;refreshLiveStage();}};
+  }
+  stage.addEventListener('pointerdown',event=>{
+    if(!liveStage.active||liveStage.armed||timing.busy||event.button!==0)return;
+    const word=event.target.closest('[data-word]'),syllable=event.target.closest('[data-syllable]');if(!word)return;
+    const target=LvScore.choreographyTarget(liveScore(),syllable&&liveStage.scope==='syllable'?{kind:'syllable',id:syllable.dataset.syllable}:{kind:'word',id:word.dataset.word});
+    if(target){liveStage.pinned=target.target;beginPathDrag(event,'end',target);}
+  },true);
+  function paintLivePlacements(line,words,clock){
+    const place=(node,unit)=>{
+      const layer=liveStage.drag?.target.target.id===unit.id?liveStage.drag.layer:unit._staging;
+      if(!layer)return;node.style.translate='none';
+      const stageRect=stage.getBoundingClientRect(),box=node.getBoundingClientRect(),point=LvChoreography.pathPosition(layer,(clock-unit.startMs)/Math.max(1,unit.endMs-unit.startMs),bloomMotion.matches);
+      // A syllable's destination is stage-relative even when its parent word moves.
+      // Convert the screen delta into parent coordinates before applying local translate.
+      let parents=new DOMMatrix();for(let parent=node.parentElement;parent&&parent!==viewport;parent=parent.parentElement){const transform=getComputedStyle(parent).transform;if(transform!=='none')parents=new DOMMatrix(transform).multiply(parents);}
+      const delta=new DOMPoint(stageRect.left+point.x*stageRect.width-box.left-box.width/2,stageRect.top+point.y*stageRect.height-box.top-box.height/2,0,0).matrixTransform(parents.inverse());
+      if(!Number.isFinite(delta.x)||!Number.isFinite(delta.y))return;
+      const style=getComputedStyle(node),own=style.transform==='none'?new DOMMatrix():new DOMMatrix(style.transform),landing=layer.path?{x:0,y:0}:LvChoreography.landingAt(clock,unit.startMs,{style:layer.landing,reduced:bloomMotion.matches});
+      node.style.translate=`calc(${(delta.x+own.e).toFixed(3)}px + ${landing.x.toFixed(4)}em) calc(${(delta.y+own.f).toFixed(3)}px + ${landing.y.toFixed(4)}em)`;node.dataset.choreographyPlacement=layer.id;
+    };
+    words.forEach((word,i)=>{const node=line.children[i];if(!node)return;place(node,word);for(const part of node.querySelectorAll('[data-syllable]')){const unit=word.syllables?.find(s=>s.id===part.dataset.syllable);if(unit)place(part,unit);}});
+    if(liveStage.drag||words.some(w=>w._staging||w.syllables?.some(s=>s._staging)))line.style.overflow='visible';
+  }
+
   function renderScore(mediaMs) {
     if(trackWatch?.loading()&&trackWatch?.status().generation>0)return;
     refreshRecordingTransport();refreshLiveStage();
@@ -6741,7 +6890,7 @@
     cancelCountIn();listenToTake();
     if(tapping.take?.status==='armed')tapping.take=eventTake(tapping.take)?LvTapTiming.stopEvents(tapping.take):wordTake(tapping.take)?LvTapTiming.stopWordHolds(tapping.take):LvTapTiming.stop(tapping.take);
     finishEffectGesture(true);performanceTake.armed=false; // Hiding is not Apply or Discard; retain completed gestures.
-    liveStage.armed=false;liveStage.active=false;liveDock.hidden=true;root.classList.remove('lvx-live-stage');
+    cancelPathDrag();liveStage.armed=false;liveStage.active=false;liveDock.hidden=true;lyricRail.hidden=true;pathControls.hidden=true;railState.recordReady=false;root.classList.remove('lvx-live-stage');
     setPreviewPlaying(false);
     stopEffectPreview();
     hudSizeObserver.disconnect();controlSizeObserver.disconnect();

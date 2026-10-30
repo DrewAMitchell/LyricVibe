@@ -375,6 +375,16 @@
           const e=layer.effect;if(!e||!EFFECTS.has(e.type)||!Number.isFinite(e.strength)||e.strength<0||e.strength>1||e.axis!==undefined&&(e.type!=='groove'||!['horizontal','vertical'].includes(e.axis)))bad('invalid choreography effect');
         }else if(layer.kind==='placement'){
           if(!layer.position||!['x','y'].every(k=>Number.isFinite(layer.position[k])&&layer.position[k]>=0&&layer.position[k]<=1)||!DISPLAY_CATALOG.landings.includes(layer.landing)||!DISPLAY_CATALOG.motions.includes(layer.motion))bad('invalid choreography placement');
+          if(layer.path!==undefined){
+            const path=layer.path,point=p=>p&&['x','y'].every(k=>Number.isFinite(p[k])&&p[k]>=0&&p[k]<=1);
+            if(path?.kind==='quadratic'){
+              if(!point(path.start)||!point(path.control))bad('invalid choreography curve');
+            }else if(path?.kind==='recorded'){
+              if(!Array.isArray(path.points)||path.points.length<2||path.points.length>128||path.points[0]?.t!==0||path.points.at(-1)?.t!==1)bad('invalid recorded choreography path');
+              let previous=-1;for(const p of path.points){if(!point(p)||!Number.isFinite(p.t)||p.t<0||p.t>1||p.t<=previous)bad('path samples must have increasing normalized time');previous=p.t;}
+              const end=path.points.at(-1);if(end.x!==layer.position.x||end.y!==layer.position.y)bad('path destination must match the final sample');
+            }else bad('unknown choreography path kind');
+          }
         }else bad('unknown choreography layer kind');
       }
     }
