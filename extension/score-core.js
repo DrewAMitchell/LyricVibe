@@ -365,6 +365,19 @@
         }
       }
     }
+    if(score.choreographyLayers!==undefined){
+      if(!Array.isArray(score.choreographyLayers)||score.choreographyLayers.length>2048)bad('choreography layers must be a bounded list');
+      const layerIds=new Set();
+      for(const layer of score.choreographyLayers){
+        if(!layer||typeof layer.id!=='string'||!layer.id||layer.id.length>128||layerIds.has(layer.id)||!['word','syllable'].includes(layer.target?.kind)||typeof layer.target.id!=='string'||!layer.target.id||!Number.isSafeInteger(layer.recordedAtMs)||layer.recordedAtMs<0)bad('invalid choreography layer identity or target');
+        layerIds.add(layer.id);
+        if(layer.kind==='effect'){
+          const e=layer.effect;if(!e||!EFFECTS.has(e.type)||!Number.isFinite(e.strength)||e.strength<0||e.strength>1||e.axis!==undefined&&(e.type!=='groove'||!['horizontal','vertical'].includes(e.axis)))bad('invalid choreography effect');
+        }else if(layer.kind==='placement'){
+          if(!layer.position||!['x','y'].every(k=>Number.isFinite(layer.position[k])&&layer.position[k]>=0&&layer.position[k]<=1)||!DISPLAY_CATALOG.landings.includes(layer.landing)||!DISPLAY_CATALOG.motions.includes(layer.motion))bad('invalid choreography placement');
+        }else bad('unknown choreography layer kind');
+      }
+    }
     if(score.stageItems!==undefined){
       if(!Array.isArray(score.stageItems)||score.stageItems.length>128)bad('stage items must be a bounded list');
       const ids=new Set();for(const item of score.stageItems){const r=item?.rect;
@@ -453,7 +466,20 @@
     if (!operation || typeof operation !== "object" || typeof operation.type !== "string") fail("INVALID_OPERATION", "operation must have a type");
     const next = clone(score);
     const op = operation;
-    if(op.type==='setLane'){
+    if(op.type==='setChoreographyLayer'){
+      if(!op.layer||!choreographyTarget(next,op.layer.target))fail('UNKNOWN_ID','Choose a current word or authored syllable for the layer.');
+      const layers=next.choreographyLayers||[],index=layers.findIndex(l=>l.id===op.layer.id);
+      if(index<0)layers.push(clone(op.layer));else layers[index]=clone(op.layer);
+      next.choreographyLayers=layers;
+    }else if(op.type==='deleteChoreographyLayer'){
+      if(!next.choreographyLayers?.some(l=>l.id===op.layerId))fail('UNKNOWN_ID','This choreography layer no longer exists.');
+      next.choreographyLayers=next.choreographyLayers.filter(l=>l.id!==op.layerId);
+      if(!next.choreographyLayers.length)delete next.choreographyLayers;
+    }else if(op.type==='deleteUnitEffect'){
+      const found=choreographyTarget(next,op.target),effects=found?.unit.effects;
+      if(!effects||!Number.isInteger(op.index)||op.index<0||JSON.stringify(effects[op.index])!==JSON.stringify(op.expectedEffect))fail('REVISION_CONFLICT','The selected base effect changed. Select it again.');
+      effects.splice(op.index,1);
+    }else if(op.type==='setLane'){
       if(typeof op.laneId!=='string'||!/^[A-Za-z0-9_-]+$/.test(op.laneId)||typeof op.label!=='string'||!op.label.trim()||op.label.length>80||/[\[\]\r\n]/.test(op.label)||!['lead','backing'].includes(op.role))fail('INVALID_OPERATION','A vocal track needs an ID, name and Main or Backing role.');
       if(next.lanes.some(l=>l.id!==op.laneId&&(l.label.toLowerCase()===op.label.trim().toLowerCase()||l.id.toLowerCase()===op.label.trim().toLowerCase())))fail('INVALID_OPERATION','Use a distinct name for each vocal track.');
       const lane=next.lanes.find(l=>l.id===op.laneId),value={id:op.laneId,label:op.label.trim(),role:op.role};
@@ -908,5 +934,32 @@
     const hasLyrics=modes.some(m=>m.possible),complete=hasLyrics&&lanes.every(l=>Object.values(l.modes).every(m=>m.status==='complete'||m.status==='empty'));
     return {lanes,percent:!hasLyrics?null:complete?100:Math.min(99,Math.round(modes.reduce((n,m)=>n+m.ratio,0)/3*100))};
   }
-  return { VERSION, DISPLAY_CATALOG, validEmoji, stageRegionAt, resolveStageRegionRect, ScoreError, mediaKey, parseLrc, parseVocalText, doubledText, displayToken, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, phraseTimingCoverage, timingCoverage, timingCompleteness };
+  // Layers follow stable lyric identities and their current authored timing.
+  // Unresolved targets survive text edits as inactive layers, never silently retargeted.
+  function choreographyTarget(score,target){
+    if(!target||!['word','syllable'].includes(target.kind))return null;
+    for(const phrase of score.phrases)for(const word of phrase.words){
+      const unit=target.kind==='word'?(word.id===target.id?word:null):word.syllables?.find(s=>s.id===target.id);
+      if(unit)return {phrase,word,unit,target};
+    }
+    return null;
+  }
+  function choreographyTargetAt(score,sourceMs,scope='word',laneId=null){
+    const clock=sourceMs-score.offsetMs,matches=[];
+    for(const phrase of score.phrases){if(laneId&&phrase.laneId!==laneId)continue;
+      for(const word of phrase.words){if(word.excluded)continue;
+        for(const unit of scope==='syllable'?word.syllables||[]:[word])if(clock>=unit.startMs&&clock<unit.endMs)matches.push({phrase,word,unit,target:{kind:scope,id:unit.id}});
+      }
+    }
+    return matches.length===1?matches[0]:null;
+  }
+  function projectChoreographyLayers(score,phrases){
+    const units=new Map();for(const p of phrases)for(const w of p.words){units.set('word:'+w.id,w);for(const s of w.syllables||[])units.set('syllable:'+s.id,s);}
+    for(const layer of score.choreographyLayers||[]){const unit=units.get(layer.target.kind+':'+layer.target.id);if(!unit)continue;
+      if(layer.kind==='effect')unit.effects=[...(unit.effects||[]),{...layer.effect,_layer:true}];
+      else unit._staging=layer;
+    }
+    return phrases;
+  }
+  return { VERSION, DISPLAY_CATALOG, choreographyTarget, choreographyTargetAt, projectChoreographyLayers, validEmoji, stageRegionAt, resolveStageRegionRect, ScoreError, mediaKey, parseLrc, parseVocalText, doubledText, displayToken, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, phraseTimingCoverage, timingCoverage, timingCompleteness };
 });

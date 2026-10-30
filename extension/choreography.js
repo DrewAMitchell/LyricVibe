@@ -174,6 +174,10 @@
     if(!cue||now<cue.startMs||now>=cue.endMs)return out;
     const elapsed=now-cue.startMs,t=elapsed/1000,duration=cue.endMs-cue.startMs;
     const envelope=Math.min(1,elapsed/90,(cue.endMs-now)/100),intensity=mode==='puzzle'?1:mode==='fall'?.72:.55;
+    if(effects.some(e=>e._layer)){
+      const base=expressionAt(cue,now,{mode,reduced,automatic,effects:effects.filter(e=>!e._layer)}),added=expressionAt(cue,now,{mode,reduced,automatic:false,effects:effects.filter(e=>e._layer).map(({_layer,...e})=>e)});
+      return {...base,x:base.x+added.x,y:base.y+added.y,turn:base.turn+added.turn,scale:base.scale*added.scale,spin:(base.spin||0)+(added.spin||0),brightness:base.brightness*added.brightness,wave:Math.max(base.wave,added.wave),wavePhase:added.wave?added.wavePhase:base.wavePhase,waveAxis:added.wave?added.waveAxis:base.waveAxis,shadow:[base.shadow,added.shadow].filter(Boolean).join(','),reason:(base.reason?base.reason+' + ':'')+'layer'};
+    }
     if(effects.length){
       out.reason='authored';
       for(const effect of effects){const strength=Math.max(0,Math.min(1,effect.strength??.3));

@@ -3205,6 +3205,43 @@
 
 #lvx-root .lvx-word-set-quick label { min-width:min(100%,180px); }
 
+/* A small live control window leaves the source stage exposed. */
+#lvx-root .lvx-live-dock{position:absolute;z-index:75;left:50%;bottom:24px;transform:translateX(-50%);width:max-content;max-width:calc(100% - 32px);box-sizing:border-box;padding:10px 12px;border:1px solid #54756f;border-radius:12px;background:#101c21f5;box-shadow:0 10px 35px #0007;color:#e6f0ec;pointer-events:auto;font:12px/1.4 system-ui;text-align:left}
+#lvx-root .lvx-live-dock[hidden]{display:none!important}
+#lvx-root .lvx-live-target{display:flex;gap:12px;align-items:center;margin-bottom:7px;min-height:20px}
+#lvx-root .lvx-live-target strong{font-size:10px;letter-spacing:.12em;color:#b8d8a2}
+#lvx-root .lvx-live-target output{font-weight:650;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#lvx-root [data-live-status]{font-size:11px;color:#aac3c7;max-width:460px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#lvx-root .lvx-live-controls{display:flex;align-items:end;gap:6px;flex-wrap:wrap}
+#lvx-root .lvx-live-dock :is(button,select,input){box-sizing:border-box;max-width:100%;min-width:0;border:1px solid #486467;border-radius:6px;background:#1b3035;color:#eaf3ef;font:12px/1.3 system-ui;padding:7px 9px;min-height:32px}
+#lvx-root .lvx-live-dock button,#lvx-root .lvx-live-dock summary{cursor:pointer}
+#lvx-root .lvx-live-dock button:hover,#lvx-root .lvx-live-dock summary:hover{background:#2c4548}
+#lvx-root .lvx-live-dock :disabled{opacity:.4;cursor:default}
+#lvx-root .lvx-live-dock label{display:grid;gap:3px;color:#a9c1c8;font-size:10px}
+#lvx-root .lvx-live-dock label:has(input[type=checkbox]){display:flex;align-items:center;gap:6px;font-size:12px}
+#lvx-root .lvx-live-dock input[type=checkbox]{min-height:16px;width:16px}
+#lvx-root .lvx-live-dock summary{list-style:none;min-height:32px;box-sizing:border-box;padding:7px 10px;border:1px solid #486467;border-radius:6px;background:#1b3035;white-space:nowrap}
+#lvx-root .lvx-live-dock summary::after{content:' ▴';color:#a9c790}
+#lvx-root .lvx-live-dock details[open]>summary{border-color:#d9edc1;color:#d9edc1}
+#lvx-root .lvx-live-pop{position:absolute;right:0;bottom:calc(100% + 8px);width:min(370px,calc(100vw - 48px));box-sizing:border-box;padding:15px;border:1px solid #54756f;border-radius:12px;background:#102027fa;box-shadow:0 10px 28px #0008;display:grid;grid-template-columns:1fr 1fr;gap:10px;animation:lvx-studio-enter .16s ease-out}
+#lvx-root .lvx-live-pop :is(p,small,[data-live-layers],.lvx-live-pages){grid-column:1/-1;margin:0;color:#b2c8cc;font-size:11px}
+#lvx-root .lvx-live-pop small{line-height:1.5}
+#lvx-root .lvx-live-effect-grid{grid-template-columns:repeat(3,1fr)}
+#lvx-root .lvx-live-hint{margin-top:7px;color:#8ba9b0;font-size:10px}
+#lvx-root [data-live-arm],#lvx-root [data-live-save]{background:#d9edc1;color:#15251c;border-color:#d9edc1}
+#lvx-root .lvx-live-dock[data-armed=true] [data-live-arm]{background:#743b36;color:#ffded6;border-color:#b56f63}
+#lvx-root .lvx-live-layer{display:flex;gap:5px;margin-bottom:5px}
+#lvx-root .lvx-live-layer button:first-child{flex:1;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#lvx-root .lvx-live-layer button[aria-pressed=true]{background:#3b5037;border-color:#b9da9e}
+#lvx-root .lvx-live-pages{display:flex;align-items:center;gap:9px}
+#lvx-root [data-live-rail]{flex:1;min-width:60px;accent-color:#b9da9e}
+#lvx-root.lvx-live-stage .lvx-stage{pointer-events:auto}
+#lvx-root.lvx-live-stage .lvx-score-word{cursor:pointer}
+#lvx-root.lvx-live-placing .lvx-stage,#lvx-root.lvx-live-placing .lvx-score-word{cursor:crosshair}
+#lvx-root.lvx-live-stage .lvx-recording-playback{display:none!important}
+#lvx-root .lvx-live-dock :focus-visible{outline:2px solid #d9edc1;outline-offset:3px}
+@media(prefers-reduced-motion:reduce){#lvx-root .lvx-live-pop{animation:none}}
+@media(max-width:740px){#lvx-root .lvx-live-dock{width:calc(100% - 24px);bottom:12px}#lvx-root [data-live-status]{display:none}#lvx-root .lvx-live-hint{font-size:9px}#lvx-root .lvx-live-target{margin-bottom:4px}}
 /* Display controls follow the job: appearance, movement, vocabulary, placement. */
 #lvx-root .lvx-studio-tabs>button{padding:8px 6px;transition:background .18s ease,color .18s ease}
 #lvx-root .lvx-studio-tabs>button small{display:block;margin-top:4px;font:400 10px/1.3 system-ui;opacity:.8}
@@ -3216,3 +3253,6 @@
 @keyframes lvx-studio-enter{from{opacity:.4;transform:translateY(3px)}to{opacity:1;transform:none}}
 @media(max-width:520px){#lvx-root .lvx-studio-tabs>button small{display:none}}
 @media(prefers-reduced-motion:reduce){#lvx-root .lvx-studio-page:not([hidden]){animation:none}#lvx-root .lvx-studio-tabs>button,#lvx-root .lvx-theme-grid .lvx-theme-tile{transition:none}}
+
+#lvx-root.lvx-live-stage .lvx-sidebar{display:none!important}
+#lvx-root .lvx-live-dock summary::before{display:none}

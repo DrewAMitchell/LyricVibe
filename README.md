@@ -111,3 +111,18 @@ Use Save timings to keep the preview. The new choice starts off and is remembere
 Display studio: **Look** chooses font/color, **Motion** chooses layout/dance,
 **Words** edits word rules and emoji maps, and **Stage** controls placement/exits.
 The sidebar opens each directly; arrow keys move between studio tabs.
+
+
+### Perform choreography on the stage
+
+Open **Stage live**. Press **Enter** to arm, then **1–9** to layer effects on the
+word or syllable playing now. **Space** pauses/resumes. Choose **Place**, then
+click a landing point; existing lyric timing stays fixed. Landing offers preset
+entry and motion profiles. Look & motion also holds the vocal track and per-word
+look/emoji controls. Click a lyric while stopped to select it.
+
+Open **Layers** to select or remove an individual effect or placement.
+**Backspace** removes the selected layer; **Ctrl/Command+Z** restores the last
+preview edit. Base effects are labeled separately. Stop with **Enter**, then
+**Save**. Failed saves retain the take for retry. Advanced maps, presets, beat
+editing and region keyframes remain in their existing tools outside Stage live.

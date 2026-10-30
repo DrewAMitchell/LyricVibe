@@ -106,6 +106,7 @@
   const captureTracks={slots:new Map(),switching:false};
   const performanceTake = { armed: false, binding: null, laneId: null, rate: 1, marks: [] };
   const effectGesture = { input:null, type:'clear', samples:new Map(), base:[], groupId:null };
+  const liveStage={active:false,armed:false,scope:'word',mode:'effects',laneId:null,ops:[],history:[],preview:null,token:null,revision:null,selected:null,pinned:null,page:0,all:false,status:''};
   const effectTracks=[];
   const effectColors={pulse:'#63cbd5',tilt:'#b59aeb',shake:'#ed8d8d',bounce:'#8ed39c',glow:'#e9c66f',groove:'#7eacf0',echo:'#75d4bb',glitch:'#ef87cf',spin:'#f3b77d',breath:'#c7a2dc',color:'#e5a3cb',blank:'#7f919a'};
 
@@ -248,7 +249,7 @@
   themeButton.textContent = 'SAMAY';
   themeButton.title = 'Choose a lyric display style (previews use this video\u2019s lyrics)';
   themeButton.setAttribute('aria-haspopup', 'dialog');
-  themeButton.addEventListener('click', () => toggleThemePicker());
+  themeButton.addEventListener('click', () => void openLiveStage());
 
   const syncEarlier = document.createElement('button');
   syncEarlier.className = 'lvx-sync-btn';
@@ -353,6 +354,7 @@
   const sidebarItems = document.createElement('div'); sidebarItems.className = 'lvx-sidebar-items';
   const sidebarPin = document.createElement('button'); sidebarPin.type='button';sidebarPin.className='lvx-sidebar-pin';sidebarPin.textContent='LV';sidebarPin.title='Pin or unpin controls';sidebarPin.setAttribute('aria-label','Unpin controls');sidebarPin.setAttribute('aria-pressed','true');
   const sidebarView = (key,label,title,activate) => { const button=document.createElement('button');button.type='button';button.dataset.sidebarView=key;button.textContent=label;button.title=title;button.onclick=activate;sidebarItems.append(button);return button; };
+  const liveStageView=sidebarView('live-stage','Stage live','Perform choreography on the song stage',()=>void openLiveStage());
   const displayLookView=sidebarView('display-look','Look','Display · choose a look',()=>{studio.view='look';toggleThemePicker(true);syncSidebarState();});
   const displayMotionView=sidebarView('display-motion','Motion','Display · tune motion',()=>{studio.view='motion';toggleThemePicker(true);syncSidebarState();});
   const displayWordsView=sidebarView('display-words','Words','Display · word rules and emoji maps',()=>{studio.view='words';toggleThemePicker(true);syncSidebarState();});
@@ -425,9 +427,9 @@
   const controlSizeObserver=new ResizeObserver(placeControls);controlSizeObserver.observe(sidebar);controlSizeObserver.observe(root);
   sidebarPin.onclick=()=>{const pinned=sidebar.classList.toggle('lvx-sidebar-pinned');sidebarPin.setAttribute('aria-pressed',String(pinned));sidebarPin.setAttribute('aria-label',pinned?'Unpin controls':'Pin controls open');};
   const syncSidebarState=()=>{
-    const locked=timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active;
-    for(const button of [displayLookView,displayMotionView,displayWordsView,displayStageView,stageEditView,timingRecordView,timingRefineView,timingEffectsView,timingBeatView])button.disabled=locked;
-    for(const [button,on] of [[displayLookView,themePicker.hidden===false&&studio.view==='look'],[displayMotionView,themePicker.hidden===false&&studio.view==='motion'],[displayWordsView,themePicker.hidden===false&&studio.view==='words'],[displayStageView,themePicker.hidden===false&&studio.view==='stage'],[timingRecordView,!syncPanel.hidden&&timingWorkspace.view==='record'],[timingRefineView,!syncPanel.hidden&&timingWorkspace.view==='review'],[timingEffectsView,!syncPanel.hidden&&timingWorkspace.view==='effects'],[timingBeatView,!syncPanel.hidden&&timingWorkspace.view==='beat'],[stageEditView,stageEdit.active]])button.setAttribute('aria-current',on?'page':'false');
+    const locked=timing.busy||liveStage.active||tapping.take?.status==='armed'||performanceTake.armed||countIn.active;
+    for(const button of [liveStageView,displayLookView,displayMotionView,displayWordsView,displayStageView,stageEditView,timingRecordView,timingRefineView,timingEffectsView,timingBeatView])button.disabled=locked;
+    for(const [button,on] of [[liveStageView,liveStage.active],[displayLookView,themePicker.hidden===false&&studio.view==='look'],[displayMotionView,themePicker.hidden===false&&studio.view==='motion'],[displayWordsView,themePicker.hidden===false&&studio.view==='words'],[displayStageView,themePicker.hidden===false&&studio.view==='stage'],[timingRecordView,!syncPanel.hidden&&timingWorkspace.view==='record'],[timingRefineView,!syncPanel.hidden&&timingWorkspace.view==='review'],[timingEffectsView,!syncPanel.hidden&&timingWorkspace.view==='effects'],[timingBeatView,!syncPanel.hidden&&timingWorkspace.view==='beat'],[stageEditView,stageEdit.active]])button.setAttribute('aria-current',on?'page':'false');
   };
   sidebar.addEventListener('pointerenter',syncSidebarState);
   for(const button of sidebarItems.children)button.addEventListener('click',syncSidebarState);
@@ -1047,7 +1049,7 @@
   // A stopped take and a take already used in the preview are still unsaved.
   // Keep this independent of tapPending(), which only gates editor operations.
   function hasUnsavedWork() {
-    return Boolean(syncSave.pending || [...captureTracks.slots.values()].some(slot=>tapCount(slot.state.take)) || stageEdit?.fieldsDirty || stageEdit?.drag || timing.dirty || transcript.dirty || tapping.splitDirty || effectPending() ||
+    return Boolean(liveStage.ops.length || liveStage.armed || syncSave.pending || [...captureTracks.slots.values()].some(slot=>tapCount(slot.state.take)) || stageEdit?.fieldsDirty || stageEdit?.drag || timing.dirty || transcript.dirty || tapping.splitDirty || effectPending() ||
       tapping.take && (tapping.take.status === 'armed' || tapCount(tapping.take) || tapping.take.pendingStartMs != null) ||
       timing.draft && LvTimingVariant.hasChanges(timing.draft.score, state.score));
   }
@@ -1055,7 +1057,7 @@
   let navigationHold = null, navigationGestureUntil = 0;
   const navigationWork = () => JSON.stringify([timing.draft?.token, timing.draft?.previewRevision,
     timing.dirty && syncText.value, transcript.dirty && syncButton('transcript-text').value,
-    tapping.splitDirty && [syncButton('tap-spoken').value, syncButton('tap-split').value], tapping.take, [...captureTracks.slots], performanceTake.armed, performanceTake.marks, syncSave.pending]);
+    tapping.splitDirty && [syncButton('tap-spoken').value, syncButton('tap-split').value], tapping.take, [...captureTracks.slots], performanceTake.armed, performanceTake.marks, syncSave.pending,liveStage.ops]);
   const navigationSource = () => LvScore.mediaKey(timing.draft?.score.source || state.score?.source);
   function leavesEditedVideo(url) {
     const source = navigationSource();
@@ -1257,7 +1259,7 @@
   const tempoSourceKey=()=>exportHost?LvScore.mediaKey(exportHost.packet.score.source):LvScore.mediaKey({url:location.href});
   const hasBaselineTempo=()=>Boolean(tempo.map&&tempo.mediaKey===tempoSourceKey());
   function refreshTempoGate(){
-    const required=Boolean(!stageEdit?.active&&tempoSourceKey()&&tempo.mediaKey===tempoSourceKey()&&!tempo.map);
+    const required=Boolean(!liveStage.active&&!stageEdit?.active&&tempoSourceKey()&&tempo.mediaKey===tempoSourceKey()&&!tempo.map);
     if(required&&!root.classList.contains('lvx-tempo-required'))setSyncNotice('Set the song’s baseline BPM first. It sets the count-in and beat grid; refine tempo sections later.');
     root.classList.toggle('lvx-tempo-required',required);
     syncPanel.querySelector('h2').textContent=required?'Set baseline BPM':'Edit timing';
@@ -3743,6 +3745,7 @@
 
   window.__lyricVibeOverlay = {
     interfaceVersion: 2,
+    liveStage:Object.freeze({open:openLiveStage,getState:()=>({active:liveStage.active,armed:liveStage.armed,pending:liveStage.ops.length}),commit:commitLiveStage}),
     backgroundStage:Object.freeze({getState:()=>({...backgroundStage}),set:setBackgroundStage}),
     // Health check: returns false once this script's extension context dies
     // (extension reloaded/updated), so the next injection knows to replace us.
@@ -5286,13 +5289,13 @@
     };
     words.forEach((word,i)=>{
       const node=line.children[i],cue=cues[word.id];if(!node)return;if(!cue){paintWordTexture(node,word,clock,settings.theme||state.theme);return;}
-      const parts=[...node.querySelectorAll('[data-syllable]')],authored=word.effects?.length||word.syllables?.some(s=>s.effects?.length)||node.closest('.lvx-beat-target')||node.querySelector('.lvx-beat-target');
+      const parts=[...node.querySelectorAll('[data-syllable]')],authored=word.effects?.some(e=>!e._layer)||word.syllables?.some(s=>s.effects?.some(e=>!e._layer))||node.closest('.lvx-beat-target')||node.querySelector('.lvx-beat-target');
       const explicitArt=word.appearance?.art,automatic=settings.automatic&&!authored&&word.appearance?.motion===undefined&&explicitArt===undefined;
       const artCue=explicitArt!==undefined?{...cue,rule:{word:LvChoreography.ruleWord(word.text),motion:'off',effects:explicitArt==='off'?[]:[explicitArt]}}:cue;
       paintWordTexture(node,word,clock,settings.theme||state.theme,(explicitArt==='fire'||automatic&&cue.rule?.effects.includes('fire'))?'fire':null);
-      paint(node,parts.length?{...cue,sustained:[]}:cue,word.effects||[],automatic,!authored,true,word.appearance?.motion??(automatic&&cue.rule?cue.rule.motion:undefined));
+      paint(node,parts.length?{...cue,sustained:[]}:cue,word.effects||[],automatic,!authored,true,word._staging?.motion??word.appearance?.motion??(automatic&&cue.rule?cue.rule.motion:undefined));
       for(const part of parts){const syllable=word.syllables?.find(s=>s.id===part.dataset.syllable);if(!syllable)continue;
-        paint(part,{...cue,rule:null,doubled:false,startMs:syllable.startMs,endMs:syllable.endMs,impact:false,direction:null,sustained:cue.sustained.filter(s=>s.id===syllable.id)},syllable.effects||[],automatic&&!cue.rule,false,node.dataset.dance!=='flex'&&(!word.effects?.some(e=>e.type==='groove')||Boolean(syllable.effects?.length)));
+        paint(part,{...cue,rule:null,doubled:false,startMs:syllable.startMs,endMs:syllable.endMs,impact:false,direction:null,sustained:cue.sustained.filter(s=>s.id===syllable.id)},syllable.effects||[],automatic&&!cue.rule,false,node.dataset.dance!=='flex'&&(!word.effects?.some(e=>e.type==='groove')||Boolean(syllable.effects?.length)),syllable._staging?.motion);
       }
       paintWordRuleDecoration(node,artCue,clock,automatic||explicitArt!==undefined);
       paintWordEmoji(node,cue,clock,emojiTagsEnabled(settings));
@@ -5358,18 +5361,146 @@
       const r=frame.rect;Object.assign(node.style,{left:r.x*100+'%',top:r.y*100+'%',width:r.width*100+'%',height:r.height*100+'%',opacity:frame.opacity.toFixed(4)});node.style.setProperty('--lvx-item-energy',frame.energy.toFixed(4));node.style.setProperty('--lvx-item-cone',frame.cone.toFixed(4));node.style.setProperty('--lvx-item-glow',frame.glow.toFixed(4));
     }
   }
+  /* The live stage is the preview. This dock only owns input and pending operations. */
+  const liveDock=document.createElement('section');liveDock.className='lvx-live-dock';liveDock.hidden=true;liveDock.setAttribute('aria-label','Live choreography controls');
+  liveDock.innerHTML=`<div class="lvx-live-target"><strong>STAGE LIVE</strong><output data-live-target>No active word</output><span data-live-status role="status"></span></div><div class="lvx-live-controls">
+    <button type="button" data-live-arm>Arm · Enter</button><button type="button" data-live-play>Play · Space</button>
+    <label>Target<select data-live-scope aria-label="Live choreography target"><option value="word">Word</option><option value="syllable">Syllable</option></select></label>
+    <label>Mode<select data-live-mode aria-label="Live choreography mode"><option value="effects">Effects · 1–9</option><option value="placement">Place · click stage</option></select></label>
+    <details data-live-pop="look"><summary>Look & motion</summary><div class="lvx-live-pop"><label>Vocal track<select data-live-lane aria-label="Live vocal track"></select></label><label>Look<select data-live-look aria-label="Live display look"></select></label><label>Layout<select data-live-layout aria-label="Live layout"><option value="classic">Classic</option><option value="fall">Falling</option><option value="puzzle">Puzzle</option><option value="vinyl">Vinyl</option></select></label><label>Word dance<select data-live-dance aria-label="Live word dance"></select></label><label><input type="checkbox" data-live-auto> Automatic expression</label><label>Word look<select data-live-word-look aria-label="Selected word look"></select></label><label>Word emoji<input data-live-emoji aria-label="Selected word emoji" maxlength="32" placeholder="Emoji or blank"></label><button type="button" data-live-emoji-apply>Apply emoji to word</button><small>Word changes stay in this song’s preview until Save.</small></div></details>
+    <details data-live-pop="effects"><summary>Effects</summary><div class="lvx-live-pop lvx-live-effect-grid"></div></details>
+    <details data-live-pop="placement"><summary>Landing</summary><div class="lvx-live-pop"><label>Entry<select data-live-landing aria-label="Live landing profile"></select></label><label>Motion<select data-live-motion aria-label="Live motion profile"></select></label><p>Arm, choose Place, then click where the current word or syllable should land. Existing timing stays fixed.</p></div></details>
+    <details data-live-pop="layers"><summary>Layers <span data-live-count>0</span></summary><div class="lvx-live-pop"><label><input type="checkbox" data-live-all> All song layers</label><div data-live-layers></div><div class="lvx-live-pages"><button type="button" data-live-prev aria-label="Previous layers">‹</button><output data-live-page></output><input type="range" data-live-rail aria-label="Layer page" min="0" max="0" value="0"><button type="button" data-live-next aria-label="Next layers">›</button></div><small>Selected layer: Backspace removes it. Base effects are labeled separately. Undo restores the last change.</small></div></details>
+    <button type="button" data-live-undo>Undo</button><button type="button" data-live-save>Save</button><button type="button" data-live-close aria-label="Close live choreography">✕</button>
+    </div><div class="lvx-live-hint">Enter arm/stop · Space play/pause · 1–9 add · Backspace remove selected · Ctrl+Z undo</div>`;
+  viewport.append(liveDock);
+  const liveControl=name=>liveDock.querySelector('[data-live-'+name+']');
+  const liveEffects=['pulse','tilt','shake','bounce','glow','groove','echo','glitch','spin'];
+  function liveOptions(node,choices,value){node.replaceChildren(...Object.entries(choices).map(([id,label])=>{const option=document.createElement('option');option.value=id;option.textContent=label;return option;}));node.value=value;}
+  liveOptions(liveControl('look'),THEME_LABELS,state.theme);liveOptions(liveControl('word-look'),{'':'Display default',...THEME_LABELS},'');
+  liveOptions(liveControl('dance'),Object.fromEntries(['off','mix','tip','flex','bounce','launch'].map(k=>[k,k])),choreography.dance);
+  liveOptions(liveControl('landing'),LvChoreography.landingStyles,'settle');liveOptions(liveControl('motion'),{off:'Still',...LvChoreography.wordRuleMotions},'off');
+  liveEffects.forEach((type,i)=>{const button=document.createElement('button');button.type='button';button.textContent=(i+1)+' · '+type;button.dataset.liveEffect=type;button.onclick=()=>addLiveEffect(type);liveDock.querySelector('.lvx-live-effect-grid').append(button);});
+  for(const details of liveDock.querySelectorAll('details'))details.ontoggle=()=>{if(details.open)for(const other of liveDock.querySelectorAll('details'))if(other!==details)other.open=false;};
+  const liveScore=()=>liveStage.preview||timing.draft?.score||state.score;
+  function liveTarget(){const score=liveScore();return score?(liveStage.pinned&&!liveStage.armed?LvScore.choreographyTarget(score,liveStage.pinned):LvScore.choreographyTargetAt(score,getMediaTimeMs(),liveStage.scope,liveStage.laneId)):null;}
+  function liveMessage(text){liveStage.status=text;liveControl('status').textContent=text;}
+  function backupLiveStage(){
+    if(!liveStage.mediaKey)return;
+    const packet={schema:'lyricvibe-choreography-take-v1',mediaKey:liveStage.mediaKey,lyricsHash:timing.draft?.baseHash,previewToken:liveStage.token,previewRevision:liveStage.revision,operations:structuredClone(liveStage.ops),updatedAt:new Date().toISOString()};
+    liveStage.backup=(liveStage.backup||Promise.resolve()).catch(()=>{}).then(()=>chrome.storage.local.set({['lvChoreographyTake:'+liveStage.mediaKey]:packet})).catch(error=>liveMessage('Recovery backup failed: '+error.message+' · keep this window open.'));
+  }
+  function queueLiveOperation(operation){
+    if(timing.busy||!liveStage.active||!timing.draft)return false;
+    if(LvScore.mediaKey({url:location.href})!==liveStage.mediaKey||timing.draft.token!==liveStage.token||timing.draft.previewRevision!==liveStage.revision){liveStage.armed=false;liveMessage('The song or preview changed. Your take is retained; reopen after resolving it.');return false;}
+    if(liveStage.ops.length>=256){liveStage.armed=false;liveMessage('Take is full. Save or stop before continuing.');return false;}
+    try{const before=liveScore(),next=LvScore.applyOperation(before,operation,before.revision);liveStage.history.push({score:liveStage.preview,ops:liveStage.ops.length,selected:liveStage.selected});liveStage.preview=next;liveStage.ops.push(operation);state.scoreSignature='';backupLiveStage();refreshLiveStage();renderScore(getMediaTimeMs());return true;}catch(error){liveMessage(error.message);return false;}
+  }
+  function addLiveEffect(type){
+    if(!liveStage.armed){liveMessage('Arm first. Effects are recorded on the word or syllable playing now.');return;}
+    const target=liveTarget();if(!target){liveMessage('No single timed target here. Choose a vocal track or authored syllables.');return;}
+    const layer={id:'choreo-'+crypto.randomUUID(),kind:'effect',target:target.target,effect:{type,strength:.6},recordedAtMs:Math.round(getMediaTimeMs())};
+    if(queueLiveOperation({type:'setChoreographyLayer',layer})){liveStage.selected=layer.id;liveMessage(type+' → '+target.unit.text+' · layered');refreshLiveStage();}
+  }
+  async function openLiveStage(){
+    if(liveStage.active){liveDock.hidden=false;return;}
+    if(timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active||timing.dirty||transcript.dirty||tapping.splitDirty||stageEdit.fieldsDirty||tapPending()){setHud('Finish the current take or typed edit before Stage live.',true,true);return;}
+    timing.busy=true;
+    try{
+      if(!timing.draft){const current=await timingRequest('LV_TIMING_CURRENT');timing.draft=(current.preview?current:await timingRequest('LV_TIMING_PREPARE',{fromSaved:true})).preview;}
+      const key=LvScore.mediaKey(timing.draft.score.source);
+      if(liveStage.ops.length&&(liveStage.mediaKey!==key||liveStage.token!==timing.draft.token||liveStage.revision!==timing.draft.previewRevision))throw Error('A retained choreography take belongs to another preview. Its recovery copy is intact.');
+      liveStage.mediaKey=key;liveStage.token=timing.draft.token;liveStage.revision=timing.draft.previewRevision;liveStage.active=true;liveStage.armed=false;liveStage.laneId=timingPhrase()?.laneId||timing.draft.score.lanes.find(l=>l.role==='lead')?.id;liveStage.pinned=null;
+      timing.view='proposed';syncPanel.hidden=true;stageEdit.active=false;stagePanel.hidden=true;stageSurface.hidden=true;root.classList.remove('lvx-stage-editing','lvx-sync-open','lvx-tempo-required');toggleThemePicker(false);stopEffectPreview();liveDock.hidden=false;root.classList.add('lvx-live-stage');
+      liveOptions(liveControl('lane'),Object.fromEntries(timing.draft.score.lanes.map(l=>[l.id,l.label])),liveStage.laneId);liveControl('look').value=state.theme;liveControl('layout').value=choreography.mode;liveControl('dance').value=choreography.dance;liveControl('auto').checked=choreography.automatic;
+      liveMessage('Stage follows the song. Arm to perform; click a lyric to select it while stopped.');
+    }catch(error){setHud(error.message,true,true);}finally{timing.busy=false;refreshLiveStage();syncSidebarState();state.scoreSignature='';if(state.score)renderScore(getMediaTimeMs());}
+  }
+  async function commitLiveStage(save=false){
+    if(timing.busy||!timing.draft)return false;liveStage.armed=false;
+    if(liveStage.ops.length){
+      if(liveStage.token!==timing.draft.token||liveStage.revision!==timing.draft.previewRevision){liveMessage('Preview changed; the take is retained.');return false;}
+      timing.busy=true;refreshLiveStage();
+      try{const result=await timingRequest('LV_TIMING_TUNE',{operations:liveStage.ops});timing.draft=result.preview;liveStage.ops=[];liveStage.history=[];liveStage.preview=null;liveStage.token=result.preview.token;liveStage.revision=result.preview.previewRevision;backupLiveStage();}
+      catch(error){liveMessage('Not saved: '+error.message+' · take retained.');return false;}finally{timing.busy=false;}
+    }
+    if(save){await applyTimingReview();if(timing.saveError){liveMessage('Not saved: '+timing.saveError);return false;}liveStage.token=timing.draft?.token;liveStage.revision=timing.draft?.previewRevision;syncPanel.hidden=true;root.classList.remove('lvx-sync-open');liveMessage('Choreography saved for this song.');}
+    else liveMessage('Take is in preview. Save keeps it.');
+    state.scoreSignature='';refreshLiveStage();return true;
+  }
+  async function undoLiveStage(){
+    if(timing.busy)return;
+    if(liveStage.history.length){const previous=liveStage.history.pop();liveStage.preview=previous.score;liveStage.ops.length=previous.ops;liveStage.selected=previous.selected;backupLiveStage();}
+    else if(!liveStage.ops.length&&timing.draft?.undoScores?.length){timing.busy=true;try{timing.draft=(await timingRequest('LV_TIMING_UNDO')).preview;liveStage.token=timing.draft.token;liveStage.revision=timing.draft.previewRevision;}catch(error){liveMessage(error.message);}finally{timing.busy=false;}}
+    state.scoreSignature='';liveMessage('Last choreography edit undone.');refreshLiveStage();renderScore(getMediaTimeMs());
+  }
+  function liveLayerRows(){
+    const score=liveScore(),target=liveTarget();if(!score)return [];
+    const rows=(score.choreographyLayers||[]).filter(layer=>liveStage.all||target&&LvScore.choreographyTarget(score,layer.target)?.word.id===target.word.id).map(layer=>{const unit=LvScore.choreographyTarget(score,layer.target);return {id:layer.id,label:(layer.kind==='effect'?layer.effect.type:layer.landing+' landing')+' · '+(unit?.unit.text||'unresolved target'),operation:{type:'deleteChoreographyLayer',layerId:layer.id}};});
+    if(target){for(const unit of [target.word,...target.word.syllables||[]])for(const [index,effect]of (unit.effects||[]).entries()){const t={kind:unit===target.word?'word':'syllable',id:unit.id};rows.push({id:'base:'+unit.id+':'+index,label:'Base '+effect.type+' · '+unit.text,operation:{type:'deleteUnitEffect',target:t,index,expectedEffect:structuredClone(effect)}});}
+      const beat=LvTapTiming.tempoAt(tempo.map,getMediaTimeMs())?.beat;
+      for(const cue of score.beatCues||[])if(Number.isFinite(beat)&&beat>=cue.beat&&beat<cue.beat+cue.durationBeats&&(['screen','active'].includes(cue.target.kind)||cue.target.id===target.phrase.laneId||[target.phrase.id,target.word.id,target.unit.id].includes(cue.target.id)))rows.push({id:'beat:'+cue.id,label:'Beat '+cue.effect+' · '+cue.target.kind,operation:{type:'deleteBeatCue',cueId:cue.id}});
+    }
+    return rows;
+  }
+  function removeLiveLayer(id=liveStage.selected){const row=liveLayerRows().find(r=>r.id===id);if(!row){liveMessage('Select a layer in Layers first; nothing was cleared.');return;}if(queueLiveOperation(row.operation)){liveStage.selected=null;liveMessage(row.label+' removed · Undo restores it.');refreshLiveStage();}}
+  function refreshLiveStage(){
+    if(!liveStage.active)return;const target=liveTarget(),media=getMedia();liveDock.dataset.armed=String(liveStage.armed);root.classList.toggle('lvx-live-placing',liveStage.armed&&liveStage.mode==='placement');
+    liveControl('target').textContent=target?(target.target.kind==='syllable'?target.word.text+' / ':'')+target.unit.text:'No active '+liveStage.scope;
+    liveControl('arm').textContent=liveStage.armed?'Stop · Enter':'Arm · Enter';liveControl('play').textContent=media?.paused?'Play · Space':'Pause · Space';
+    for(const key of ['scope','mode','save','close','arm'])liveControl(key).disabled=timing.busy;
+    liveControl('save').disabled=timing.busy||liveStage.armed||!hasUnsavedWork();liveControl('undo').disabled=timing.busy||!liveStage.history.length&&!timing.draft?.undoScores?.length;
+    const targetKey=target?.word.id+':'+(liveScore()?.revision||0);
+    if(liveDock.dataset.target!==targetKey){liveDock.dataset.target=targetKey;liveControl('word-look').value=target?.word.appearance?.look||'';if(document.activeElement!==liveControl('emoji'))liveControl('emoji').value=target?.word.appearance?.emoji||'';}
+    for(const name of ['word-look','emoji','emoji-apply'])liveControl(name).disabled=timing.busy||!target;
+    const rows=liveLayerRows(),pages=Math.max(1,Math.ceil(rows.length/6));liveStage.page=Math.min(liveStage.page,pages-1);liveControl('count').textContent=rows.length;
+    const key=JSON.stringify([rows,liveStage.page,liveStage.selected]);if(liveDock.__layersKey!==key){liveDock.__layersKey=key;const list=liveControl('layers');list.replaceChildren();for(const row of rows.slice(liveStage.page*6,liveStage.page*6+6)){const item=document.createElement('div'),select=document.createElement('button'),remove=document.createElement('button');item.className='lvx-live-layer';select.type=remove.type='button';select.textContent=row.label;select.dataset.layerId=row.id;select.setAttribute('aria-pressed',String(row.id===liveStage.selected));select.onclick=()=>{liveStage.selected=row.id;refreshLiveStage();};remove.textContent='×';remove.setAttribute('aria-label','Remove '+row.label);remove.onclick=()=>removeLiveLayer(row.id);item.append(select,remove);list.append(item);}if(!rows.length)list.textContent='No recorded layers on this target.';}
+    liveControl('page').textContent=(liveStage.page+1)+' / '+pages;liveControl('rail').max=String(pages-1);liveControl('rail').value=String(liveStage.page);liveControl('prev').disabled=liveStage.page===0;liveControl('next').disabled=liveStage.page===pages-1;
+  }
+  async function toggleLiveArmed(){if(timing.busy)return;if(liveStage.armed){getMedia()?.pause();await commitLiveStage();}else{if(isAdvertisement()||youtubeMediaState()?.clockUsable===false)return;liveStage.pinned=null;liveStage.armed=true;try{await getMedia()?.play();liveMessage('Performing · 1–9 add effects; placement clicks follow the current target.');}catch(error){liveStage.armed=false;liveMessage(error.message);}}refreshLiveStage();}
+  function handleLiveStageKeys(event){
+    const typing=event.target?.matches?.('input,textarea,select')||event.target?.isContentEditable;if(typing||event.altKey)return;
+    const undo=(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z',space=event.code==='Space'||event.key===' ',number=/^[1-9]$/.test(event.key),owned=undo||space||number||event.key==='Enter'||event.key==='Backspace';
+    if(!owned||!undo&&(event.ctrlKey||event.metaKey))return;
+    if(event.target?.closest?.('button,summary')&&(space||event.key==='Enter')){event.stopImmediatePropagation();return;}
+    event.preventDefault();event.stopImmediatePropagation();if(event.type!=='keydown'||event.repeat)return;
+    if(undo)void undoLiveStage();else if(space)liveControl('play').click();else if(event.key==='Enter')void toggleLiveArmed();else if(event.key==='Backspace')removeLiveLayer();else if(number)addLiveEffect(liveEffects[Number(event.key)-1]);
+  }
+  liveControl('arm').onclick=()=>void toggleLiveArmed();liveControl('play').onclick=()=>{const media=getMedia();if(media?.paused)void media.play().catch(e=>liveMessage(e.message));else media?.pause();refreshLiveStage();};
+  liveControl('lane').onchange=e=>{liveStage.laneId=e.target.value;liveStage.pinned=null;refreshLiveStage();};
+  liveControl('scope').onchange=e=>{liveStage.scope=e.target.value;liveStage.pinned=null;refreshLiveStage();};liveControl('mode').onchange=e=>{liveStage.mode=e.target.value;refreshLiveStage();};
+  liveControl('look').onchange=e=>applyTheme(e.target.value);liveControl('layout').onchange=e=>{setChoreography({...choreography,mode:e.target.value});state.scoreSignature='';};liveControl('dance').onchange=e=>setChoreography({...choreography,dance:e.target.value});liveControl('auto').onchange=e=>setChoreography({...choreography,automatic:e.target.checked});
+  const changeLiveWord=change=>{const t=liveTarget();if(!t)return;const appearance={...t.word.appearance,...change};for(const key of Object.keys(appearance))if(appearance[key]===null)delete appearance[key];if(queueLiveOperation({type:'setWordAppearance',wordId:t.word.id,appearance:Object.keys(appearance).length?appearance:null}))liveMessage('Word appearance updated in this song’s preview.');};
+  liveControl('word-look').onchange=e=>changeLiveWord({look:e.target.value||null});liveControl('emoji-apply').onclick=()=>changeLiveWord({emoji:liveControl('emoji').value.trim()});
+  liveControl('all').onchange=e=>{liveStage.all=e.target.checked;liveStage.page=0;refreshLiveStage();};liveControl('prev').onclick=()=>{liveStage.page=Math.max(0,liveStage.page-1);refreshLiveStage();};liveControl('next').onclick=()=>{liveStage.page++;refreshLiveStage();};liveControl('rail').oninput=e=>{liveStage.page=Number(e.target.value);refreshLiveStage();};
+  liveControl('rail').onpointerdown=e=>{const rect=e.currentTarget.getBoundingClientRect(),max=Number(e.currentTarget.max);if(!max)return;const at=(e.clientX-rect.left)/rect.width,current=liveStage.page/max;if(Math.abs(at-current)>.05){e.preventDefault();liveStage.page=Math.max(0,Math.min(max,liveStage.page+(at>current?1:-1)));refreshLiveStage();}};
+  liveControl('undo').onclick=()=>void undoLiveStage();liveControl('save').onclick=()=>void commitLiveStage(true);liveControl('close').onclick=async()=>{if(!await commitLiveStage())return;liveStage.active=false;liveDock.hidden=true;root.classList.remove('lvx-live-stage','lvx-live-placing');syncSidebarState();};
+  stage.addEventListener('pointerdown',event=>{
+    if(!liveStage.active||event.button!==0)return;
+    if(liveStage.armed&&liveStage.mode==='placement'){
+      event.preventDefault();event.stopPropagation();const target=liveTarget();if(!target){liveMessage('No single timed target at this moment.');return;}const rect=stage.getBoundingClientRect(),layer={id:'choreo-'+crypto.randomUUID(),kind:'placement',target:target.target,position:{x:Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width)),y:Math.max(0,Math.min(1,(event.clientY-rect.top)/rect.height))},landing:liveControl('landing').value,motion:liveControl('motion').value,recordedAtMs:Math.round(getMediaTimeMs())};if(queueLiveOperation({type:'setChoreographyLayer',layer})){liveStage.selected=layer.id;liveMessage('Landing placed for '+target.unit.text+' · timing unchanged.');refreshLiveStage();}
+    }else if(!liveStage.armed){const syllable=event.target.closest('[data-syllable]'),word=event.target.closest('[data-word]');if(!word)return;event.preventDefault();liveStage.pinned=syllable&&liveStage.scope==='syllable'?{kind:'syllable',id:syllable.dataset.syllable}:{kind:'word',id:word.dataset.word};refreshLiveStage();}
+  });
+  function paintLivePlacements(line,words,clock){
+    const place=(node,unit,wordNode)=>{const layer=unit._staging;if(!layer)return;const rect=stage.getBoundingClientRect(),landing=LvChoreography.landingAt(clock,unit.startMs,{style:layer.landing,reduced:bloomMotion.matches});let x=line.offsetLeft+wordNode.offsetLeft+wordNode.offsetWidth/2,y=line.offsetTop+wordNode.offsetTop+wordNode.offsetHeight/2;
+      if(node!==wordNode){x=line.offsetLeft+wordNode.offsetLeft+node.offsetLeft+node.offsetWidth/2;y=line.offsetTop+wordNode.offsetTop+node.offsetTop+node.offsetHeight/2;}
+      const dx=layer.position.x*rect.width-x,dy=layer.position.y*rect.height-y;node.style.translate=`calc(${dx.toFixed(3)}px + ${landing.x.toFixed(4)}em) calc(${dy.toFixed(3)}px + ${landing.y.toFixed(4)}em)`;node.dataset.choreographyPlacement=layer.id;
+    };
+    words.forEach((word,i)=>{const node=line.children[i];if(!node)return;place(node,word,node);for(const part of node.querySelectorAll('[data-syllable]')){const unit=word.syllables?.find(s=>s.id===part.dataset.syllable);if(unit)place(part,unit,node);}});
+    if(words.some(w=>w._staging||w.syllables?.some(s=>s._staging)))line.style.overflow='visible';
+  }
   function renderScore(mediaMs) {
     if(trackWatch?.loading()&&trackWatch?.status().generation>0)return;
-    refreshRecordingTransport();
+    refreshRecordingTransport();refreshLiveStage();
     if ((countIn.previewTake||tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete')) && timing.draft && !syncPanel.hidden && !stageEdit.active) {clearStagePerformance();renderCaptureScore();return;}
-    const score = syncDisplayScore(syllableTakeScore() || (timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score));
+    const score = syncDisplayScore((liveStage.active&&liveStage.preview) || syllableTakeScore() || (timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score));
     renderStagePerformance(score,mediaMs);
     const regionFrame=(score.stageRegions||[]).filter(r=>mediaMs>=r.startMs&&mediaMs<r.endMs).map(r=>({...r,rect:LvScore.resolveStageRegionRect(score,r)}));
     if(stageEdit.active&&stageEdit.subject!=='performance'&&stageEdit.drag){const p=stagePhrase(),area=selectedStageArea();if(area)for(const r of regionFrame)if(r.areaId===area.id)r.rect=stageEdit.drag.rect;if(p){const existing=regionFrame.findIndex(r=>r.target.id===p.id),draft={id:'drag',target:{kind:'phrase',id:p.id},rect:stageEdit.drag.rect};if(existing>=0)regionFrame[existing]=draft;else regionFrame.push(draft);}}
     const regionLayout=regionFrame.length>0;
     if(stage.dataset.regionLayout!==String(regionLayout)){stage.dataset.regionLayout=String(regionLayout);for(const key of ['left','top','width','height'])stage.style[key]=(regionLayout?({left:0,top:0,width:100,height:100})[key]:placement[key])+'%';state.scoreSignature='';}
     const isBacking=phrase=>score.lanes.find(l=>l.id===phrase.laneId)?.role==='backing';
-    const useVinyl=choreography.mode==='vinyl'&&!regionLayout&&!stageEdit.active&&!score.phrases.some(p=>!isBacking(p)&&mediaMs-score.offsetMs>=p.startMs&&mediaMs-score.offsetMs<p.endMs&&p.words.some(w=>w.appearance));
+    const useVinyl=choreography.mode==='vinyl'&&!regionLayout&&!stageEdit.active&&!score.choreographyLayers?.some(l=>LvScore.choreographyTarget(score,l.target)?.phrase.words.some(w=>mediaMs-score.offsetMs>=w.startMs&&mediaMs-score.offsetMs<w.endMs))&&!score.phrases.some(p=>!isBacking(p)&&mediaMs-score.offsetMs>=p.startMs&&mediaMs-score.offsetMs<p.endMs&&p.words.some(w=>w.appearance));
     if(stage.classList.contains('lvx-vinyl-stage')!==useVinyl)stage.classList.toggle('lvx-vinyl-stage',useVinyl);
     if(stage.classList.contains('lvx-choreography-stage')===useVinyl)stage.classList.toggle('lvx-choreography-stage',!useVinyl);
     const stagePadding=useVinyl?'0px':'16px';if(stage.style.paddingTop!==stagePadding)stage.style.paddingTop=stagePadding;
@@ -5389,6 +5520,7 @@
         for (const part of word.syllables || []) { const child = operations.get(part.id); if (child) part.effects = child.effect ? [child.effect] : []; }
       }
     }
+    LvScore.projectChoreographyLayers(score,active.phrases);
     if(useVinyl)active.phrases=[];
     const signature = `${score.revision}:${timing.draft?.previewRevision ?? 'saved'}:${timing.view}:${state.theme}:${useVinyl}:${regionFrame.map(r=>r.id).join(',')}:` + active.phrases.map(p => p.id).join('|');
     if (signature !== state.scoreSignature || !stage.classList.contains('lvx-score-stage')) {
@@ -5474,7 +5606,8 @@
       const {width,height}=rect,maxFont=backing?Math.min(48,placement.maxFontPx*.6):settings.mode==='puzzle'?(settings.fillStage?Math.max(width,height):placement.maxFontPx):Math.min(placement.maxFontPx,laneFont(phrase,score)),minFont=backing?Math.min(maxFont,placement.minFontPx*.6):placement.minFontPx;
       choreographLine(line,phrase.words,atMs,width,height,maxFont,cues,minFont,settings);
       Object.assign(line.style,{position:'absolute',left:rect.x+'px',top:rect.y+'px',margin:'0',overflow:'hidden'});line.dataset.region=authoredRegion?.id||'default';line.dataset.area=authoredRegion?.areaId||'';
-      if(!backing)expressLine(line,phrase.words,atMs,cues,settings);else phrase.words.forEach((word,i)=>{paintWordTexture(line.children[i],word,atMs);paintWordEmoji(line.children[i],cues[word.id],atMs,emojiTagsEnabled(settings));});
+      if(!backing||phrase.words.some(w=>w.effects?.some(e=>e._layer)||w._staging||w.syllables?.some(s=>s.effects?.some(e=>e._layer)||s._staging)))expressLine(line,phrase.words,atMs,cues,backing?{...settings,automatic:false}:settings);else phrase.words.forEach((word,i)=>{paintWordTexture(line.children[i],word,atMs);paintWordEmoji(line.children[i],cues[word.id],atMs,emojiTagsEnabled(settings));});
+      paintLivePlacements(line,phrase.words,atMs);
     }
   }
   function laneFont(phrase,score){return score.lanes.find(l=>l.id===phrase.laneId)?.role==='backing'?40:80;}
@@ -5900,6 +6033,7 @@
   }
 
   function handleTapKeys(event) {
+    if(liveStage.active){handleLiveStageKeys(event);return;}
     if (!root.isConnected || syncPanel.hidden) return;
     if(trackWatch?.loading()&&trackWatch?.status().generation>0)return;
     if(event.target===controlHandle&&event.key.startsWith('Arrow'))return;
@@ -6607,6 +6741,7 @@
     cancelCountIn();listenToTake();
     if(tapping.take?.status==='armed')tapping.take=eventTake(tapping.take)?LvTapTiming.stopEvents(tapping.take):wordTake(tapping.take)?LvTapTiming.stopWordHolds(tapping.take):LvTapTiming.stop(tapping.take);
     finishEffectGesture(true);performanceTake.armed=false; // Hiding is not Apply or Discard; retain completed gestures.
+    liveStage.armed=false;liveStage.active=false;liveDock.hidden=true;root.classList.remove('lvx-live-stage');
     setPreviewPlaying(false);
     stopEffectPreview();
     hudSizeObserver.disconnect();controlSizeObserver.disconnect();
