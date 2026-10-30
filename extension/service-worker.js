@@ -98,11 +98,13 @@ function isApiDegraded(apiName) {
  * Returns { ok, data, errorType } instead of throwing.
  * errorType: 'TIMEOUT' | 'NETWORK_ERROR' | 'RATE_LIMITED' | 'SERVER_ERROR' | 'UNAUTHORIZED' | 'NOT_FOUND' | null
  */
-const lookupPolicy=LvLookupPolicy.create({fetch:(...args)=>fetch(...args),storage:chrome.storage.session});
+const lookupPolicy=LvLookupPolicy.create({fetch:(...args)=>fetch(...args),storage:chrome.storage.session,clientId:`LyricVibe ${chrome.runtime.getManifest?.().version||'development'} (https://github.com/DrewAMitchell/LyricVibe)`});
 async function apiFetch(url,apiName,timeoutMs,job){
   const result=await lookupPolicy.request(url,apiName,timeoutMs,job);
-  if(result.ok)recordApiSuccess(apiName);
-  else if(['TIMEOUT','SERVER_ERROR','NETWORK_ERROR','RATE_LIMITED'].includes(result.errorType))recordApiFailure(apiName,result.errorType);
+  if(!result.reused&&!result.suppressed){
+    if(result.ok)recordApiSuccess(apiName);
+    else if(['TIMEOUT','SERVER_ERROR','NETWORK_ERROR','RATE_LIMITED'].includes(result.errorType))recordApiFailure(apiName,result.errorType);
+  }
   return result;
 }
 
@@ -485,8 +487,7 @@ async function _detectAndSyncInner(tabId,prevKey,detectStart,job={trace:[],count
   const result=await recognize({mode:'metadata',hints,job});await lookupStillCurrent(tabId,job);
   if(result?.ok&&hasUsableLyrics(result)){await handleRecognitionResult(tabId,result,job);return;}
   if(result?.apiError){
-    const cooldown=lookupPolicy.status().cooldowns.lrclib||0;
-    sendToTab(tabId,{type:'LV_API_ERROR',text:cooldown>Date.now()?'Lyrics service asked us to wait. Saved lyrics remain available; retry will respect its cooldown.':'Lyrics service is unavailable or this lookup reached its request budget. Saved work is retained.',canRetry:true},job);
+    sendToTab(tabId,{type:'LV_API_ERROR',text:LvLookupPolicy.failureMessage(job.trace),canRetry:true},job);
     scheduleAutoRetry(tabId);
   }else sendToTab(tabId,{type:'LV_ERROR',text:result?.message||'No lyrics found for this video.'},job);
 }
@@ -519,7 +520,7 @@ function scheduleAutoRetry(tabId){
   const attempt=retryAttempts.get(tabId)||0;if(attempt>=2)return;
   retryAttempts.set(tabId,attempt+1);
   const cooldown=Math.max(0,...Object.values(lookupPolicy.status().cooldowns))-Date.now();
-  const delay=Math.max(60000*2**attempt,cooldown);
+  const baseDelay=Math.max(60000*2**attempt,cooldown),delay=baseDelay+Math.round(Math.random()*baseDelay*.15);
   autoRetryTimers.set(tabId,setTimeout(async()=>{
     autoRetryTimers.delete(tabId);if(!sessions.has(tabId)||!await automaticDetectionAllowed(tabId))return;
     void detectAndSync(tabId);

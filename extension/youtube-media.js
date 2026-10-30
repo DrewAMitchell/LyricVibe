@@ -55,7 +55,16 @@
     const lookupDurationMs = clockUsable ? nativeDurationMs : contentDurationMs;
     return { adActive, contentDurationMs, nativeDurationMs, lookupDurationMs, durationMatches, metadataMatches, sourceVideoId, clockUsable, reason, paused: !clockUsable || Boolean(snapshot.mediaPaused), seeking: !clockUsable || Boolean(snapshot.mediaSeeking) };
   }
-  const api = { parseIsoDurationMs, parseClockMs, videoIdFromUrl, isAdActive, inspect };
+  function artistHint({url,canonicalUrl,title,owner,officialArtist}){
+    if(!videoIdFromUrl(url)||videoIdFromUrl(url)!==videoIdFromUrl(canonicalUrl))return '';
+    // An explicit artist/title pair is already handled by the title parser.
+    if(/\s[-–—]\s/.test(String(title||'')))return '';
+    const name=String(owner||'').replace(/\s+/g,' ').trim();
+    if(!name||name.length>160)return '';
+    if(/ - Topic$/i.test(name))return name.replace(/ - Topic$/i,'').trim();
+    return officialArtist===true?name:'';
+  }
+  const api = { parseIsoDurationMs, parseClockMs, videoIdFromUrl, isAdActive, inspect, artistHint };
   root.LvYoutubeMedia = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(globalThis);

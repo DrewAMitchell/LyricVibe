@@ -2,6 +2,16 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const tap = require('../extension/tap-timing.js');
 
+test('saved prompts respect offset, lane, exclusions and stale note evidence',()=>{
+  const score={offsetMs:200,phrases:[{laneId:'lead',words:[{id:'w',syllables:[{text:'oh',startMs:1000,endMs:2000,captureEvidence:{sourceMs:1200,releaseMs:2200,noteEvents:[{sourceMs:1600},{sourceMs:2400}]}},{text:'hey',startMs:2500,endMs:3000}]}]},{laneId:'backing',words:[{id:'x',syllables:[{text:'x',startMs:1000,endMs:2000}]}]}]};
+  assert.deepEqual(tap.savedPrompts(score,'lead').map(e=>[e.kind,e.at,e.estimated]),[['syllable',1000,false],['note',1400,false],['syllable',2500,true]]);
+  score.phrases[0].words[0].syllables[0].startMs=1100;
+  assert.equal(tap.savedPrompts(score,'lead').filter(e=>e.kind==='note').length,0);
+  score.phrases[0].words[0].syllables[0].endMs=2100;score.offsetMs=-150;
+  assert.equal(tap.savedPrompts(score,'lead').find(e=>e.kind==='note').at,1500);
+  score.phrases[0].words[0].excluded=true;assert.deepEqual(tap.savedPrompts(score,'lead'),[]);
+});
+
 test('playback advances untouched words, locks a held word, and listening preserves marks', () => {
   const units=[0,1,2].map(i=>({id:'w'+i,wordId:'w'+i,text:'word',minMs:0,maxMs:10000,estimatedStartMs:1000+i*1000,estimatedEndMs:2000+i*1000}));
   let take=tap.begin(units,{mode:'word',cadence:'pairs'});

@@ -580,7 +580,17 @@
     const refresh=()=>{group.querySelector('[data-held-duration]').hidden=rule.value!=='duration';};refresh();
     rule.onchange=()=>{setChoreography({...choreography,heldRule:rule.value});refresh();renderStylePreview();};
     minimum.onchange=()=>{if(!minimum.checkValidity())return;setChoreography({...choreography,heldMinMs:Number(minimum.value)});renderStylePreview();};
-    effect.onchange=()=>{setChoreography({...choreography,heldEffect:effect.value});renderStylePreview();};return group;
+    const choices=document.createElement('div');choices.className='lvx-held-choices';choices.setAttribute('role','group');choices.setAttribute('aria-label','Held note effect');
+    const samples=[['breathe','Breathe','Warm color & gentle wave'],['groove','Wave','Letters rise and fall'],['glow','Glow','Brighter held text'],['pulse','Pulse','Subtle size pulse'],['off','None','Still text']];
+    const word={id:'held-sample',text:'Stay',startMs:0,endMs:3000,effects:[]},cues={'held-sample':{startMs:0,endMs:3000,sustained:[{startMs:0,endMs:3000}]}};
+    let frame=0,active=null,started=0;
+    const paint=(button,clock)=>expressLine(button.querySelector('.lvx-held-sample'),[word],clock,cues,{...choreography,automatic:true,beatPulse:false,dance:'off',mode:'classic',heldEffect:button.dataset.heldEffect});
+    const stop=()=>{cancelAnimationFrame(frame);frame=0;if(active)paint(active,650);active=null;};
+    const tick=now=>{if(!active||!group.isConnected||!group.getClientRects().length||document.hidden||bloomMotion.matches){stop();return;}paint(active,250+(now-started)%2200);frame=requestAnimationFrame(tick);};
+    const start=button=>{stop();active=button;paint(button,650);if(!bloomMotion.matches){started=performance.now();frame=requestAnimationFrame(tick);}};
+    const select=value=>{effect.value=value;setChoreography({...choreography,heldEffect:value});for(const b of choices.children)b.setAttribute('aria-pressed',String(b.dataset.heldEffect===value));renderStylePreview();};
+    for(const [value,label,description]of samples){const button=document.createElement('button');button.type='button';button.dataset.heldEffect=value;button.setAttribute('aria-label',label+' held effect');button.setAttribute('aria-pressed',String(value===effect.value));button.innerHTML='<span class="lvx-held-sample"><span class="lvx-word">Stay</span></span><strong></strong><small></small>';button.querySelector('strong').textContent=label;button.querySelector('small').textContent=description;button.onclick=()=>select(value);button.onpointerenter=()=>start(button);button.onpointerleave=()=>{if(document.activeElement!==button)stop();};button.onfocus=()=>start(button);button.onblur=stop;choices.append(button);paint(button,650);}
+    effect.parentElement.replaceWith(choices);return group;
   }
   function setChoreography(value){choreography={...heldSettings(value),beatPulse:value.beatPulse!==false,landing:Object.hasOwn(LvChoreography.landingStyles,value.landing)?value.landing:'settle',dance:['off','mix','tip','flex','bounce','launch'].includes(value.dance)?value.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic===true,autoFire:value.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,value.fireColor)?value.fireColor:'ember',fireSmoke:value.fireSmoke!==false,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:Object.hasOwn(LvChoreography.layoutOrigins,value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
   function previewTick(now){
@@ -1669,13 +1679,33 @@
     renderEventReview();renderPerformPhrase(); renderTapTimeline(); refreshMarkCorrection(); refreshEffectPanel();
   }
   function refreshCaptureKeys(){
-    const guide=syncPanel.querySelector('.lvx-capture-keys'),take=tapping.take;guide.hidden=!eventPass();if(guide.hidden)return;
+    const guide=syncPanel.querySelector('.lvx-capture-keys'),take=tapping.take,isEvents=eventPass(),mode=syncButton('tap-mode').value;guide.hidden=false;
     const events=take?.events||[],holding=take?.pendingStartMs!=null;
+    const unit=mode==='phrase'?'phrase':mode==='word'||wordPass()?'word':'syllable';
+    guide.querySelector('[data-capture-key=syllable] strong').textContent='New '+unit;
+    guide.querySelector('[data-capture-key=note]').hidden=!isEvents;
+    guide.dataset.pass=isEvents?'events':unit;
     guide.querySelector('[data-capture-key=syllable]').dataset.active=String(holding);
-    guide.querySelector('[data-capture-count=syllable]').textContent=events.filter(e=>e.kind==='syllable-entrance').length+(holding?1:0);
+    guide.querySelector('[data-capture-count=syllable]').textContent=isEvents?events.filter(e=>e.kind==='syllable-entrance').length+(holding?1:0):(take?.marks?.length||0);
     guide.querySelector('[data-capture-count=note]').textContent=events.filter(e=>e.kind==='note-change').length;
-    guide.querySelector('[data-capture-key=syllable] small').textContent=syllableHold(take)||!take&&syncButton('tap-syllable-flow').value==='holds'?'Hold while you sing it · release at its end':'Tap once at its entrance';
-    syncButton('tap-note').disabled=timing.busy||take?.status!=='armed'||(syllableHold(take)?!holding:!events.some(e=>e.kind==='syllable-entrance'));
+    guide.querySelector('[data-capture-key=syllable] small').textContent=holdCapture()||isEvents&&!take&&syncButton('tap-syllable-flow').value==='holds'?'Hold while you sing it · release at its end':'Tap once at its entrance';
+    const key=mode+':'+syncButton('tap-syllable-flow').value;if(guide.dataset.guide!==key){guide.dataset.guide=key;guide.querySelector('.lvx-capture-feedback').textContent=isEvents?'One “oh” across three notes: hold Space, tap N twice.':unit[0].toUpperCase()+unit.slice(1)+' pass · N note changes are recorded in the syllable pass.';}
+    syncButton('tap-note').disabled=!isEvents||timing.busy||take?.status!=='armed'||(syllableHold(take)?!holding:!events.some(e=>e.kind==='syllable-entrance'));
+  }
+  let savedPromptCache={score:null,lane:null,events:[]};
+  function refreshSavedPrompts(now){
+    const strip=syncPanel.querySelector('.lvx-saved-prompts');if(!strip||syncPanel.hidden||timingWorkspace.view!=='record')return;
+    const score=timing.draft?.score,lane=timingPhrase()?.laneId;
+    if(savedPromptCache.score!==score||savedPromptCache.lane!==lane)savedPromptCache={score,lane,events:LvTapTiming.savedPrompts(score,lane)};
+    const events=savedPromptCache.events,near=events.filter(e=>e.at>=now-120&&e.at<=now+2500).slice(0,4),holding=events.find(e=>e.kind==='syllable'&&e.at<now-120&&e.end>now);
+    const label=strip.querySelector('small');label.textContent=!events.length?'No saved syllable cues yet · record the syllable pass first.':eventPass()?'Saved timing · Space syllable / N note':'Saved syllable & note timing · reference for this pass';
+    const track=strip.querySelector('.lvx-prompt-track');track.hidden=!events.length;
+    for(let i=0;i<4;i++){const node=track.children[i],event=near[i];node.hidden=!event;if(!event)continue;
+      node.dataset.kind=event.kind;node.dataset.due=String(Math.abs(event.at-now)<=120);node.style.setProperty('--approach',Math.max(0,Math.min(1,1-(event.at-now)/2500)));
+      node.querySelector('kbd').textContent=eventPass()?(event.kind==='note'?'N':'SPACE'):(event.kind==='note'?'NOTE':'SYLL');
+      node.querySelector('span').textContent=event.text;node.querySelector('small').textContent=(event.estimated?'Estimated · ':'')+(Math.abs(event.at-now)<=120?'Now':((event.at-now)/1000).toFixed(1)+'s');
+    }
+    strip.querySelector('output').textContent=holding?'Holding “'+holding.text+'” · '+((holding.end-now)/1000).toFixed(1)+'s left':near.length?'':'Waiting for the next saved cue';
   }
   function flashCaptureKey(kind,text){
     const guide=syncPanel.querySelector('.lvx-capture-keys');guide.querySelector('.lvx-capture-feedback').textContent=text;
@@ -1940,6 +1970,7 @@
   }
   function setCaptureText(selector,value){const element=syncPanel.querySelector(selector);if(element.textContent!==value)element.textContent=value;}
   function refreshPerformClock(now) {
+    refreshSavedPrompts(now);
     if(!state.score)return;
     // After punch-in, releases/explicit navigation own the capture cursor.
     // Stale playback estimates must not skip an unclaimed word between presses.
@@ -3494,7 +3525,12 @@
     for(const [section,id]of [[capture,'record'],[effects,'effects'],[beat,'beat']]){section.open=true;section.classList.add('lvx-workspace-section');panes[id].append(section);}
     // Primary capture actions stay above the cue at every viewport height.
     capture.querySelector('.lvx-perform-cue').before(capture.querySelector('.lvx-record-choices'),capture.querySelector('.lvx-other-parts'),capture.querySelector('.lvx-perform-actions'));
-    const transport=document.createElement('div');transport.className='lvx-capture-transport';transport.append(syncButton('capture-restart'),syncButton('capture-phrase'),syncButton('capture-forward'),leadInControl('Recording lead-in seconds'));capture.querySelector('.lvx-perform-actions').after(transport);
+    const cue=capture.querySelector('.lvx-perform-cue');
+    cue.before(capture.querySelector('.lvx-capture-keys'));
+    const prompts=document.createElement('div');prompts.className='lvx-saved-prompts';prompts.setAttribute('aria-label','Saved timing prompts');prompts.innerHTML='<small></small><div class="lvx-prompt-track">'+Array.from({length:4},()=>'<div hidden><kbd></kbd><span></span><small></small></div>').join('')+'</div><output></output>';capture.querySelector('.lvx-capture-keys').after(prompts);
+    cue.after(capture.querySelector('.lvx-record-choices'),capture.querySelector('.lvx-other-parts'));
+    const coverage=document.createElement('details');coverage.className='lvx-record-coverage';coverage.innerHTML='<summary>Timing completeness</summary>';coverage.append(syncPanel.querySelector('.lvx-completion'));panes.record.append(coverage);
+    const transport=document.createElement('div');transport.className='lvx-capture-transport';transport.append(syncButton('capture-restart'),syncButton('capture-phrase'),syncButton('capture-forward'),leadInControl('Recording lead-in seconds'));cue.after(transport);
     const gap=document.createElement('details');gap.className='lvx-effect-gap';gap.innerHTML='<summary>Phrase exit <span>Override this phrase</span></summary>';
     const gapHint=syncButton('gap-default').nextElementSibling;
     gap.append(syncButton('gap-beats').closest('label'),syncButton('gap-use'),syncButton('gap-default'),gapHint);effects.append(gap);
@@ -4141,6 +4177,8 @@
         title.replace(/ - YouTube$/i, '');
       const normalizeTitle=value=>String(value).replace(/^\(\d+\)\s*/, '').replace(/ - YouTube$/i,'').replace(/\s+/g,' ').trim();
       if(normalizeTitle(title)&&normalizeTitle(hints.track)!==normalizeTitle(title))hints.mediaReady=false;
+      const owner=document.querySelector('ytd-watch-metadata #owner');
+      hints.artist=globalThis.LvYoutubeMedia?.artistHint({url,canonicalUrl:document.querySelector('link[rel=canonical]')?.href,title:hints.track,owner:owner?.querySelector('ytd-channel-name a')?.textContent,officialArtist:!!owner?.querySelector('[aria-label="Official Artist Channel"]')})||'';
     } else if (host.includes('spotify.com')) {
       /* ── SPOTIFY RESILIENT SELECTORS (2026) ── */
       hints.track = spotifyGetTrack(title);

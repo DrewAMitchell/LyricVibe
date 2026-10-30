@@ -3,6 +3,15 @@ const assert = require('node:assert/strict');
 const media = require('../extension/youtube-media.js');
 const snapshot = { url: 'https://www.youtube.com/watch?v=FIXTURE0003', canonicalUrl: 'https://www.youtube.com/watch?v=FIXTURE0003', isoDuration: 'PT3M32S', playerClassName: 'html5-video-player ad-created paused-mode', mediaDurationSec: 211.521, mediaCurrentTimeSec: 0, mediaPaused: false, mediaSeeking: false };
 
+test('artist hints require the current video and an official artist or Topic owner, never a generic uploader',()=>{
+  const s={url:snapshot.url,canonicalUrl:snapshot.canonicalUrl,title:'Example Song',owner:'Example Artist',officialArtist:true};
+  assert.equal(media.artistHint(s),'Example Artist');
+  assert.equal(media.artistHint({...s,officialArtist:false}),'');
+  assert.equal(media.artistHint({...s,officialArtist:false,owner:'Example Artist - Topic'}),'Example Artist');
+  assert.equal(media.artistHint({...s,title:'Other Artist - Example Song'}),'');
+  assert.equal(media.artistHint({...s,canonicalUrl:'https://www.youtube.com/watch?v=TESTVIDEO01'}),'');
+});
+
 test('ISO duration parses YouTube main metadata without adopting ad duration', () => {
   assert.equal(media.parseIsoDurationMs('PT3M32S'), 212000);
   assert.equal(media.parseIsoDurationMs('PT2M46S'), 166000);

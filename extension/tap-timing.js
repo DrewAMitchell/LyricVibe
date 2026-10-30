@@ -1541,7 +1541,26 @@
     return {...next,status:'armed'};
   }
 
-  return { begin, mark, release, removeCurrentPhrase, undo, stop, adjust, reposition, followPlayback, punchIn, moveCursor, reassignLast, restoreWordFrameTake, rewindToPhrase, restorePhraseStreamTake,
+  // Score timing drives prompts. Preserve captured note spacing when moving a
+  // syllable or changing sync; a changed duration cannot reuse unscaled evidence.
+  function savedPrompts(score,laneId){
+    const result=[],offset=score?.offsetMs||0;
+    for(const phrase of score?.phrases||[]){if(laneId&&phrase.laneId!==laneId)continue;
+      for(const word of phrase.words||[]){if(word.excluded)continue;
+        for(const syllable of word.syllables||[]){if(!Number.isFinite(syllable.startMs)||!Number.isFinite(syllable.endMs))continue;
+          const evidence=syllable.captureEvidence;
+          result.push({kind:'syllable',at:syllable.startMs,end:syllable.endMs,text:syllable.text,wordId:word.id,estimated:!evidence});
+          if(!evidence)continue;
+          const unchanged=Number.isFinite(evidence.releaseMs)?Math.abs(evidence.releaseMs-evidence.sourceMs-(syllable.endMs-syllable.startMs))<=1:Math.abs(evidence.sourceMs-offset-syllable.startMs)<=1;
+          if(!unchanged)continue;
+          for(const note of evidence.noteEvents||[]){const at=syllable.startMs+note.sourceMs-evidence.sourceMs;if(Number.isFinite(at)&&at>=syllable.startMs&&at<syllable.endMs)result.push({kind:'note',at,text:syllable.text,wordId:word.id,estimated:false});}
+        }
+      }
+    }
+    return result.sort((a,b)=>a.at-b.at);
+  }
+
+  return { savedPrompts, begin, mark, release, removeCurrentPhrase, undo, stop, adjust, reposition, followPlayback, punchIn, moveCursor, reassignLast, restoreWordFrameTake, rewindToPhrase, restorePhraseStreamTake,
     beginEvents, markEvent, pressEventHold, releaseEventHold, stopEvents, undoEvent, rewindEvents, associateEvents, restoreEventRecording, timingEvidence,
     beginWordHolds, restoreWordHoldRecording, pressWord, releaseWord, skipWords, undoWordHold, stopWordHolds, rewindWordHolds, retimePhraseHolds, associateWordHolds, wordHoldsFromPairs, estimateTempo,
     planOtherParts, leadInProgress, captureProgress, validateTempoMap, tempoMapFromEstimate, setTempoPoint, removeTempoPoint, tempoAt, tempoTimeAtBeat };

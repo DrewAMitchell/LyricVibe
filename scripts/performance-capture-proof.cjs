@@ -15,7 +15,7 @@ log('START',process.pid);let server,browser;
   const evaluate=async value=>{const expression=typeof value==='function'?'('+value.toString()+')()':value;const r=await session.send('Runtime.evaluate',{expression,contextId:executionContextId,awaitPromise:true,returnByValue:true,userGesture:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
   await evaluate(()=>{window.__messageListeners=[];window.__store={};window.chrome={runtime:{id:'fixture',getManifest:()=>({version:'fixture'}),onMessage:{addListener(fn){__messageListeners.push(fn)}},sendMessage:async()=>({ok:true})},storage:{local:{get:async(keys,cb)=>{cb?.(__store);return __store},set:async data=>Object.assign(__store,data)}}};const v=document.querySelector('video');Object.defineProperties(v,{currentTime:{value:2,writable:true,configurable:true},duration:{value:30},paused:{value:true,writable:true},playbackRate:{value:1,writable:true}});v.pause=()=>{v.paused=true};v.play=async()=>{v.paused=false};});
   for(const name of ['score-core','tap-timing','beat-track','choreography','transcript-text','timing-variant','pronunciation'])await evaluate(fs.readFileSync(path.join(root,'extension',name+'.js'),'utf8'));
-  await evaluate(fs.readFileSync(path.join(root,'extension/content.js'),'utf8').replace(/\}\)\(\);\s*$/,'window.__qa={state,timing,tapping,tempo,syncPanel,tapBinding,eventEnvelope,archiveEvents,useEventAssignments,discardTapTake,restoreLastSyllablePass,root,renderEventReview,refreshTimingPanel,disableWatch:()=>{trackWatch=null;}};})();'));
+  await evaluate(fs.readFileSync(path.join(root,'extension/content.js'),'utf8').replace(/\}\)\(\);\s*$/,'window.__qa={state,timing,tapping,tempo,syncPanel,tapBinding,eventEnvelope,archiveEvents,useEventAssignments,discardTapTake,restoreLastSyllablePass,root,renderEventReview,refreshTimingPanel,refreshSavedPrompts,disableWatch:()=>{trackWatch=null;}};})();'));
 
 
   await evaluate(()=>{
@@ -72,6 +72,20 @@ log('START',process.pid);let server,browser;
   await page.getByRole('tab',{name:'Refine',exact:true}).click();
   await page.locator('.lvx-event-phrase summary').click();
   await page.locator('.lvx-event-review').screenshot({path:path.join(root,'docs/performance-capture-current.png')});
-  const proof={observedAt:new Date().toISOString(),basis:'Production Chrome keyboard handlers, capture/grouping/score core and archive UI; synthetic media and worker transport, no live user song.',checks:['Space holds and N note changes','two syllables plus six note events','exact raw presses/releases and speed','recorded count overrides dictionary','word bounds expand to captured syllables','capture evidence and pitch events reach score export','saved score unchanged until Save','Undo preserves prior preview','raw archive reopen exact'],result};
+  await page.getByRole('tab',{name:'Record',exact:true}).click();
+  await evaluate(()=>{__qa.tapping.take=null;__qa.refreshTimingPanel();__qa.refreshSavedPrompts(1000);});
+  assert.match(await page.locator('.lvx-saved-prompts').innerText(),/SPACE/);
+  await evaluate(()=>__qa.refreshSavedPrompts(1300));
+  assert.equal(await page.locator('.lvx-prompt-track [data-kind=note][data-due=true]').count(),2);
+  const paused=await page.locator('.lvx-saved-prompts').innerText();await page.waitForTimeout(100);assert.equal(await page.locator('.lvx-saved-prompts').innerText(),paused);
+  await evaluate(()=>{__qa.syncPanel.querySelector('[data-sync=tap-mode]').value='word';__qa.refreshTimingPanel();__qa.refreshSavedPrompts(1000);});
+  assert.equal(await page.locator('[data-capture-key=syllable] strong').innerText(),'New word');
+  assert.equal(await page.locator('[data-capture-key=note]').isVisible(),false);
+  assert.match(await page.locator('.lvx-saved-prompts').innerText(),/reference for this pass/);
+  const geometry=await page.locator('.lvx-capture-keys').evaluate(n=>({top:n.getBoundingClientRect().top,bottom:n.getBoundingClientRect().bottom,scroll:n.scrollWidth,width:n.clientWidth}));
+  assert.ok(geometry.top>=0&&geometry.bottom<=720);assert.ok(geometry.scroll<=geometry.width);
+  await page.screenshot({path:path.join(root,'docs/record-mode-prompts.png')});
+  const proof={observedAt:new Date().toISOString(),basis:'Production Chrome keyboard handlers, capture/grouping/score core and archive UI; synthetic media and worker transport, no live user song.',checks:['Space holds and N note changes','two syllables plus six note events','exact raw presses/releases and speed','recorded count overrides dictionary','word bounds expand to captured syllables','capture evidence and pitch events reach score export','saved score unchanged until Save','Undo preserves prior preview','raw archive reopen exact','saved note approach cues follow explicit media clock','paused prompts remain still','word pass guide visible without N action','full-window prompt visibility'],result};
   fs.writeFileSync(path.join(root,'docs/performance-capture-proof.json'),JSON.stringify(proof,null,2)+'\n');console.log(JSON.stringify(proof));
 })().catch(error=>{console.error(error.stack);process.exitCode=1}).finally(async()=>{await browser?.close();const pid=server?.process().pid;await server?.close();if(pid)log('END',pid);log('END',process.pid)});
+

@@ -3301,6 +3301,8 @@
 #lvx-root [data-path-caption]{max-width:240px;overflow:hidden;text-overflow:ellipsis}
 #lvx-root .lvx-capture-keys{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
 #lvx-root .lvx-capture-keys[hidden]{display:none}
+#lvx-root .lvx-capture-keys>[hidden]{display:none}
+#lvx-root .lvx-capture-keys:not([data-pass=events]){grid-template-columns:1fr}
 #lvx-root .lvx-capture-keys>[data-capture-key]{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:4px 8px;border:1px solid #447a88;border-radius:9px;background:#102d36;color:#e0f9ff;padding:10px;text-align:left;min-width:0;white-space:normal}
 #lvx-root .lvx-capture-keys>[data-capture-key=note]{border-color:#8b6db8;background:#29203b;color:#f0e5ff}
 #lvx-root .lvx-capture-keys kbd{font:800 13px system-ui;padding:5px 7px;border:1px solid currentColor;border-bottom-width:3px;border-radius:5px}
@@ -3316,6 +3318,21 @@
 #lvx-root .lvx-held-settings label[hidden]{display:none}
 #lvx-root .lvx-held-settings small{font:11px/1.5 system-ui;color:#bac8d2}
 #lvx-root .lvx-held-settings select,#lvx-root .lvx-held-settings input{width:100%;min-width:0;box-sizing:border-box}
+#lvx-root .lvx-held-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;min-width:0}
+#lvx-root .lvx-held-choices button{display:grid;gap:4px;padding:8px;min-width:0;white-space:normal;text-align:left;background:#14222c;border:1px solid #4b606d;border-radius:7px;color:#e2eaf0}
+#lvx-root .lvx-held-choices button[aria-pressed=true]{border-color:#76e0d6;box-shadow:inset 0 0 0 1px #76e0d6}
+#lvx-root .lvx-held-choices button:focus-visible{outline:2px solid #fff;outline-offset:2px}
+#lvx-root .lvx-held-sample{display:flex;justify-content:center;align-items:center;height:44px;overflow:hidden;font:700 27px Georgia,serif;color:#c2cbd3}
+#lvx-root .lvx-held-sample .lvx-word{display:inline-block;white-space:nowrap;opacity:1;filter:brightness(var(--lvx-expression-bright,1));font:inherit;animation:none}
+#lvx-root .lvx-held-choices strong{font:700 12px system-ui}
+#lvx-root .lvx-saved-prompts{padding:8px 0;color:#bfcfd9;font:12px/1.4 system-ui}
+#lvx-root .lvx-prompt-track{display:flex;gap:6px;margin:5px 0}
+#lvx-root .lvx-prompt-track>div{flex:1;min-width:0;display:grid;gap:3px;padding:7px;border:1px solid #4e8596;border-radius:7px;background:linear-gradient(to right,#24556b calc(var(--approach)*100%),#101d27 0)}
+#lvx-root .lvx-prompt-track>[data-kind=note]{border-color:#b38fdd;background:linear-gradient(to right,#4e355e calc(var(--approach)*100%),#201b29 0)}
+#lvx-root .lvx-prompt-track>[data-due=true]{outline:2px solid #ecfaff;color:#fff}
+#lvx-root .lvx-prompt-track span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#lvx-root .lvx-prompt-track [hidden],#lvx-root .lvx-prompt-track>[hidden],#lvx-root .lvx-prompt-track[hidden]{display:none}
+#lvx-root .lvx-prompt-track kbd{font:800 11px system-ui}
 @container (max-width:450px){#lvx-root .lvx-capture-keys{grid-template-columns:1fr}}
 
-#lvx-root [data-live-pop=held] .lvx-live-pop{grid-template-columns:1fr;width:330px}
+#lvx-root [data-live-pop=held] .lvx-live-pop{grid-template-columns:1fr;width:min(370px,calc(100vw - 48px));max-height:calc(100vh - 220px);overflow-y:auto;overscroll-behavior:contain}

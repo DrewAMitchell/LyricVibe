@@ -46,3 +46,15 @@ test('request timeout covers response-body decoding as well as headers',async()=
   const policy=Policy.create({spacingMs:0,fetch:async(url,{signal})=>({ok:true,json:()=>new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(Object.assign(Error('abort'),{name:'AbortError'})),{once:true}))})});
   assert.equal((await policy.request('https://fixture/a','lrclib',15,{})).errorType,'TIMEOUT');
 });
+
+test('server cooldown keeps HTTP cause after worker restart and never impersonates a rate limit',async()=>{
+  const store=storage();let calls=0;const firstJob={trace:[]};
+  let p=Policy.create({storage:store,now:()=>100000,spacingMs:0,random:()=>0,clientId:'LyricVibe fixture',fetch:async(_url,options)=>{calls++;assert.equal(options.headers['Lrclib-Client'],'LyricVibe fixture');return {ok:false,status:503,headers:{get:()=>null}};}});
+  await p.request('https://fixture/a','lrclib',100,firstJob);
+  assert.match(Policy.failureMessage(firstJob.trace),/temporarily.*503/);
+  p=Policy.create({storage:store,now:()=>100001,spacingMs:0,fetch:async()=>{calls++;return ok();}});
+  const nextJob={trace:[]},result=await p.request('https://fixture/b','lrclib',100,nextJob);
+  assert.equal(calls,1);assert.equal(result.errorType,'SERVER_ERROR');assert.equal(result.httpStatus,503);assert.equal(result.suppressed,true);
+  assert.match(Policy.failureMessage(nextJob.trace),/503/);assert.doesNotMatch(Policy.failureMessage(nextJob.trace),/rate limit|asked us/i);
+  assert.equal(firstJob.trace.at(-1).httpStatus,503);
+});

@@ -147,12 +147,23 @@ In syllable event capture, **Space** marks a new syllable and **N** marks a
 new note within that syllable. Hold Space through its duration; the key stays
 lit, and N flashes separately without advancing the syllable count.
 For one “oh” across three notes: hold Space, tap N twice, then release.
+Record keeps the active pass and its key guide visible near the top. A saved-timing
+strip previews the next 2.5 seconds of syllables and recorded note changes; it
+follows pause, seek and sync. Other passes show these as reference cues.
+Estimated syllables are labeled; missing note events are never invented.
+Timing completeness expands below the recording controls.
 
 Open **Stage live → Held notes** for global qualification (relative length,
 minimum duration per syllable, or explicit words only) and the effect (Breathe,
-Wave, Glow, Pulse, or None). Select a word in the rail for **Follow global /
+Wave, Glow, Pulse, or None). Each choice shows the same text sample; hover or
+keyboard focus previews the real effect without changing selection. Reduced-motion
+mode keeps the sample still. Select a word in the rail for **Follow global /
 Always / Never**. Global defaults save immediately; word overrides use Save/Undo.
 Automatic expression must be enabled. Authored effects and word rules take
 priority. The rule uses saved timing and estimated counts for unsplit words,
 not detected pitch. Existing scores remain valid; scores with explicit held
 word overrides require this version or newer.
+
+Lyrics lookup distinguishes LRCLIB server errors from rate limits and preserves
+the cause through cooldowns. Requests remain paced with bounded retries; official
+artist and Topic channel metadata can supply missing artist names.
