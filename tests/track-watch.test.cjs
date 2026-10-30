@@ -9,6 +9,7 @@ function harness(){
  const window=events(), hints={url:'https://www.youtube.com/watch?v=AAAAAAAAAAA',track:'A',mediaReady:true};
  const add=(fn,delay,interval)=>{const id=++sequence;timers.set(id,{fn,at:now+delay,interval});return id};
  const context=vm.createContext({document,window,root:{contains:()=>false},performance:{now:()=>now},state:{active:false},observationFocused:()=>focused,
+  listenGlobal:(target,name,listener,options)=>target.addEventListener(name,listener,options),
   getPageHints:()=>{reads++;return hints},LvScore:require('../extension/score-core.js'),chrome:{runtime:{sendMessage:async m=>messages.push(m)}},
   MutationObserver:class {constructor(fn){this.fn=fn}observe(){observed.add(this)}disconnect(){observed.delete(this)}},
   setTimeout:(f,d)=>add(f,d,0),clearTimeout:id=>timers.delete(id),setInterval:(f,d)=>add(f,d,d),clearInterval:id=>timers.delete(id),

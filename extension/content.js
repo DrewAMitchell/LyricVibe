@@ -33,7 +33,13 @@
     var lvxOldAlive = false; // var: hoisted so it's visible after this block
     try { lvxOldAlive = lvxOld.interfaceVersion === 2 && typeof lvxOld.ping === 'function' ? lvxOld.ping() : false; } catch (_) {}
     if (!lvxOldAlive) {
-      try { if (typeof lvxOld.hide === 'function') lvxOld.hide(); } catch (_) {}
+      if(typeof lvxOld.dispose==='function'){
+        // The old instance may still hold an unfinished take. Never replace it
+        // when it cannot safely release that state.
+        try { if(lvxOld.dispose()!==true)return; } catch (_) { return; }
+      }else{
+        try { if (typeof lvxOld.hide === 'function') lvxOld.hide(); } catch (_) {}
+      }
       try { const lvxEl = document.getElementById('lvx-root'); if (lvxEl) lvxEl.remove(); } catch (_) {}
       window.__lyricVibeOverlay = null;
       // (zombie replaced — fall through to full re-initialization below)
@@ -46,6 +52,15 @@
   if (window.__lvxNeverTrue) { // no-op guard: absorbs a leftover legacy return statement
     return;
   }
+
+  // Normal hide/reopen keeps these listeners. Permanent disposal of a stale
+  // instance removes them all without disturbing the host page's listeners.
+  const globalLifetime=new AbortController(),runtimeListeners=[];
+  function listenGlobal(target,type,listener,options){
+    const opts=typeof options==='boolean'?{capture:options}:{...options};
+    target.addEventListener(type,listener,{...opts,signal:globalLifetime.signal});
+  }
+  function listenRuntime(listener){chrome.runtime.onMessage.addListener(listener);runtimeListeners.push(listener);}
 
   /* ══════════════════════════════════════
      STATE
@@ -382,7 +397,7 @@
   }
   function installBackgroundStage(){
     if(!root.querySelector('[data-sidebar-view=background-stage]')){const button=document.createElement('button');button.type='button';button.dataset.sidebarView='background-stage';button.textContent='Keep stage live';button.title='Keep this tab animating when unfocused; only one tab can hold this role';button.setAttribute('aria-pressed','false');button.onclick=()=>void setBackgroundStage(!backgroundStage.enabled);root.querySelector('.lvx-sidebar-items').append(button);}
-    chrome.runtime.onMessage.addListener((message,sender,respond)=>{if(message?.type==='LV_BACKGROUND_STAGE_STATE'){applyBackgroundStage(message);respond({ok:true});}});
+    listenRuntime((message,sender,respond)=>{if(message?.type==='LV_BACKGROUND_STAGE_STATE'){applyBackgroundStage(message);respond({ok:true});}});
     chrome.runtime.sendMessage({type:'LV_BACKGROUND_STAGE_GET'}).then(result=>{if(result?.ok)applyBackgroundStage(result);}).catch(()=>{});
   }
   sidebarNav.append(sidebarPin,sidebarItems);
@@ -635,7 +650,7 @@
     }
   }
   function setPreviewPlaying(value){previewPlaying=value;cancelAnimationFrame(previewFrame);previewFrame=0;previewLast=0;themePicker.dataset.playing=String(value);const b=themePicker.querySelector('[data-preview-play]');if(b){b.textContent=value?'Pause preview':'Play preview';b.setAttribute('aria-pressed',String(value));}renderStylePreview();if(value&&!themePicker.hidden)previewFrame=requestAnimationFrame(previewTick);}
-  document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelAnimationFrame(previewFrame);previewFrame=0;previewLast=0;themePicker.dataset.playing='false';}else if(previewPlaying&&!themePicker.hidden)setPreviewPlaying(true);});
+  listenGlobal(document,'visibilitychange',()=>{if(document.hidden){cancelAnimationFrame(previewFrame);previewFrame=0;previewLast=0;themePicker.dataset.playing='false';}else if(previewPlaying&&!themePicker.hidden)setPreviewPlaying(true);});
   themePicker.setAttribute('role', 'dialog'); themePicker.setAttribute('aria-label', 'Lyric display style');
   function themePreviewWords() {
     const score = typeof timing !== 'undefined' && timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score;
@@ -786,7 +801,7 @@
   }
   function syncPlacementFields(){for(const input of themePicker.querySelectorAll('[data-placement]'))if(document.activeElement!==input)input.value=String(Math.round(placement[input.dataset.placement]*10)/10);const status=themePicker.querySelector('[data-placement-status]');if(status)status.textContent=placementSaveError?'Area not saved: '+placementSaveError:!placementSongKey()?'Global default · this player has no supported song identity':songPlacement?'This song · custom area':'This song · using global default';const inherit=themePicker.querySelector('[data-placement-inherit]');if(inherit)inherit.disabled=!songPlacement;const global=themePicker.querySelector('[data-placement-global]');if(global)global.disabled=!placementSongKey();}
   themePicker.addEventListener('keydown', event => { if (event.key === 'Escape') { event.stopPropagation(); toggleThemePicker(false); themeButton.focus(); } });
-  document.addEventListener('pointerdown', event => { if (!themePicker.hidden && !themePicker.contains(event.target) && !bounds.contains(event.target) && event.target !== themeButton) toggleThemePicker(false); }, true);
+  listenGlobal(document,'pointerdown', event => { if (!themePicker.hidden && !themePicker.contains(event.target) && !bounds.contains(event.target) && event.target !== themeButton) toggleThemePicker(false); }, true);
 
   let captureLeadInMs=800,captureLeadInEdited=false;
   function leadInControl(label){
@@ -1114,7 +1129,7 @@
     else holdUnsavedNavigation('Stayed on this video. Automatic next is blocked; your take and edits are retained. Resume to review, or Save timings before leaving.');
     return leave;
   }
-  window.addEventListener('beforeunload', event => {
+  listenGlobal(window,'beforeunload', event => {
     if (!hasUnsavedWork() || approvedNavigation(navigationApproval?.url || location.href)) return;
     // Native dialogs do not report Cancel to script. Park the player before
     // asking; if the document stays, queued autoplay still has no permission.
@@ -1122,7 +1137,7 @@
     event.preventDefault(); event.returnValue = '';
   });
   // Catch links before YouTube mutates its player/DOM, including Next in a playlist.
-  window.addEventListener('click', event => {
+  listenGlobal(window,'click', event => {
     if(event.isTrusted&&event.composedPath().some(node=>['A','BUTTON','VIDEO'].includes(node?.tagName)||node?.getAttribute?.('role')==='button'))navigationGestureUntil=performance.now()+1000;
     if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     const link = event.composedPath().find(node => node?.tagName === 'A' && node.href);
@@ -1131,21 +1146,21 @@
     if (url.origin !== location.origin) return; // Native beforeunload owns document exits.
     if (!confirmUnsavedNavigation(url.href,true)) { event.preventDefault(); event.stopImmediatePropagation(); }
   }, true);
-  window.addEventListener('keydown',event=>{
+  listenGlobal(window,'keydown',event=>{
     if(event.isTrusted&&!event.target?.matches?.('input,textarea,select')&&!event.target?.isContentEditable&&
       (['Space','KeyK','MediaPlayPause'].includes(event.code)||event.shiftKey&&event.code==='KeyN'))navigationGestureUntil=performance.now()+1000;
   },true);
   // YouTube's onYtNavigate starts its player/page transition before pushState.
   // Stop that event at window capture; canceling the later browser navigation
   // alone does not unwind the already-running site handler.
-  window.addEventListener('yt-navigate',event=>{
+  listenGlobal(window,'yt-navigate',event=>{
     const endpoint=event.detail?.endpoint;
     const target=endpoint?.watchEndpoint?.videoId?'/watch?v='+encodeURIComponent(endpoint.watchEndpoint.videoId):endpoint?.commandMetadata?.webCommandMetadata?.url||endpoint?.urlEndpoint?.url;
     if(!target)return;
     let url;try{url=new URL(target,location.href).href;}catch{return;}
     if(!confirmUnsavedNavigation(url)){event.preventDefault();event.stopImmediatePropagation();}
   },true);
-  window.addEventListener('play',event=>{
+  listenGlobal(window,'play',event=>{
     if(event.target!==getMedia()||!navigationHeld()||!navigationHold.pause)return;
     if(performance.now()<=navigationGestureUntil){navigationHold.pause=false;return;}
     event.stopImmediatePropagation();getMedia()?.pause();
@@ -1158,7 +1173,7 @@
     if (event.cancelable && !confirmUnsavedNavigation(event.destination.url,event.userInitiated)) event.preventDefault();
   });
   // An unsaved take should never silently roll into the next playlist video.
-  window.addEventListener('ended', event => {
+  listenGlobal(window,'ended', event => {
     if(event.target===getMedia()&&repeatCapture(true)){event.stopImmediatePropagation();return;}
     if (event.target !== getMedia() || !hasUnsavedWork()) return;
     event.stopImmediatePropagation();
@@ -3715,7 +3730,7 @@
     stageControl('item-preview').onclick=async()=>{if((stageEdit.fieldsDirty||!stageEdit.itemId)&&!await savePerformanceItem())return;const item=timing.draft.score.stageItems?.find(i=>i.id===stageEdit.itemId),media=getMedia();if(item&&media){media.currentTime=item.startMs/1000;await media.play().catch(error=>stageMessage(error.message,true));}};
   }
   function configurePerformanceAudio(){
-    if(!stageEdit.bassNavigationStop){stageEdit.bassNavigationStop=()=>{stageEdit.bass?.stop('source-changed');refreshPerformanceAudio();};document.addEventListener('yt-navigate-start',stageEdit.bassNavigationStop);}
+    if(!stageEdit.bassNavigationStop){stageEdit.bassNavigationStop=()=>{stageEdit.bass?.stop('source-changed');refreshPerformanceAudio();};listenGlobal(document,'yt-navigate-start',stageEdit.bassNavigationStop);}
     stageControl('item-audio').onclick=async()=>{
       if(stageEdit.bass?.state().enabled){stageEdit.bass.stop();refreshPerformanceAudio();return;}
       if(!globalThis.LvBassResponse){stageMessage('Reload LyricVibe to enable live bass.',true);return;}
@@ -3891,7 +3906,7 @@
     hudSizeObserver.observe(hud);controlSizeObserver.observe(sidebar);controlSizeObserver.observe(root);placeControls();
   }
   mountRoot();
-  document.addEventListener('fullscreenchange', () => { if (root.isConnected) mountRoot(); });
+  listenGlobal(document,'fullscreenchange', () => { if (root.isConnected) mountRoot(); });
 
   window.__lyricVibeOverlay = {
     interfaceVersion: 2,
@@ -3905,6 +3920,7 @@
     },
     show,
     hide: teardown,
+    dispose: disposeOverlay,
     observation: Object.freeze({status:()=>trackWatch?.status()}),
     hints: getPageHints,
     overlayExport:Object.freeze({create:buildOverlayPackage}),
@@ -3966,7 +3982,7 @@
      MESSAGE LISTENER
      ══════════════════════════════════════ */
   if (typeof chrome === 'undefined' || !chrome.runtime?.onMessage) return; // extension context invalidated
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  listenRuntime((message, sender, sendResponse) => {
     if (!message || !message.type) return;
     if(message.type==='LV_WATCH_STATUS'){sendResponse({ok:true,version:1,enabled:overlayEnabled,active:observationFocused()&&document.readyState==='complete'&&trackWatch?.ready(),navigationToken:trackWatch?.token()});return;}
     if(message.type==='LV_RESET_VIDEO'){resetCurrentVideo();sendResponse({ok:true});return;}
@@ -4190,13 +4206,13 @@
     }
   });
 
-  document.addEventListener('keydown', handleKeys, true);
-  window.addEventListener('keydown', handleTapKeys, true);
-  window.addEventListener('keyup', handleTapKeys, true);
-  window.addEventListener('blur', () => { finishEffectGesture(true);refreshEffectLive();countIn.spaceHeld=false;if (tapping.heldInput) listenToTake(); });
+  listenGlobal(document,'keydown', handleKeys, true);
+  listenGlobal(window,'keydown', handleTapKeys, true);
+  listenGlobal(window,'keyup', handleTapKeys, true);
+  listenGlobal(window,'blur', () => { finishEffectGesture(true);refreshEffectLive();countIn.spaceHeld=false;if (tapping.heldInput) listenToTake(); });
   void loadPlaybackRatePreference();
   observePlaybackRate();
-  for (const eventName of ['seeking', 'pause', 'ratechange', 'ended']) document.addEventListener(eventName, event => {
+  for (const eventName of ['seeking', 'pause', 'ratechange', 'ended']) listenGlobal(document,eventName, event => {
     if(eventName==='ratechange'&&event.target===getMedia()){observePlaybackRate(event.target);return;}
     if(eventName==='seeking'&&event.target===getMedia()){
       const internal=timing.busy||Number.isFinite(tapping.armSeekMs)&&Math.abs(event.target.currentTime*1000-tapping.armSeekMs)<100;
@@ -4214,7 +4230,7 @@
       else if(eventName==='ended')stopTapTake('Playback ended. Completed marks are retained. Save timings when ready.');
     }
   }, true);
-  document.addEventListener('seeked',event=>{
+  listenGlobal(document,'seeked',event=>{
     if(event.target===getMedia()&&tapping.take?.status==='armed'&&!timing.busy){refreshPerformClock(event.target.currentTime*1000-timingOffsetMs());state.scoreSignature='';renderScore(getMediaTimeMs());setSyncNotice('Following playback. Your next press takes over from this position; existing timing is retained until then.');return;}
     if(event.target===getMedia()&&timing.draft&&(!tapping.take||tapping.take.status==='stopped')&&!timing.busy){refreshPerformClock(event.target.currentTime*1000-timingOffsetMs());state.scoreSignature='';renderScore(getMediaTimeMs());return;}
     if(event.target===getMedia()&&!tapping.take&&tapping.followSeek&&!timing.busy&&!syncPanel.hidden){refreshPerformClock(event.target.currentTime*1000-timingOffsetMs());return;}
@@ -4222,7 +4238,15 @@
     refreshPerformClock(event.target.currentTime*1000-timingOffsetMs());
     setSyncNotice('Following your seek position. Recorded taps are intact. Continue, then press to replace from here; Undo mark restores the previous take.');
   },true);
-  window.addEventListener('resize', () => {
+  // Wake the media-clock loop immediately after transport changes. A quiet
+  // paused tab otherwise checks at a lower rate, but seeks and resumed playback
+  // must never wait for that idle timer.
+  for(const name of ['play','pause','seeking','seeked','ratechange','ended']){
+    listenGlobal(document,name,event=>{
+      if(event.target===getMedia()&&state.active&&observationFocused())startLoop({immediate:true});
+    },true);
+  }
+  listenGlobal(window,'resize', () => {
     if (state.currentMoment) fitMoment(state.currentMoment);
     if (state.theme === 'flow') flowFitAllSlots();
   });
@@ -4686,6 +4710,7 @@
       }
       navigationEditorOpen=!syncPanel.hidden;
       discardTimingLocal();transcript.dirty=false;transcript.shownFor=null;
+      clearDerivedSongRender();
       state.score=null;state.plainLyrics=null;state.lines=[];state.trackKey='';state.trackTitle='';
       timing.phraseIndex=0;tapping.wordId=null;
       tempo.mediaKey=null;tempo.map=null;
@@ -4761,13 +4786,13 @@
       poll=setInterval(()=>schedule(),5000);schedule();
       if(state.active&&settled){if(state.isSpotify)startSpotifyPolling();startLoop();}
     };
-    document.addEventListener('visibilitychange',sync);
-    window.addEventListener('focus',sync);window.addEventListener('blur',sync);window.addEventListener('pageshow',sync);
-    window.addEventListener('pagehide',()=>{watching=false;settled=false;clear();send({type:'LV_WATCH_STATE',active:false});});
-    document.addEventListener('readystatechange',onPageEvent);window.addEventListener('load',onPageEvent);
-    window.addEventListener('popstate',onPageEvent);window.addEventListener('hashchange',onPageEvent);
-    document.addEventListener('yt-navigate-start',navStart);document.addEventListener('yt-navigate-finish',navEnd);
-    for(const name of ['loadedmetadata','durationchange','play'])document.addEventListener(name,onPageEvent,true);
+    listenGlobal(document,'visibilitychange',sync);
+    listenGlobal(window,'focus',sync);listenGlobal(window,'blur',sync);listenGlobal(window,'pageshow',sync);
+    listenGlobal(window,'pagehide',()=>{watching=false;settled=false;clear();send({type:'LV_WATCH_STATE',active:false});});
+    listenGlobal(document,'readystatechange',onPageEvent);listenGlobal(window,'load',onPageEvent);
+    listenGlobal(window,'popstate',onPageEvent);listenGlobal(window,'hashchange',onPageEvent);
+    listenGlobal(document,'yt-navigate-start',navStart);listenGlobal(document,'yt-navigate-finish',navEnd);
+    for(const name of ['loadedmetadata','durationchange','play'])listenGlobal(document,name,onPageEvent,true);
     return {sync,reset,token,ready:()=>settled&&!navigating,loading:()=>navigating||!settled,
       accept:key=>{if(key){lastTrackKey=key;pendingKey=key;if(!navigating)settled=true;}},
       status:()=>({watching,navigating,generation,loading:navigating||!settled,settled,navigationToken:token(),pending:Boolean(timer),polling:Boolean(poll)})};
@@ -5142,10 +5167,14 @@
      MAIN PLAYBACK LOOP (improved sync)
      ══════════════════════════════════════ */
   function schedulePlaybackFrame(tick){
-    if(backgroundStage.enabled&&document.hidden){state.backgroundTimer=setTimeout(tick,100);return 0;}
+    const media=getMedia();
+    const interactive=countIn.active||countIn.preparing||tapping.take?.status==='armed'||performanceTake.armed||stageEdit.active||liveStage.active;
+    if(backgroundStage.enabled&&document.hidden||media?.paused&&!interactive){
+      state.backgroundTimer=setTimeout(()=>{state.backgroundTimer=0;tick();},100);return 0;
+    }
     return requestAnimationFrame(tick);
   }
-  function startLoop() {
+  function startLoop({immediate=false}={}) {
     cancelLoop();
     if(!observationFocused()||trackWatch?.loading())return;
 
@@ -5257,7 +5286,7 @@
       state.rafId = schedulePlaybackFrame(tick);
     }
 
-    state.rafId = schedulePlaybackFrame(tick);
+    state.rafId = immediate?requestAnimationFrame(tick):schedulePlaybackFrame(tick);
   }
 
   function cancelLoop() {
@@ -5365,6 +5394,16 @@
   let beatDisplayCache={score:null,map:null,ends:{}};
   const beatStyledNodes=new Set();
   let expressionPlan={score:null,cues:{}};
+  // These are rebuildable presentation caches, never the score or a take.
+  // Drop references only after a source change is admitted or the overlay is
+  // hidden; unsaved work remains owned by its existing recovery path.
+  function clearDerivedSongRender(){
+    beatDisplayCache={score:null,map:null,ends:{}};
+    expressionPlan={score:null,cues:{}};
+    savedPromptCache={score:null,lane:null,events:[]};
+    beatStyledNodes.clear();beatGrooveLetters.clear();
+    for(const node of effectTracks)delete node._lvxTrackCache;
+  }
   function expressionCues(score){if(expressionPlan.score!==score||expressionPlan.library!==wordRuleSets||expressionPlan.heldKey!==JSON.stringify(heldSettings(choreography))){const set=LvChoreography.wordSetFor(wordRuleSets,score.source);expressionPlan={score,library:wordRuleSets,heldKey:JSON.stringify(heldSettings(choreography)),cues:LvChoreography.compose(score,set.rules,{...set,...heldSettings(choreography)})};}return expressionPlan.cues;}
   function ensureDanceLetters(node){
     if(!node.dataset.flexLetters){const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT),texts=[];while(walker.nextNode())texts.push(walker.currentNode);
@@ -5763,7 +5802,7 @@
     if(drag.record&&LvScore.mediaKey({url:location.href})===drag.mediaKey){const media=getMedia();media.pause();media.currentTime=drag.mediaTime;if(!drag.paused)void media.play().catch(()=>{});}
     railState.recordReady=false;state.scoreSignature='';liveMessage('Motion edit cancelled; previous path retained.');refreshLiveStage();if(state.score)renderScore(getMediaTimeMs());
   }
-  document.addEventListener('pointermove',samplePathDrag,true);document.addEventListener('pointerup',finishPathDrag,true);document.addEventListener('pointercancel',()=>cancelPathDrag(),true);window.addEventListener('blur',()=>cancelPathDrag());
+  listenGlobal(document,'pointermove',samplePathDrag,true);listenGlobal(document,'pointerup',finishPathDrag,true);listenGlobal(document,'pointercancel',()=>cancelPathDrag(),true);listenGlobal(window,'blur',()=>cancelPathDrag());
   for(const node of pathControls.querySelectorAll('[data-path-handle]')){
     node.onpointerdown=e=>{const target=liveTarget();if(target)beginPathDrag(e,node.dataset.pathHandle,target);};
     node.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)||timing.busy||liveStage.drag)return;e.preventDefault();e.stopPropagation();const target=liveTarget();if(!target)return;const layer=editablePlacement(target),handle=node.dataset.pathHandle,p=pathHandles(layer)[handle],step=e.shiftKey?.001:.01;movePathHandle(layer,handle,normalizedPoint(p.x+(e.key==='ArrowLeft'?-step:e.key==='ArrowRight'?step:0),p.y+(e.key==='ArrowUp'?-step:e.key==='ArrowDown'?step:0)));if(queueLiveOperation({type:'setChoreographyLayer',layer})){liveStage.selected=layer.id;refreshLiveStage();}};
@@ -5863,8 +5902,11 @@
       }
       state.scoreSignature = signature;
     }
-    const areas=LvChoreography.vocalAreas(stage.clientWidth,stage.clientHeight,score.phrases.some(p=>isBacking(p)&&p.words.some(w=>!w.excluded)),backingDisplay);
-    if(useVinyl)renderVinylScore(score,mediaMs,{x:0,y:0,width:stage.clientWidth,height:stage.clientHeight});
+    // Read geometry once before per-phrase style writes; repeated layout reads
+    // inside the loop can force the browser to recalculate after every phrase.
+    const stageWidth=stage.clientWidth,stageHeight=stage.clientHeight;
+    const areas=LvChoreography.vocalAreas(stageWidth,stageHeight,score.phrases.some(p=>isBacking(p)&&p.words.some(w=>!w.excluded)),backingDisplay);
+    if(useVinyl)renderVinylScore(score,mediaMs,{x:0,y:0,width:stageWidth,height:stageHeight});
     renderBeatEffects(score,mediaMs);
     const cues=typeof LvChoreography==='undefined'?{}:expressionCues(score);
     // Authoring outline only while editing, so you can see where to continue a take while scrubbing.
@@ -5902,7 +5944,7 @@
       const authoredRegion=regionFrame.find(r=>r.target.id===phrase.id),settings=backing||authoredRegion||stageEdit.active||choreography.mode==='vinyl'?{...choreography,mode:'classic',automatic:false,dance:'off'}:choreography;
       const peers=active.phrases.filter(p=>isBacking(p)===backing),area=backing?areas.backing:areas.main,slot=peers.indexOf(phrase),count=Math.max(1,peers.length);
       let rect={x:area.x+8,y:area.y+area.height*slot/count+8,width:Math.max(1,area.width-16),height:Math.max(1,area.height/count-16)};
-      if(regionLayout){rect=authoredRegion?{x:authoredRegion.rect.x*stage.clientWidth,y:authoredRegion.rect.y*stage.clientHeight,width:authoredRegion.rect.width*stage.clientWidth,height:authoredRegion.rect.height*stage.clientHeight}:{x:placement.left/100*stage.clientWidth+rect.x*placement.width/100,y:placement.top/100*stage.clientHeight+rect.y*placement.height/100,width:rect.width*placement.width/100,height:rect.height*placement.height/100};}
+      if(regionLayout){rect=authoredRegion?{x:authoredRegion.rect.x*stageWidth,y:authoredRegion.rect.y*stageHeight,width:authoredRegion.rect.width*stageWidth,height:authoredRegion.rect.height*stageHeight}:{x:placement.left/100*stageWidth+rect.x*placement.width/100,y:placement.top/100*stageHeight+rect.y*placement.height/100,width:rect.width*placement.width/100,height:rect.height*placement.height/100};}
       const label=[...stage.children].find(el=>el.dataset.backingFor===phrase.id);
       if(label){const header=backingLabelMode()==='header',size=header?Math.min(18,rect.height*.25):Math.min(120,rect.width*.25);Object.assign(label.style,{left:rect.x+'px',top:rect.y+'px',width:(header?rect.width:size)+'px',height:(header?size:rect.height)+'px',opacity:String(phrase.opacity*.65),fontSize:Math.min(12,rect.height*.2)+'px'});if(header){rect.y+=size;rect.height=Math.max(1,rect.height-size);}else{rect.x+=size;rect.width=Math.max(1,rect.width-size);}}
       const {width,height}=rect,maxFont=backing?Math.min(48,placement.maxFontPx*.6):settings.mode==='puzzle'?(settings.fillStage?Math.max(width,height):placement.maxFontPx):Math.min(placement.maxFontPx,laneFont(phrase,score)),minFont=backing?Math.min(maxFont,placement.minFontPx*.6):placement.minFontPx;
@@ -7035,8 +7077,10 @@
      TEARDOWN / SHOW
      ══════════════════════════════════════ */
   function teardown() {
-    chrome.storage.onChanged?.removeListener(wordPresetStorageChanged);
-    chrome.storage.onChanged?.removeListener(placementStorageChanged);
+    try{
+      chrome.storage.onChanged?.removeListener(wordPresetStorageChanged);
+      chrome.storage.onChanged?.removeListener(placementStorageChanged);
+    }catch(_){/* Extension reload can invalidate the old context. */}
     clearTimeout(controlsNoticeTimer);controlsNotice.hidden=true;
     overlayEnabled=false;trackWatch?.sync();
     resumeSyncPanel=resumeSyncPanel||!syncPanel.hidden;
@@ -7065,11 +7109,28 @@
     state.spotifyLastGoodWall = 0;
     state.spotifyAutoCalibSamples = [];
     root.classList.remove('lvx-active');
+    clearDerivedSongRender();
     stage.textContent = '';clearStagePerformance();
     preview.textContent = '';
     progressFill.style.width = '0%';
     toggleShortcutsPanel(false);
     root.remove();
+  }
+
+  function disposeOverlay(){
+    const pendingOffset=offsetWheelTimer||document.activeElement===offsetInput&&offsetInput.value!==String(state.syncOffsetMs);
+    if(hasUnsavedWork()||pendingOffset){
+      syncPanel.hidden=false;
+      setSyncNotice('This previous LyricVibe session still holds unsaved work. Keep this page open while you recover it.','warn');
+      return false;
+    }
+    teardown();
+    globalLifetime.abort();
+    for(const listener of runtimeListeners){try{chrome.runtime.onMessage.removeListener?.(listener);}catch(_){}}
+    runtimeListeners.length=0;
+    clearTimeout(state.hudTimer);clearTimeout(shortcutsAutoHideTimer);
+    clearTimeout(transcriptTimer);clearTimeout(offsetWheelTimer);
+    return true;
   }
 
   function show() {

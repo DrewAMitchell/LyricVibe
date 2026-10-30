@@ -51,6 +51,12 @@ test('activeAt omits excluded words from returned phrase presentation and fully 
   let at = score.activeAt(edited, see.startMs);
   assert.deepEqual(at.phrases[0].words.map(w => w.id), [see.id, light.id]);
   assert.ok(!at.phrases[0].activeWords.includes(that.id));
+  // A renderer may annotate projected words; those writes must never mutate
+  // the saved score, including nested effects arrays.
+  at.phrases[0].words[0].text = 'changed only in projection';
+  at.phrases[0].words[0].effects.push({type:'shake',strength:1});
+  assert.equal(edited.phrases[0].words[0].text, see.text);
+  assert.deepEqual(edited.phrases[0].words[0].effects, []);
   edited = score.applyOperation(edited, { type: 'setWordExcluded', wordId: see.id, excluded: true }, edited.revision);
   edited = score.applyOperation(edited, { type: 'setWordExcluded', wordId: light.id, excluded: true }, edited.revision);
   assert.deepEqual(score.activeAt(edited, see.startMs).phrases, []);

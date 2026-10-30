@@ -852,7 +852,9 @@
       const visibleWords = phrase.words.filter(w => !w.excluded);
       if (!visibleWords.length) continue;
       const activeWords = visibleWords.filter(w => at >= w.startMs && at <= w.endMs);
-      phrases.push({ ...clone(phrase),...(end>phrase.endMs?{displayEndMs:end,persisted:at>phrase.endMs}:{}),words: clone(visibleWords), activeWords: activeWords.map(w => w.id), activeSyllables: activeWords.flatMap(w => (w.syllables || []).filter(syllable => at >= syllable.startMs && at <= syllable.endMs).map(syllable => syllable.id)), opacity });
+      const rendered=clone(phrase);
+      rendered.words=rendered.words.filter(w=>!w.excluded);
+      phrases.push({ ...rendered,...(end>phrase.endMs?{displayEndMs:end,persisted:at>phrase.endMs}:{}),activeWords: activeWords.map(w => w.id), activeSyllables: activeWords.flatMap(w => (w.syllables || []).filter(syllable => at >= syllable.startMs && at <= syllable.endMs).map(syllable => syllable.id)), opacity });
     }
     return { phrases };
   }
