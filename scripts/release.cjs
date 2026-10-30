@@ -128,6 +128,7 @@ async function main(command, args) {
   await run(process.execPath, ['scripts/build.cjs'], source);
   await run(process.execPath, ['scripts/save-state-proof.cjs'], source);
   await run(process.execPath, ['scripts/overlay-startup-proof.cjs'], source);
+  await run(process.execPath, ['scripts/bloom-behavior-proof.cjs'], source);
   await run(process.execPath, ['scripts/sync-offset-proof.cjs'], source);
   await run(process.execPath, ['scripts/performance-capture-proof.cjs'], source);
   await run(process.execPath, ['scripts/recording-correction-proof.cjs'], source);

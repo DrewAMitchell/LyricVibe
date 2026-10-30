@@ -217,7 +217,7 @@
       else if(result?.error)node.textContent+='\n\nLookup context unavailable: '+(result.error.message||result.error);
     }).catch(error=>{node.textContent+='\n\nExtension connection: '+error.message;});}catch(error){node.textContent+='\n\nExtension connection: '+error.message;}
   }
-  let bloomEnabled=true;
+  let bloomEnabled=true, bloomPaintAt=-Infinity, bloomPaintEnabled=null;
   let linger=LvBeatTrack.lingerSettings();
   function setLinger(value){
     linger=LvBeatTrack.lingerSettings(value);state.scoreSignature='';
@@ -1434,8 +1434,17 @@
     const valid=tempo.mediaKey===tempoSourceKey(),e=valid?LvTapTiming.tempoAt(tempo.map,sourceMs):null;
     const media=getMedia(),phase=e?.phase??(((sourceMs/500)%1)+1)%1;
     const pulse=bloomEnabled&&!bloomMotion.matches&&media&&!media.paused&&!media.seeking?Math.pow((1+Math.cos(phase*Math.PI*2))/2,3):0;
-    root.style.setProperty('--lvx-bloom-alpha',bloomEnabled?String(.06+.18*pulse):'0');
-    root.style.setProperty('--lvx-bloom-radius',`${16+18*pulse}px`);
+    // Only the controls use these variables. Updating an inherited variable on
+    // the full-screen root invalidates the whole overlay every video frame.
+    const now=performance.now();
+    if(bloomPaintEnabled!==bloomEnabled||now-bloomPaintAt>=80){
+      bloomPaintAt=now;bloomPaintEnabled=bloomEnabled;
+      for(const target of [hud,syncPanel,themePicker,shortcutsPanel]){
+        if(!target.getClientRects().length)continue;
+        target.style.setProperty('--lvx-bloom-alpha',bloomEnabled?String(.06+.18*pulse):'0');
+        target.style.setProperty('--lvx-bloom-radius',`${16+18*pulse}px`);
+      }
+    }
     const text=e?`♩ ${Math.round(e.bpm)} BPM · T`:`♩ ${tempo.taps.length&&valid?tempo.taps.length+'/4':'—'} BPM · T`;
     if(tempoCaption.textContent!==text)tempoCaption.textContent=text;
     const beatsPerBar=tempo.map?.beatsPerBar||4,beatInBar=e?((Math.floor(e.beat)%beatsPerBar)+beatsPerBar)%beatsPerBar+1:null;
