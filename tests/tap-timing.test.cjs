@@ -2,6 +2,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const tap = require('../extension/tap-timing.js');
 
+test('partial hyphen words do not block complete words or invent missing timing',()=>{
+  const units=[{id:'a1',wordId:'a',text:'RED',spelling:'RED-',minMs:0,maxMs:10000},{id:'a2',wordId:'a',text:'BLUE',spelling:'BLUE',minMs:0,maxMs:10000},{id:'b',wordId:'b',text:'SKY',spelling:'SKY',minMs:0,maxMs:10000}];
+  const take={...tap.begin(units),status:'complete',marks:[{id:'a1',wordId:'a',startMs:1000,endMs:1400},{id:'b',wordId:'b',startMs:3000,endMs:4000}]};
+  const before=JSON.stringify(take),plan=tap.wordTakeChanges(take);
+  assert.deepEqual(plan,{changes:[{wordId:'b',startMs:3000,endMs:4000}],incomplete:['a']});assert.equal(JSON.stringify(take),before);
+  const restored=tap.restoreWordTake(take);assert.deepEqual(restored.marks,take.marks);assert.equal(restored.index,1);assert.equal(restored.status,'stopped');
+  assert.throws(()=>tap.wordTakeChanges({...take,marks:[...take.marks,take.marks[0]]}),/invalid or duplicate/);
+});
+
 test('saved prompts respect offset, lane, exclusions and stale note evidence',()=>{
   const score={offsetMs:200,phrases:[{laneId:'lead',words:[{id:'w',syllables:[{text:'oh',startMs:1000,endMs:2000,captureEvidence:{sourceMs:1200,releaseMs:2200,noteEvents:[{sourceMs:1600},{sourceMs:2400}]}},{text:'hey',startMs:2500,endMs:3000}]}]},{laneId:'backing',words:[{id:'x',syllables:[{text:'x',startMs:1000,endMs:2000}]}]}]};
   assert.deepEqual(tap.savedPrompts(score,'lead').map(e=>[e.kind,e.at,e.estimated]),[['syllable',1000,false],['note',1400,false],['syllable',2500,true]]);

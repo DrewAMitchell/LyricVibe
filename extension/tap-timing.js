@@ -1560,7 +1560,38 @@
     return result.sort((a,b)=>a.at-b.at);
   }
 
-  return { savedPrompts, begin, mark, release, removeCurrentPhrase, undo, stop, adjust, reposition, followPlayback, punchIn, moveCursor, reassignLast, restoreWordFrameTake, rewindToPhrase, restorePhraseStreamTake,
+  function wordTakeChanges(take){
+    if(take?.mode!=='word'||!['pairs','flow'].includes(take.cadence)||!['stopped','complete'].includes(take.status))fail('INVALID_TAKE','Stop a word take before using it.');
+    begin(take.units,{mode:'word',cadence:take.cadence});
+    const byId=new Map(take.units.map(u=>[u.id,u])),groups=new Map(),seen=new Set();
+    for(const mark of take.marks){const unit=byId.get(mark.id);
+      if(!unit||seen.has(mark.id)||mark.wordId!==unit.wordId||!integerTime(mark.startMs)||!integerTime(mark.endMs)||mark.endMs<=mark.startMs||mark.startMs<unit.minMs||mark.endMs>unit.maxMs)fail('INVALID_TAKE','Word recording contains an invalid or duplicate mark.');
+      seen.add(mark.id);if(!groups.has(mark.wordId))groups.set(mark.wordId,[]);groups.get(mark.wordId).push(mark);
+    }
+    const changes=[],incomplete=[];
+    for(const [wordId,marks]of groups){const units=take.units.filter(u=>u.wordId===wordId),ordered=units.map(u=>marks.find(m=>m.id===u.id)).filter(Boolean);
+      if(units.length!==marks.length){incomplete.push(wordId);continue;}
+      if(ordered.some((m,i)=>i&&m.startMs<ordered[i-1].endMs))fail('INVALID_TAKE','Hyphen parts overlap or are out of order.');
+      changes.push({wordId,startMs:ordered[0].startMs,endMs:ordered.at(-1).endMs,...(units.length>1?{hyphenParts:ordered.map((m,i)=>({text:units[i].spelling,startMs:m.startMs,endMs:m.endMs}))}:{})});
+    }
+    return {changes,incomplete};
+  }
+  function restoreWordTake(snapshot){
+    wordTakeChanges(snapshot);
+    const take=clone(snapshot);delete take.actionHistory;take.status='stopped';take.pendingStartMs=null;
+    take.index=Math.max(0,take.units.findIndex(u=>!take.marks.some(m=>m.id===u.id)));take.lastMs=take.marks.at(-1)?.endMs??null;return take;
+  }
+  function restoreStoppedTake(snapshot){
+    if(snapshot?.cadence==='word-frames')return restoreWordFrameTake(snapshot);
+    if(snapshot?.cadence==='phrase-stream')return restorePhraseStreamTake(snapshot);
+    if(!snapshot||!['stopped','complete'].includes(snapshot.status)||!Array.isArray(snapshot.marks)||snapshot.marks.length>10000)fail('INVALID_TAKE','Provide a stopped timing take.');
+    const base=begin(snapshot.units,{mode:snapshot.mode,cadence:snapshot.cadence}),units=new Map(base.units.map(u=>[u.id,u])),seen=new Set();
+    for(const m of snapshot.marks){const u=units.get(m.id);if(!u||seen.has(m.id)||m.wordId!==u.wordId||m.syllableId!==u.syllableId||!integerTime(m.startMs)||!integerTime(m.endMs)||m.endMs<m.startMs||m.startMs<u.minMs||m.endMs>u.maxMs)fail('INVALID_TAKE','Saved timing marks do not match their source units.');seen.add(m.id);}
+    if(!Number.isSafeInteger(snapshot.index)||snapshot.index<0||snapshot.index>snapshot.units.length)fail('INVALID_TAKE','Saved timing cursor is invalid.');
+    const take=clone(snapshot);delete take.actionHistory;take.status='stopped';take.pendingStartMs=null;return take;
+  }
+
+  return { wordTakeChanges, restoreWordTake, restoreStoppedTake, savedPrompts, begin, mark, release, removeCurrentPhrase, undo, stop, adjust, reposition, followPlayback, punchIn, moveCursor, reassignLast, restoreWordFrameTake, rewindToPhrase, restorePhraseStreamTake,
     beginEvents, markEvent, pressEventHold, releaseEventHold, stopEvents, undoEvent, rewindEvents, associateEvents, restoreEventRecording, timingEvidence,
     beginWordHolds, restoreWordHoldRecording, pressWord, releaseWord, skipWords, undoWordHold, stopWordHolds, rewindWordHolds, retimePhraseHolds, associateWordHolds, wordHoldsFromPairs, estimateTempo,
     planOtherParts, leadInProgress, captureProgress, validateTempoMap, tempoMapFromEstimate, setTempoPoint, removeTempoPoint, tempoAt, tempoTimeAtBeat };

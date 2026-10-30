@@ -167,3 +167,16 @@ word overrides require this version or newer.
 Lyrics lookup distinguishes LRCLIB server errors from rate limits and preserves
 the cause through cooldowns. Requests remain paced with bounded retries; official
 artist and Topic channel metadata can supply missing artist names.
+
+An unfinished hyphenated word no longer blocks saving the rest of a word take.
+Its earlier timing stays unchanged, and the exact take is backed up locally
+before completed words enter the preview. **Refine → Restore unfinished take**
+reopens the partial marks; changed lyrics, sync or word boundaries reject stale
+backups. The backup is retained after restoration.
+
+**Save timings** also stores an unfinished prepared-syllable take without requiring
+the phrase to be complete. **Finish missing parts · loop** enables unrecorded-only
+capture and repeat, preferring a partial word that was just saved. In that mode,
+**Next unrecorded part / Shift+Right** preserves current marks and advances across
+phrases and vocal parts; completed timing is skipped. An unfinished phrase loops
+until you complete it, advance, or stop. Forward waits for any held key release.

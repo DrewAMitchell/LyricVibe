@@ -815,7 +815,9 @@
     recordingTransport.querySelector('[data-record-restart]').disabled=timing.busy||countIn.active||countIn.preparing||!getMedia();
     recordingTransport.querySelector('[data-record-phrase]').disabled=blocked;
     const now=getMediaTimeMs()-timingOffsetMs(),target=captureTarget(now);
-    recordingTransport.querySelector('[data-record-forward]').disabled=blocked||take?.status!=='armed'||!target||target.startMs<=now;
+    const forward=recordingTransport.querySelector('[data-record-forward]'),missing=missingLoopMode();
+    forward.textContent=missing?'Next unrecorded part →':'Next lead-in →';
+    forward.disabled=blocked||take?.status!=='armed'||!missing&&(!target||target.startMs<=now);
   }
 
   /* Next-line preview (bottom center) */
@@ -1016,6 +1018,7 @@
   }
   const tapCount = take => eventTake(take)?Math.max(take.events.length,take.rawInputs?.length||0):wordTake(take)?take.holds.length:(take?.marks.length||0)+(take?.removedPhraseIds?.length||0);
   const captureSaveWarning=()=>{
+    if(timing.wordCaptureWarning)return timing.wordCaptureWarning;
     if(!rawTake(tapping.take))return '';
     const report=wordTake(tapping.take)?LvTapTiming.associateWordHolds(tapping.take):LvTapTiming.associateEvents(tapping.take,{counts:tapping.eventCounts||{}});
     const unresolved=new Set([...recordingConflicts(),...report.phrases.filter(p=>!p.ready&&(p.eventCount||p.heldCount)).map(p=>p.phraseId),...(tapping.eventErrors||[]).map(p=>p.phraseId)]);
@@ -1939,11 +1942,13 @@
       if(counting){text(countdown.querySelector('span'),'Starts in '+(remaining.remainingMs/1000).toFixed(1)+'s');countdown.querySelector('i').style.transform='scaleX('+(1-remaining.progress)+')';}
       if(host===cue){let hint=host.querySelector('.lvx-idle-hint');if(!hint){hint=document.createElement('p');hint.className='lvx-idle-hint';host.append(hint);}visible(hint,idle);text(hint,eventTake(take)?'Space: tap · ← back · Shift+← 5s':'Space: hold · ← back · → skip');hint.title=captureGuidanceText();}
     }
-    const forward=syncButton('capture-forward');forward.hidden=!take||take.status!=='armed';
-    forward.disabled=timing.busy||!take||take.status!=='armed'||take.pendingStartMs!==null||!target||target.startMs<=now;
+    const forward=syncButton('capture-forward'),missing=missingLoopMode();forward.hidden=!take||take.status!=='armed';
+    forward.textContent=missing?'⏩ Next unrecorded part':'⏩ Next lead-in';forward.title=missing?'Keep completed marks and loop the next incomplete phrase (Shift+→)':'Jump to the next lead-in without skipping a lyric (Shift+→)';
+    forward.disabled=timing.busy||!take||take.status!=='armed'||take.pendingStartMs!==null||!missing&&(!target||target.startMs<=now);
   }
   function jumpCaptureLeadIn(){
     const take=tapping.take;if(!take||take.status!=='armed'||take.pendingStartMs!==null||timing.busy)return;
+    if(missingLoopMode()){void nextMissingPart();return;}
     const now=getMediaTimeMs()-timingOffsetMs(),target=captureTarget(now);if(!target||target.startMs<=now)return;
     const lead=Math.min(target.startMs,Math.max(now,phraseLeadInMs(target.phrase),target.startMs-captureLeadInMs));
     rewindPlaybackForTake(lead+timingOffsetMs());noteCaptureInput();setSyncNotice('Jumped to the next lead-in. Your recording cursor and completed inputs are unchanged.');
@@ -2196,13 +2201,38 @@
     finally{timing.busy=false;captureTracks.switching=false;refreshTimingPanel();}
   }
   function otherPartsSupported(){return syncButton('tap-mode').value!=='syllable'||!continuousPass();}
-  function otherPartsPlan(){return timing.draft&&timingPhrase()?LvTapTiming.planOtherParts(timing.draft.score,timingPhrase().id,{scope:syncButton('record-repeat').checked||syncButton('tap-mode').value==='syllable'?'phrase':syncButton('tap-scope').value,needsRecording:p=>LvScore.phraseTimingCoverage(p)[syncButton('tap-mode').value].status!=='complete'}):[];}
+  const missingLoopMode=()=>syncButton('record-other-parts').checked&&syncButton('record-repeat').checked&&otherPartsSupported();
+  function missingPartSteps(all=false){const score=timing.draft?.score;if(!score?.phrases.length)return [];return LvTapTiming.planOtherParts(score,score.phrases[0].id,{scope:'lane',...(all?{}:{needsRecording:p=>LvScore.phraseTimingCoverage(p)[syncButton('tap-mode').value].status!=='complete'})}).flatMap(s=>s.phraseIds.map(id=>({...s,phraseIds:[id]})));}
+  function otherPartsPlan(){return missingLoopMode()?missingPartSteps():timing.draft&&timingPhrase()?LvTapTiming.planOtherParts(timing.draft.score,timingPhrase().id,{scope:syncButton('record-repeat').checked||syncButton('tap-mode').value==='syllable'?'phrase':syncButton('tap-scope').value,needsRecording:p=>LvScore.phraseTimingCoverage(p)[syncButton('tap-mode').value].status!=='complete'}):[];}
+  async function finishMissingParts(){
+    if(timing.busy||tapping.take?.status==='armed'||!timing.draft)return;
+    await finishStoppedTake();if(tapPending()||timing.busy)return;
+    if(!otherPartsSupported()){setSyncNotice('Choose a phrase, word or prepared syllable pass for looping unrecorded parts.');return;}
+    const steps=missingPartSteps();if(!steps.length){setSyncNotice('All parts already have this timing.');return;}
+    const preferred=timing.unfinishedWordIds||[],score=timing.draft.score;
+    const step=steps.find(s=>score.phrases.find(p=>p.id===s.phraseIds[0])?.words.some(w=>preferred.includes(w.id)))||steps[0];
+    syncButton('record-other-parts').checked=true;syncButton('record-repeat').checked=true;syncButton('tap-scope').value='lane';
+    await chrome.storage.local.set({lvxRecordUnrecordedParts:true});
+    timing.phraseIndex=score.phrases.findIndex(p=>p.id===step.phraseIds[0]);tapping.wordId=timingPhrase().words.find(w=>!w.excluded)?.id;
+    getMedia()?.pause();if(getMedia())getMedia().currentTime=Math.max(0,phraseLeadInMs(timingPhrase())+timingOffsetMs())/1000;
+    partRun=null;refreshTimingPanel();await armTapTake();
+  }
+  async function nextMissingPart(){
+    const current=timingPhrase()?.id,order=missingPartSteps(true).map(s=>s.phraseIds[0]);
+    await stopTapTake();if(!await parkUnfinishedTake()||tapPending()||timing.busy||!timing.draft)return;
+    const steps=missingPartSteps(),after=order.indexOf(current),step=steps.find(s=>order.indexOf(s.phraseIds[0])>after)||steps[0];
+    if(!step){getMedia()?.pause();setSyncNotice('All unrecorded parts are now in preview. Save timings when ready.');return;}
+    timing.phraseIndex=timing.draft.score.phrases.findIndex(p=>p.id===step.phraseIds[0]);tapping.wordId=timingPhrase().words.find(w=>!w.excluded)?.id;
+    getMedia()?.pause();if(getMedia())getMedia().currentTime=Math.max(0,phraseLeadInMs(timingPhrase())+timingOffsetMs())/1000;
+    refreshTimingPanel();await armTapTake();
+  }
   function refreshOtherParts(){
     const checkbox=syncButton('record-other-parts'),hint=syncButton('other-parts-hint');
     const supported=otherPartsSupported(),steps=partRun?.steps||(!tapPending()?otherPartsPlan():[]);
     checkbox.disabled=!supported||timing.busy||tapPending()||countIn.active||countIn.preparing;
     const names=[...new Set(steps.filter(s=>s.other).map(s=>s.label))];
     const remaining=steps.reduce((n,s)=>n+s.phraseIds.length,0);
+    const finish=syncPanel.querySelector('[data-finish-missing]');if(finish){finish.hidden=!timing.draft||!supported||!missingPartSteps().length;finish.disabled=timing.busy||tapPending()||countIn.active||countIn.preparing;}
     hint.textContent=partRun?`${partRun.steps[partRun.index].label} · section ${partRun.index+1}/${partRun.steps.length}. Stop ends the run; completed timing stays in preview.`:
       !supported?'Available for phrase/word takes and single-phrase syllable practice.':!checkbox.checked?'Off · record the selected track, including existing timing.':remaining?`On · ${remaining} unfinished phrase${remaining===1?'':'s'} for ${syncButton('tap-mode').value} timing${names.length?`; includes ${names.join(', ')}`:''}. Completed phrases are skipped.`:'All parts in this range already have this timing. Nothing to record.';
   }
@@ -2255,7 +2285,7 @@
         word=phrase.words.find(w=>!w.excluded&&now>=w.startMs&&now<w.endMs)||phrase.words.find(w=>!w.excluded&&w.startMs>=now)||phrase.words.find(w=>!w.excluded)||word;tapping.wordId=word.id;
       }
       if(!keepPlayback&&!partRun&&!tapping.take&&syncButton('record-other-parts').checked&&otherPartsSupported()){
-        let steps=otherPartsPlan();if(mode==='syllable')steps=steps.flatMap(step=>step.phraseIds.map((id,index)=>({...step,phraseIds:[id],countIn:step.countIn&&index===0})));if(!steps.length)throw Error('All parts in this range already have this timing. Turn off Record unrecorded parts to rerecord them.');partRun={steps,index:0,mode,scope:syncButton('tap-scope').value,sourceKey:tempoSourceKey()};
+        let steps=otherPartsPlan();if(mode==='syllable')steps=steps.flatMap(step=>step.phraseIds.map((id,index)=>({...step,phraseIds:[id],countIn:step.countIn&&index===0})));if(!steps.length)throw Error('All parts in this range already have this timing. Turn off Record unrecorded parts to rerecord them.');if(missingLoopMode()){const at=steps.findIndex(s=>s.phraseIds[0]===phrase.id);if(at>0)steps=[...steps.slice(at),...steps.slice(0,at)];}partRun={steps,index:0,mode,scope:syncButton('tap-scope').value,sourceKey:tempoSourceKey()};
       }
       const partStep=partRun?.steps[partRun.index];
       if(partStep){phrase=timing.draft.score.phrases.find(p=>p.id===partStep.phraseIds[0]);timing.phraseIndex=timing.draft.score.phrases.indexOf(phrase);word=phrase.words.find(w=>!w.excluded);tapping.wordId=word.id;}
@@ -2354,7 +2384,7 @@
     const take=tapping.take,range=take?.repeatRange,media=getMedia();
     if(!syncButton('record-repeat').checked||timing.busy||!range||!take||!['armed','complete'].includes(take.status)||!media||(!ended&&media.paused)||isAdvertisement()||youtubeMediaState()?.clockUsable===false||tapping.binding!==tapBinding()||tempoSourceKey()!==LvScore.mediaKey(state.score?.source))return false;
     if(take.mode==='syllable'&&!wordTake(take)&&!ended&&media.currentTime*1000<range.endMs)return false;
-    if(partRun&&!ended){if(take.status==='complete'&&take.mode==='syllable'&&!continuousPass()){void keepSyllableAndNext();return true;}return false;}
+    if(partRun&&!ended){if(take.status==='complete'&&take.mode==='syllable'&&!continuousPass()){void keepSyllableAndNext();return true;}if(!missingLoopMode()||take.status==='complete')return false;}
     if(!ended&&take.status!=='complete'&&media.currentTime*1000<range.endMs)return false;
     // A held unit owns its release. Never truncate it at an estimated loop end.
     if(!ended&&take.pendingStartMs!==null&&take.pendingStartMs!==undefined)return false;
@@ -2523,6 +2553,22 @@
     setSyncNotice(`${take.marks.length} buffered taps restored exactly. Review, continue, or seek back to retake a phrase.`);
     return true;
   }
+  function restoreBufferedWords(packet){
+    if(timing.busy||tapPending()||timing.dirty||transcript.dirty||tapping.splitDirty||!timing.draft||!getMedia()?.paused)throw Error('Pause and finish the current take before restoring words.');
+    const score=timing.draft.score,words=score.phrases.flatMap(p=>p.words);
+    const generic=packet?.schema==='lyricvibe-buffered-timing-v1';
+    if(packet?.restoreAllowed===false||!['lyricvibe-buffered-words-v1','lyricvibe-buffered-timing-v1'].includes(packet?.schema)||packet.mediaKey!==LvScore.mediaKey(score.source)||packet.mediaKey!==LvScore.mediaKey({url:location.href})||packet.lyricsHash!==timing.draft.baseHash||packet.offsetMs!==score.offsetMs)throw Error('The take backup belongs to different lyrics, video or sync. It remains saved.');
+    const take=generic?LvTapTiming.restoreStoppedTake(packet.take):LvTapTiming.restoreWordTake(packet.remainingTake||packet.take),current=new Map(wordTimingUnits(words).map(u=>[u.id,u]));
+    const references=packet.referenceWords;if(!Array.isArray(references)||!references.length)throw Error('Word backup has no source references.');
+    if(references.some(r=>{const w=words.find(w=>w.id===r.id);return !w||w.excluded||w.text!==r.text||w.startMs!==r.startMs||w.endMs!==r.endMs||r.shape&&JSON.stringify(w)!==r.shape;})||take.marks.some(m=>!references.some(r=>r.id===m.wordId))||!generic&&take.units.some(u=>{const c=current.get(u.id);return !c||c.wordId!==u.wordId||c.spelling!==u.spelling||c.maxMs!==u.maxMs;}))throw Error('These words changed after the backup. Existing timings are preserved; the backup remains available.');
+    tapping.take=take;tapping.binding=tapBinding();tapping.rate=getMedia().playbackRate;tapping.wordId=take.units[0].wordId;tapping.listening=false;
+    timing.phraseIndex=score.phrases.findIndex(p=>p.words.some(w=>w.id===tapping.wordId));timing.wordCaptureWarning=null;
+    syncButton('tap-mode').value=take.mode;syncButton('tap-cadence').value=take.cadence==='pairs'?'hold':'flow';if(generic&&packet.syllableFlow)syncButton('tap-syllable-flow').value=packet.syllableFlow;
+    setTimingWorkspace('record');refreshTimingPanel();setSyncNotice(`${take.marks.length} timing marks restored exactly. Earlier saved timing is unchanged; continue or review this take.`);return true;
+  }
+  async function restoreLastUnfinishedWords(){
+    try{const all=await chrome.storage.local.get(null),key=LvScore.mediaKey(timing.draft?.score.source),packet=Object.entries(all).filter(([k,v])=>(k.startsWith('lvBufferedWords:'+key+':')||k.startsWith('lvBufferedTiming:'+key+':'))&&['lyricvibe-buffered-words-v1','lyricvibe-buffered-timing-v1'].includes(v?.schema)).map(([,v])=>v).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))[0];if(!packet)throw Error('No unfinished take backup for this video.');restoreBufferedWords(packet);}catch(error){setSyncNotice(error.message,'error');}
+  }
   function skipWordHold(delta){
     const take=tapping.take;if(!wordTake(take)||timing.busy)return;
     try{
@@ -2563,15 +2609,18 @@
     if (tapping.binding !== tapBinding()) { setSyncNotice('This take belongs to an older preview. Discard it and make a fresh take.'); return; }
     timing.busy = true; refreshTimingPanel();
     try {
-      const grouped = new Map();
-      if (take.mode === 'word') for (const mark of take.marks) { if (!grouped.has(mark.wordId)) grouped.set(mark.wordId,[]); grouped.get(mark.wordId).push(mark); }
+      const wordPlan=take.mode==='word'?LvTapTiming.wordTakeChanges(take):null;
+      if(wordPlan?.incomplete.length){
+        const ids=new Set(wordPlan.incomplete),units=take.units.filter(u=>ids.has(u.wordId)),marks=take.marks.filter(m=>ids.has(m.wordId));
+        const words=timing.draft.score.phrases.flatMap(p=>p.words),referenceWords=words.filter(w=>ids.has(w.id)).map(w=>({id:w.id,text:w.text,startMs:w.startMs,endMs:w.endMs}));
+        await chrome.storage.local.set({['lvBufferedWords:'+LvScore.mediaKey(state.score.source)+':'+crypto.randomUUID()]:{schema:'lyricvibe-buffered-words-v1',...recordingContext(),referenceWords,take:structuredClone(take),remainingTake:{...LvTapTiming.begin(units,{mode:'word',cadence:take.cadence}),marks,status:'stopped',pendingStartMs:null},createdAt:new Date().toISOString()}});
+        if(tapping.take!==take||tapping.binding!==tapBinding())throw Error('The recording changed while backing it up. Nothing was replaced.');
+        timing.unfinishedWordIds=[...wordPlan.incomplete];
+        timing.wordCaptureWarning=`${wordPlan.incomplete.length} unfinished hyphenated word${wordPlan.incomplete.length===1?' keeps':'s keep'} earlier timing. Partial marks are backed up; Refine → Restore unfinished take reopens them.`;
+        if(!wordPlan.changes.length){discardTapTake(true);setSyncNotice(timing.wordCaptureWarning,'warn');return;}
+      }
       const payload = frameTake(take)||streamTake(take) ? {operations:await continuousSyllableOperations(take)} : take.mode === 'phrase' ? {operations:[...(take.removedPhraseIds||[]).flatMap(id=>(timing.draft.score.phrases.find(p=>p.id===id)?.words||[]).filter(w=>!w.excluded).map(w=>({type:'setWordExcluded',wordId:w.id,excluded:true}))),...take.marks.map(mark=>({type:'setPhraseTiming',phraseId:mark.id,startMs:mark.startMs,endMs:mark.endMs}))]} : take.mode === 'word'
-        ? { changes: [...grouped].map(([wordId,marks]) => {
-          const units = take.units.filter(unit=>unit.wordId===wordId);
-          if (units.length > 1 && units.length !== marks.length) throw Error('Finish every part of this hyphenated word, or undo its marks, before using the take.');
-          return {wordId,startMs:marks[0].startMs,endMs:marks.at(-1).endMs,
-            ...(units.length > 1 ? {hyphenParts:marks.map(mark=>({text:units.find(unit=>unit.id===mark.id).spelling,startMs:mark.startMs,endMs:mark.endMs}))} : {})};
-        }) }
+        ? { changes: wordPlan.changes }
         : { operation:{type:'setPhraseSyllableTimings',phraseId:take.units[0].phraseId,marks:take.marks} };
       if(take.mode==='syllable'&&!frameTake(take)&&!streamTake(take)&&take.status!=='complete')throw Error('Finish this phrase or retake it. Other phrases can already be saved.');
       if(tapping.take!==take||tapping.binding!==tapBinding())throw Error('The take or preview changed while preparing spelling. Your marks are retained.');
@@ -2580,6 +2629,7 @@
       timing.draft = result.preview; discardTapTake(true); timing.auditioned = false; state.scoreSignature = '';
       // Keeping a phrase take never changes the user's capture mode or track.
       setSyncNotice(take.mode === 'phrase' ? 'Phrases added to preview. Keep refining, or save this iteration.' : 'Take added to preview. Save timings to keep it for this video.');
+      if(wordPlan?.incomplete.length)setSyncNotice(`${wordPlan.changes.length} complete words added to preview. ${timing.wordCaptureWarning}`,'warn');
       if(frameTake(take))setSyncNotice('Tapped syllables added to preview; word edges and untapped words kept. Text cuts are suggestions: inspect them in the lightweight editor. Save timings when ready.');
       if(streamTake(take))setSyncNotice('Phrase-guided syllables added to preview. Word edges now come from your taps. Untapped words and an unfinished trailing word keep their earlier data. Save timings when ready.');
     } catch (error) { if(partRun)getMedia()?.pause();partRun=null;setSyncNotice(error.message,'error'); }
@@ -3347,6 +3397,7 @@
     syncSidebarState();
   }
   function discardTimingLocal() {
+    timing.wordCaptureWarning=null;
     captureTracks.slots.clear();
     cancelCountIn();
     navigationHold=null;navigationApproval=null;
@@ -3419,11 +3470,24 @@
     catch (error) { setSyncNotice(`Playback could not start: ${error.message}`); }
     refreshTimingPanel();
   }
+  async function parkUnfinishedTake(){
+    if(!timingTapPending())return true;
+    if(tapping.take?.status==='armed')return false;
+    {
+      const take=tapping.take,binding=tapBinding(),wordIds=new Set(take.units.map(u=>u.wordId));
+      const referenceWords=timing.draft.score.phrases.flatMap(p=>p.words).filter(w=>wordIds.has(w.id)).map(w=>({id:w.id,text:w.text,startMs:w.startMs,endMs:w.endMs,shape:JSON.stringify(w)}));
+      try{await chrome.storage.local.set({['lvBufferedTiming:'+LvScore.mediaKey(state.score.source)+':'+crypto.randomUUID()]:{schema:'lyricvibe-buffered-timing-v1',...recordingContext(),recordedContext:tapping.recordingContext,restoreAllowed:tapping.binding===binding,referenceWords,take:structuredClone(take),syllableFlow:syncButton('tap-syllable-flow').value,createdAt:new Date().toISOString()}});}catch(error){setSyncNotice('Could not save the unfinished take: '+error.message+'. All marks remain in this tab.','error');return false;}
+      if(tapping.take!==take||tapBinding()!==binding){setSyncNotice('The take changed during save. The earlier snapshot is backed up; save again to keep the latest marks.','warn');return false;}
+      discardTapTake(true);timing.wordCaptureWarning='Your unfinished take is saved locally. Refine → Restore unfinished take reopens every mark; existing score timing stays unchanged for those marks.';
+    }
+    return true;
+  }
   async function applyTimingReview() {
     // Audition is recommended, not required: the preview lives only in session storage, and Save is undoable.
     if (!timing.draft || timing.busy || !hasUnsavedWork() || timing.dirty || tapping.splitDirty || tapping.take?.status==='armed' || performanceTake.armed || countIn.active || countIn.preparing) return;
     await finishStoppedTake();
     if(performanceTake.marks.length)await useEffects();
+    if(!await parkUnfinishedTake())return;
     if(timingTapPending()||effectPending())return;
     // Closing Lyrics text keeps its draft. Save must include those corrections,
     // or leave them intact if validation fails, never silently save older text.
@@ -3442,7 +3506,8 @@
       // Keep editing: a fresh preview of what was just saved, so any mode can start straight away.
       const reopened = await timingRequest('LV_TIMING_PREPARE', { fromSaved: true });
       timing.draft = reopened.preview; timing.view = 'proposed';
-      setSyncNotice('Timings saved. '+(retainedCaptureWarning?'Unresolved capture was backed up separately; it is not part of the saved preview. ':'')+'Keep going in any mode; Undo saved change restores the previous score.');
+      timing.wordCaptureWarning=null;
+      setSyncNotice('Timings saved. '+(retainedCaptureWarning?retainedCaptureWarning+' ':'')+'Keep going in any mode; Undo saved change restores the previous score.');
     } catch (error) { timing.saveError=error.message;setSyncNotice(error.message,'error'); }
     finally { timing.busy = false; refreshTimingPanel(); }
   }
@@ -3537,6 +3602,7 @@
     const exact=syncText.closest('details');exact.querySelector('summary').firstChild.nodeValue='Exact word timings ';panes.review.append(exact);
     for(const selector of ['.lvx-event-review','.lvx-mark-correction','.lvx-tap-timeline','.lvx-syllable-review'])panes.review.append(syncPanel.querySelector(selector));
     const reviewActions=document.createElement('div');reviewActions.className='lvx-review-actions';reviewActions.append(syncButton('events-restore'),syncButton('light-editor'));panes.review.prepend(reviewActions);reviewActions.append(syncButton('retime-flag'));syncButton('retime-flag').textContent='Flag for later';
+    const restoreWords=document.createElement('button');restoreWords.type='button';restoreWords.textContent='Restore unfinished take';restoreWords.onclick=restoreLastUnfinishedWords;reviewActions.append(restoreWords);
     editGroup.insertBefore(transcriptOpen,quickSyncButton);
     const takeActions=syncButton('tap-use').parentElement;panes.review.append(takeActions);
     const reviewHint=document.createElement('p');reviewHint.className='lvx-studio-note';reviewHint.textContent='Review the last recording, correct a mark or open the full editor. Your take and preview stay intact when you switch views.';panes.review.prepend(reviewHint);
@@ -3546,6 +3612,7 @@
     syncPanel.querySelector('header').after(tabs);
     syncPanel.querySelector('footer').before(...Object.values(panes));
     syncPanel.querySelector('.lvx-sync-eyebrow').textContent='LYRICVIBE / TIMING';
+    const finishMissing=document.createElement('button');finishMissing.type='button';finishMissing.dataset.finishMissing='';finishMissing.textContent='Finish missing parts · loop';finishMissing.hidden=true;finishMissing.onclick=()=>finishMissingParts().catch(error=>setSyncNotice(error.message,'error'));syncPanel.querySelector('.lvx-sync-notice').after(finishMissing);
     setTimingWorkspace('record');
   }
   buildTimingWorkspace();
@@ -3834,7 +3901,7 @@
       tuneText: text => { syncText.value = text; timing.dirty = true; return tuneTimingText(); }, audition: auditionTiming, cancel: closeTimingReview,
       tap: Object.freeze({ getState: () => JSON.parse(JSON.stringify({take:tapping.take,binding:tapping.binding,wordId:tapWord()?.id,phraseId:timingPhrase()?.id,splitDirty:tapping.splitDirty,spellings:[...(tapping.spellings||new Map())],audioState:tapping.audio?.state||null})),
         switchTrack:switchCaptureTrack, tracks:()=>captureLanes().map(l=>({id:l.id,label:l.label,role:l.role,selected:l.id===timingPhrase()?.laneId})), start: armTapTake, mark: markTapTime, release: () => markTapTime({release:true}), stop: stopTapTake, use: useTapTake,
-        reposition: repositionTap, moveCue:direction=>recoverStream(direction), reassignLast:direction=>recoverStream(direction,true), assignment:()=>rawTake(tapping.take)?recordingReport():null, restoreBuffered:restoreBufferedTake, discard: restartTranscript }),
+        reposition: repositionTap, moveCue:direction=>recoverStream(direction), reassignLast:direction=>recoverStream(direction,true), assignment:()=>rawTake(tapping.take)?recordingReport():null, restoreBuffered:restoreBufferedTake, restoreBufferedWords, discard: restartTranscript }),
       effects: Object.freeze({getState:() => JSON.parse(JSON.stringify(performanceTake)),start:startEffects,mark:markEffect,stop:stopEffects,use:useEffects,discard:() => {discardEffects();refreshTimingPanel();}}) })
   };
 
