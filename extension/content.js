@@ -1166,7 +1166,7 @@
     event.stopImmediatePropagation();getMedia()?.pause();
   },true);
   // History API updates also emit navigate, covering programmatic SPA transitions.
-  window.navigation?.addEventListener('navigate', event => {
+  if(window.navigation)listenGlobal(window.navigation,'navigate', event => {
     if (navigationApproval && !approvedNavigation(event.destination.url)) navigationApproval = null;
     if(!hasUnsavedWork()){navigationHold=null;return;}
     if (!event.destination.sameDocument || event.hashChange || event.downloadRequest || !leavesEditedVideo(event.destination.url)) return;

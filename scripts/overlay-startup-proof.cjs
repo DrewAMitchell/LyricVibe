@@ -25,7 +25,7 @@ mark('START','Node',process.pid);let server,browser,browserPid;
   // A dead context must retain unsaved input and dispose a clean instance's
   // global and runtime listeners before creating its replacement.
   const listeners=async name=>{const o=await session.send('Runtime.evaluate',{expression:name,contextId:executionContextId});return (await session.send('DOMDebugger.getEventListeners',{objectId:o.result.objectId})).listeners.length;};
-  const baseline={document:await listeners('document'),window:await listeners('window'),runtime:await evaluate(()=>__runtimeListeners.size)};
+  const baseline={document:await listeners('document'),window:await listeners('window'),navigation:await evaluate(()=>Boolean(window.navigation))?await listeners('window.navigation'):0,runtime:await evaluate(()=>__runtimeListeners.size)};
   await evaluate(()=>{window.__previous=window.__lyricVibeOverlay;const field=document.querySelector('textarea[aria-label="Exact word timings in milliseconds"]');field.value='unsaved test';field.dispatchEvent(new Event('input',{bubbles:true}));window.__previous.ping=()=>false;});
   await evaluate(fs.readFileSync(path.join(root,'extension/content.js'),'utf8'));
   assert.equal(await evaluate(()=>window.__lyricVibeOverlay===window.__previous),true,'dirty stale overlay is not replaced');
@@ -37,13 +37,13 @@ mark('START','Node',process.pid);let server,browser,browserPid;
     await evaluate(fs.readFileSync(path.join(root,'extension/content.js'),'utf8'));
     assert.equal(await evaluate(()=>window.__lyricVibeOverlay===window.__previous),false,'clean stale overlay is replaced');
     assert.equal(await page.locator('#lvx-root').count(),1);
-    assert.deepEqual({document:await listeners('document'),window:await listeners('window'),runtime:await evaluate(()=>__runtimeListeners.size)},baseline,'replacement must not accumulate listeners');
+    assert.deepEqual({document:await listeners('document'),window:await listeners('window'),navigation:await evaluate(()=>Boolean(window.navigation))?await listeners('window.navigation'):0,runtime:await evaluate(()=>__runtimeListeners.size)},baseline,'replacement must not accumulate listeners');
   }
   await evaluate(()=>{window.__previous=window.__lyricVibeOverlay;window.__previous.ping=()=>false;Object.defineProperty(chrome.storage,'onChanged',{configurable:true,get(){throw Error('Extension context invalidated')}});if(window.__previous.dispose()!==true)throw Error('Clean invalidated context did not dispose');delete chrome.storage.onChanged;});
   await evaluate(fs.readFileSync(path.join(root,'extension/content.js'),'utf8'));
-  assert.deepEqual({document:await listeners('document'),window:await listeners('window'),runtime:await evaluate(()=>__runtimeListeners.size)},baseline,'invalidated storage context leaves no duplicate listeners');
+  assert.deepEqual({document:await listeners('document'),window:await listeners('window'),navigation:await evaluate(()=>Boolean(window.navigation))?await listeners('window.navigation'):0,runtime:await evaluate(()=>__runtimeListeners.size)},baseline,'invalidated storage context leaves no duplicate listeners');
   await evaluate(()=>{window.__lyricVibeOverlay.hide();window.__lyricVibeOverlay.show();});
-  assert.deepEqual({document:await listeners('document'),window:await listeners('window'),runtime:await evaluate(()=>__runtimeListeners.size)},baseline,'normal hide/reopen retains one listener set');
+  assert.deepEqual({document:await listeners('document'),window:await listeners('window'),navigation:await evaluate(()=>Boolean(window.navigation))?await listeners('window.navigation'):0,runtime:await evaluate(()=>__runtimeListeners.size)},baseline,'normal hide/reopen retains one listener set');
   assert.equal(await evaluate(()=>JSON.stringify({store:__store,time:document.querySelector('video').currentTime,paused:document.querySelector('video').paused})),before,'reload cleanup does not mutate storage or media');
   assert.deepEqual(errors,[]);console.log(JSON.stringify({passed:true,checks:['Complete production content script starts on a fresh page','Songs control dispatches its opener message','Re-injection reuses one overlay and Songs control','Storage and paused media clock preserved','Dirty stale overlay retained','Repeated clean reload removes global and runtime listeners','Invalidated storage context disposes safely'],browserPid}));
 })().catch(e=>{console.error(e.stack);process.exitCode=1;}).finally(async()=>{await browser?.close();await server?.close();if(browserPid)mark('END','Chrome closed',browserPid);mark('END','Node',process.pid);});
