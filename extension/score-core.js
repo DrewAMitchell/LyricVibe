@@ -345,7 +345,7 @@
         if(word.displayMode!==undefined&&word.displayMode!=='whole')bad('invalid word displayMode');
         if(word.appearance!==undefined){
           const a=word.appearance;
-          if(!a||typeof a!=='object'||Array.isArray(a)||Object.keys(a).some(k=>!['look','motion','art','emoji'].includes(k))||!Object.keys(a).length||a.look!==undefined&&!DISPLAY_CATALOG.looks.includes(a.look)||a.motion!==undefined&&!DISPLAY_CATALOG.motions.includes(a.motion)||a.art!==undefined&&!DISPLAY_CATALOG.wordArt.includes(a.art)||a.emoji!==undefined&&!validEmoji(a.emoji))bad('invalid word appearance');
+          if(!a||typeof a!=='object'||Array.isArray(a)||Object.keys(a).some(k=>!['look','motion','art','emoji','held'].includes(k))||!Object.keys(a).length||a.look!==undefined&&!DISPLAY_CATALOG.looks.includes(a.look)||a.motion!==undefined&&!DISPLAY_CATALOG.motions.includes(a.motion)||a.art!==undefined&&!DISPLAY_CATALOG.wordArt.includes(a.art)||a.emoji!==undefined&&!validEmoji(a.emoji)||a.held!==undefined&&!['always','never'].includes(a.held))bad('invalid word appearance');
         }
         if (word.spokenText !== undefined && (typeof word.spokenText !== "string" || !word.spokenText.trim() || word.spokenText.length > 256 || word.spokenText.includes("|"))) bad("invalid spokenText");
         for (const effect of word.effects) if (!effect || !EFFECTS.has(effect.type) || typeof effect.strength !== "number" || !Number.isFinite(effect.strength) || effect.strength < 0 || effect.strength > 1 || effect.axis !== undefined && (effect.type !== "groove" || !["horizontal","vertical"].includes(effect.axis))) bad("invalid effect");

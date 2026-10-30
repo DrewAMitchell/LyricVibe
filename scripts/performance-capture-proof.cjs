@@ -15,7 +15,7 @@ log('START',process.pid);let server,browser;
   const evaluate=async value=>{const expression=typeof value==='function'?'('+value.toString()+')()':value;const r=await session.send('Runtime.evaluate',{expression,contextId:executionContextId,awaitPromise:true,returnByValue:true,userGesture:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
   await evaluate(()=>{window.__messageListeners=[];window.__store={};window.chrome={runtime:{id:'fixture',getManifest:()=>({version:'fixture'}),onMessage:{addListener(fn){__messageListeners.push(fn)}},sendMessage:async()=>({ok:true})},storage:{local:{get:async(keys,cb)=>{cb?.(__store);return __store},set:async data=>Object.assign(__store,data)}}};const v=document.querySelector('video');Object.defineProperties(v,{currentTime:{value:2,writable:true,configurable:true},duration:{value:30},paused:{value:true,writable:true},playbackRate:{value:1,writable:true}});v.pause=()=>{v.paused=true};v.play=async()=>{v.paused=false};});
   for(const name of ['score-core','tap-timing','beat-track','choreography','transcript-text','timing-variant','pronunciation'])await evaluate(fs.readFileSync(path.join(root,'extension',name+'.js'),'utf8'));
-  await evaluate(fs.readFileSync(path.join(root,'extension/content.js'),'utf8').replace(/\}\)\(\);\s*$/,'window.__qa={state,timing,tapping,tempo,syncPanel,tapBinding,eventEnvelope,archiveEvents,useEventAssignments,discardTapTake,restoreLastSyllablePass,renderEventReview,refreshTimingPanel,disableWatch:()=>{trackWatch=null;}};})();'));
+  await evaluate(fs.readFileSync(path.join(root,'extension/content.js'),'utf8').replace(/\}\)\(\);\s*$/,'window.__qa={state,timing,tapping,tempo,syncPanel,tapBinding,eventEnvelope,archiveEvents,useEventAssignments,discardTapTake,restoreLastSyllablePass,root,renderEventReview,refreshTimingPanel,disableWatch:()=>{trackWatch=null;}};})();'));
 
 
   await evaluate(()=>{
@@ -37,10 +37,20 @@ log('START',process.pid);let server,browser;
   });
   const time=async seconds=>evaluate(`document.querySelector('video').currentTime=${seconds}`);
   await page.keyboard.down('Space');
+  assert.equal(await evaluate(()=>__qa.syncPanel.querySelector('[data-capture-key=syllable]').dataset.active),'true');
+  assert.equal(await evaluate(()=>__qa.syncPanel.querySelector('[data-sync=tap-note]').disabled),false);
   for(const at of [1.3,1.4,1.5]){await time(at);await page.keyboard.press('n');}
+  assert.match(await evaluate(()=>__qa.syncPanel.querySelector('.lvx-capture-feedback').textContent),/Performance event recorded/);
+  assert.equal(await evaluate(()=>__qa.syncPanel.querySelector('[data-capture-count=note]').textContent),'3');
   await time(1.8);await page.keyboard.up('Space');
+  assert.equal(await evaluate(()=>__qa.syncPanel.querySelector('[data-sync=tap-note]').disabled),true);
+  await time(1.9);await page.keyboard.press('n');
+  assert.match(await evaluate(()=>__qa.syncPanel.querySelector('.lvx-capture-feedback').textContent),/Start a syllable/);
   await time(2.2);await page.keyboard.down('Space');
-  for(const at of [2.3,2.4,2.5]){await time(at);await page.keyboard.press('n');}
+  for(const at of [2.3,2.4]){await time(at);await page.keyboard.press('n');}
+  await time(2.5);await evaluate(()=>__qa.syncPanel.querySelector('[data-sync=tap-note]').click());
+  await evaluate(()=>{__qa.root.classList.add('lvx-active');__qa.root.classList.add('lvx-sync-open');});
+  await page.locator('.lvx-capture-keys').screenshot({path:path.join(root,'docs/capture-key-prompts.png')});
   await time(3.2);await page.keyboard.up('Space');
   const captured=await evaluate(()=>({events:__qa.tapping.take.events,raw:__qa.tapping.take.rawInputs}));
   assert.equal(captured.events.length,8);assert.equal(captured.raw.length,10);
@@ -57,11 +67,11 @@ log('START',process.pid);let server,browser;
   await evaluate(async()=>{await __qa.archiveEvents();__qa.discardTapTake();await __qa.restoreLastSyllablePass();});
   assert.deepEqual(await evaluate(()=>__qa.tapping.take.rawInputs),captured.raw);
   assert.deepEqual(await evaluate(()=>__qa.tapping.take.events),captured.events);
-  await page.setViewportSize({width:1100,height:850});
+
   await evaluate(()=>{__qa.syncPanel.querySelector('.lvx-tap-panel').open=true;__qa.refreshTimingPanel();});
   await page.getByRole('tab',{name:'Refine',exact:true}).click();
   await page.locator('.lvx-event-phrase summary').click();
-  await page.locator('.lvx-event-review').screenshot({path:path.join(root,'docs/performance-capture-verified.png')});
+  await page.locator('.lvx-event-review').screenshot({path:path.join(root,'docs/performance-capture-current.png')});
   const proof={observedAt:new Date().toISOString(),basis:'Production Chrome keyboard handlers, capture/grouping/score core and archive UI; synthetic media and worker transport, no live user song.',checks:['Space holds and N note changes','two syllables plus six note events','exact raw presses/releases and speed','recorded count overrides dictionary','word bounds expand to captured syllables','capture evidence and pitch events reach score export','saved score unchanged until Save','Undo preserves prior preview','raw archive reopen exact'],result};
   fs.writeFileSync(path.join(root,'docs/performance-capture-proof.json'),JSON.stringify(proof,null,2)+'\n');console.log(JSON.stringify(proof));
 })().catch(error=>{console.error(error.stack);process.exitCode=1}).finally(async()=>{await browser?.close();const pid=server?.process().pid;await server?.close();if(pid)log('END',pid);log('END',process.pid)});

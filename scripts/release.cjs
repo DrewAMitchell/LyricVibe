@@ -136,6 +136,7 @@ async function main(command, args) {
   await run(process.execPath, ['scripts/display-navigation-proof.cjs'], source);
   await run(process.execPath, ['scripts/live-stage-proof.cjs'], source);
   await run(process.execPath, ['scripts/lyric-rail-proof.cjs'], source);
+  await run(process.execPath, ['scripts/held-controls-proof.cjs'], source);
   await run('python', ['scripts/package-release.py', source, output, sha], source);
   console.log(`Candidate ${tag} verified and packaged in ${output}. Publish only this commit and its exact artifacts; release publication is a separate step.`);
 }

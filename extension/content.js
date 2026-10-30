@@ -569,9 +569,20 @@
   function backingLabelMode(){return backingLabels[backingLabelKey()]||'hidden';}
   function setBackingLabel(value){const key=backingLabelKey();if(!key)return;backingLabels={...backingLabels,[key]:['header','prefix'].includes(value)?value:'hidden'};state.scoreSignature='';chrome.storage.local.set({lvxBackingLabels:backingLabels}).catch(error=>setHud('Backing names changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
   function setBackingDisplay(value){backingDisplay=LvChoreography.backingSettings(value);state.scoreSignature='';chrome.storage.local.set({lvxBackingDisplay:backingDisplay}).catch(error=>setHud('Backing display changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
-  let choreography={beatPulse:true,landing:'settle',dance:'off',mode:'classic',upsideDown:false,automatic:false,autoFire:false,fireColor:'ember',fireSmoke:true,fillStage:true,arrangement:'chaotic',origin:'top-left'},previewPlaying=false,previewFrame=0,previewTime=1600,previewLast=0,previewTheme=state.theme;
+  const heldSettings=value=>({heldRule:['relative','duration','off'].includes(value.heldRule)?value.heldRule:'relative',heldMinMs:Number.isFinite(Number(value.heldMinMs))?Math.max(200,Math.min(5000,Math.round(Number(value.heldMinMs)))):800,heldEffect:['breathe','groove','glow','pulse','off'].includes(value.heldEffect)?value.heldEffect:'breathe'});
+  let choreography={...heldSettings({}),beatPulse:true,landing:'settle',dance:'off',mode:'classic',upsideDown:false,automatic:false,autoFire:false,fireColor:'ember',fireSmoke:true,fillStage:true,arrangement:'chaotic',origin:'top-left'},previewPlaying=false,previewFrame=0,previewTime=1600,previewLast=0,previewTheme=state.theme;
   const choreographyPlans=new WeakMap(),choreographyMeasure=document.createElement('canvas').getContext('2d');
-  function setChoreography(value){choreography={beatPulse:value.beatPulse!==false,landing:Object.hasOwn(LvChoreography.landingStyles,value.landing)?value.landing:'settle',dance:['off','mix','tip','flex','bounce','launch'].includes(value.dance)?value.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic===true,autoFire:value.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,value.fireColor)?value.fireColor:'ember',fireSmoke:value.fireSmoke!==false,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:Object.hasOwn(LvChoreography.layoutOrigins,value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
+  function buildHeldControls(){
+    const group=document.createElement('fieldset');group.className='lvx-held-settings';
+    group.innerHTML='<legend>Held notes · global</legend><label>Qualify<select aria-label="Held note rule"><option value="relative">Longer than nearby syllables</option><option value="duration">Minimum duration per syllable</option><option value="off">Only words marked Always</option></select></label><label data-held-duration>Minimum ms<input type="number" min="200" max="5000" step="50" aria-label="Held note minimum milliseconds"></label><label>Effect<select aria-label="Held note effect"><option value="breathe">Breathe · warm color &amp; wave</option><option value="groove">Wave</option><option value="glow">Glow</option><option value="pulse">Pulse</option><option value="off">None</option></select></label><small>Uses saved timing, not pitch detection. Unsplit words use estimated syllable counts. Automatic expression must be on. Authored effects and word rules take priority.</small>';
+    const rule=group.querySelector('select'),minimum=group.querySelector('input'),effect=group.querySelectorAll('select')[1];
+    rule.value=choreography.heldRule;minimum.value=choreography.heldMinMs;effect.value=choreography.heldEffect;
+    const refresh=()=>{group.querySelector('[data-held-duration]').hidden=rule.value!=='duration';};refresh();
+    rule.onchange=()=>{setChoreography({...choreography,heldRule:rule.value});refresh();renderStylePreview();};
+    minimum.onchange=()=>{if(!minimum.checkValidity())return;setChoreography({...choreography,heldMinMs:Number(minimum.value)});renderStylePreview();};
+    effect.onchange=()=>{setChoreography({...choreography,heldEffect:effect.value});renderStylePreview();};return group;
+  }
+  function setChoreography(value){choreography={...heldSettings(value),beatPulse:value.beatPulse!==false,landing:Object.hasOwn(LvChoreography.landingStyles,value.landing)?value.landing:'settle',dance:['off','mix','tip','flex','bounce','launch'].includes(value.dance)?value.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic===true,autoFire:value.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,value.fireColor)?value.fireColor:'ember',fireSmoke:value.fireSmoke!==false,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:Object.hasOwn(LvChoreography.layoutOrigins,value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
   function previewTick(now){
     if(themePicker.hidden||!previewPlaying||document.hidden){previewFrame=0;previewLast=0;return;}
     if(previewLast)previewTime+=Math.min(now-previewLast,100);previewLast=now;renderStylePreview(true);previewFrame=requestAnimationFrame(previewTick);
@@ -607,7 +618,7 @@
       const clock=selected?previewTime%(words.length*450+1600):words.length*450+700;
       words.forEach((word,i)=>paintWordTexture(line.children[i],word,clock,tile.dataset.theme));
       const previewHeight=Math.max(60,tile.querySelector('.lvx-tile-stage').clientHeight-16);
-      const settings={...choreography,theme:tile.dataset.theme,emojiTags:!!editingWordSet().emojiTags},cues=LvChoreography.compose({source:{durationMs:words.length*450+1800},phrases:[{id:'preview',laneId:'lead',words}]},editingWordSet().rules,editingWordSet());
+      const settings={...choreography,theme:tile.dataset.theme,emojiTags:!!editingWordSet().emojiTags},cues=LvChoreography.compose({source:{durationMs:words.length*450+1800},phrases:[{id:'preview',laneId:'lead',words}]},editingWordSet().rules,{...editingWordSet(),...heldSettings(choreography)});
       // Layout and painting must agree on emoji space and expression weights.
       choreographLine(line,words,clock,tile.querySelector('.lvx-tile-stage').clientWidth-16,previewHeight,Math.min(64,previewHeight*.7),cues,Math.min(48,previewHeight*.54),settings);
       expressLine(line,words,clock,cues,settings);
@@ -714,7 +725,7 @@
     for(const [value,label]of Object.entries(LvChoreography.landingStyles)){const option=document.createElement('option');option.value=value;option.textContent=label;landingSelect.append(option);}landingSelect.value=choreography.landing;
     landingSelect.onchange=()=>{setChoreography({...choreography,landing:landingSelect.value});renderStylePreview(true);};landingLabel.append(landingSelect);layoutRow.append(landingLabel);
     const effects=document.createElement('details');effects.className='lvx-word-effects';effects.open=studio.effectsOpen;effects.innerHTML='<summary>Word effects <span>Accents · sustains · moves</span></summary><div class="lvx-effects-settings"></div><dl class="lvx-effect-vocabulary"><div><dt>Accents</dt><dd>Pulse · Tilt · Shake</dd></div><div><dt>Sustains</dt><dd>Breathe · Color · Wobble</dd></div><div><dt>Moves</dt><dd>Topple · Flex · Bounce · Launch</dd></div></dl><p class="lvx-studio-note">Record accents in Timing → Effects. Sustains follow held notes when Expression is Automatic.</p>';
-    effects.querySelector('.lvx-effects-settings').append(expression,danceLabel);effects.ontoggle=()=>{if(effects.isConnected)studio.effectsOpen=effects.open;};
+    effects.querySelector('.lvx-effects-settings').append(expression,danceLabel,buildHeldControls());effects.ontoggle=()=>{if(effects.isConnected)studio.effectsOpen=effects.open;};
     const tip=danceLabel.querySelector('option[value=tip]');if(tip)tip.textContent='Topple · backward fall';
     const sample=tiles.find(t=>t.dataset.theme===state.theme).cloneNode(true);sample.removeAttribute('aria-pressed');sample.removeAttribute('type');sample.setAttribute('aria-label','Current lyric motion preview');sample.classList.add('lvx-motion-sample');sample.onclick=()=>setPreviewPlaying(!previewPlaying);
     sample.querySelector('.lvx-tile-name').textContent='CURRENT LOOK · '+THEME_LABELS[state.theme];
@@ -882,7 +893,7 @@
       <section class="lvx-phrase-syllables" hidden aria-label="Phrase syllable spelling"><details><summary>Syllable spelling <span>Edit cuts with |</span></summary><p class="lvx-sync-hint">One Space press per syllable entrance. Dictionary suggestions guide spelling, not audio alignment.</p><div class="lvx-phrase-syllable-fields"></div><button data-sync="phrase-suggest">Suggest phrase syllables</button></details><p class="lvx-phrase-syllable-hint" role="status"></p></section>
       <div class="lvx-tap-actions lvx-syllable-review" hidden><button data-sync="syllable-retake">↻ Retake phrase</button><button data-sync="syllable-hear">▶ Hear this take</button><button data-sync="syllable-next">✓ Keep phrase & next</button></div>
       <div class="lvx-tap-timeline" aria-label="Current phrase timing"><div class="lvx-tap-blocks"></div><i class="lvx-tap-playhead" hidden></i></div>
-      <div class="lvx-tap-status" role="status" aria-live="polite">Choose a word to begin.</div>
+      <div class="lvx-capture-keys" hidden><div data-capture-key="syllable"><kbd>SPACE</kbd><strong>New syllable</strong><small>Hold while you sing it · release at its end</small><output data-capture-count="syllable">0</output></div><button type="button" data-sync="tap-note" data-capture-key="note"><kbd>N</kbd><strong>Same syllable, new note</strong><small>Performance event · keep holding Space</small><output data-capture-count="note">0</output></button><p class="lvx-capture-feedback" role="status">One “oh” across three notes: hold Space, tap N twice.</p></div><div class="lvx-tap-status" role="status" aria-live="polite">Choose a word to begin.</div>
       <div class="lvx-tap-actions"><button data-sync="tap-use">Use take in preview</button><button data-sync="tap-undo">↶ Undo mark</button><button data-sync="tap-discard">Discard take</button><button data-sync="take-export" disabled>Export take</button></div>
       <button data-sync="events-restore" title="Reopen the latest syllable or word-hold recording for this video. Changed phrases remain separate for review.">Review last recording ↗</button>
       <button data-sync="transcript-open" class="lvx-transcript-open">✎ Lyrics text</button><dialog class="lvx-transcript-editor" aria-label="Lyrics text"><h3>Lyrics</h3><p class="lvx-sync-hint">One phrase per line. <code>[Bubi]</code> alone sets the singer for following lines; inside a line it switches singers from that word onward. Names are not sung. Multiple Main tracks can overlap.</p><details class="lvx-transcript-help"><summary>Text shortcuts &amp; timing</summary><p class="lvx-sync-hint">Use <code>[lead]</code> for the original Main track or <code>[backing]</code> for backing. Parentheses add backing lyrics; Apply asks where they begin. Prefix a word with <code>=</code> to show it whole. <code>word(d)</code> doubles one word; <code>(doubled)</code> at the phrase start doubles the phrase. These markers are not sung. Singer assignments preserve existing word timing. New words and lines get estimated timing; deleted words are hidden. Undo preview reverts.</p></details><div class="lvx-transcript-tracks"></div><textarea data-sync="transcript-text" rows="12" spellcheck="true" aria-label="Lyrics, one phrase per line"></textarea><ul class="lvx-transcript-changes" aria-live="polite"></ul><div class="lvx-tap-actions"><button data-sync="transcript-apply">Apply to preview</button><button data-sync="transcript-close">Close</button></div></dialog><section class="lvx-event-review" hidden aria-label="Assign recorded events"><p class="lvx-event-summary" role="status"></p><div class="lvx-event-phrases"></div><div class="lvx-tap-actions"><button data-sync="events-review">Use reviewed assignments</button><button data-sync="events-export">Export events</button></div><p class="lvx-sync-hint">Your counts override dictionary guesses. Pitch events stay within their syllable. Amber means uncertain or changed. Raw timestamps never move. A word starts at its first entrance; its end stays provisional until word-boundary cleanup. Long gaps are flagged because a held syllable can look like the next word. Unresolved phrases stay in the take.</p></section>
@@ -1631,9 +1642,9 @@
     syncButton('capture-phrase').disabled=timing.busy||!getMedia()||!take||take.pendingStartMs!==null;
     syncButton('tap-skip').disabled=timing.busy||!take||take.index>=take.units.length-1;
     if(eventPass()){
-      syncPanel.querySelector('.lvx-tap-panel > .lvx-sync-hint').textContent='Space records a syllable entrance. N or Shift+Space records a pitch change within it. Group words after Stop; use holds to capture releases.';
+      syncPanel.querySelector('.lvx-tap-panel > .lvx-sync-hint').textContent='New sung syllable: Space. Same syllable, different note: N. These choices are recorded now; no later event-type sorting pass.';
       cue.querySelector(':scope > small').textContent=take?.status==='armed'?'PERFORMANCE EVENTS · RECORDING':'PERFORMANCE EVENTS · READY';
-      cue.querySelector('.lvx-perform-instruction').textContent='Space: syllable · N / Shift+Space: pitch change';
+      cue.querySelector('.lvx-perform-instruction').textContent='New syllable → Space · same syllable, new note → N';
       syncPanel.querySelector('.lvx-tap-status').textContent=take?tapCount(take)+' events · '+(take.status==='armed'?'recording exact timestamps':'retained for word assignment'):'Start, then tap every syllable you hear';
       syncButton('tap-use').hidden=true;
       if(syllableHold(take)||!take&&syncButton('tap-syllable-flow').value==='holds'){
@@ -1650,11 +1661,26 @@
       syncPanel.querySelector('.lvx-tap-status').textContent=(wordTake(take)?(take.retime?`Retiming phrase ${phraseOrdinal(take.retime.phraseId)} · `:'')+`${take.holds.length} / ${take.units.length} words held · ${take.syllableEvents.length} syllable taps`:'Start, then hold Space for each word')+(retimeFlags.items.length?` · ⚑ ${retimeFlags.items.length} flagged`:'');
       syncButton('tap-use').hidden=true;
     }else syncButton('tap-use').hidden=false;
+    refreshCaptureKeys();
     const recordingLane=timing.draft?.score.lanes.find(l=>l.id===timingPhrase()?.laneId);if(recordingLane){const label=cue.querySelector(':scope > small');label.textContent=`SPACE → ${recordingLane.label||(recordingLane.role==='lead'?'Main':'Backing')} · `+label.textContent;}
     refreshTranscriptEditor();
     if(state.score&&retimeFlags.mediaKey!==LvScore.mediaKey(state.score.source))void loadRetimeFlags();
     if(state.score&&tempo.mediaKey!==LvScore.mediaKey(state.score.source))void loadTempo();
     renderEventReview();renderPerformPhrase(); renderTapTimeline(); refreshMarkCorrection(); refreshEffectPanel();
+  }
+  function refreshCaptureKeys(){
+    const guide=syncPanel.querySelector('.lvx-capture-keys'),take=tapping.take;guide.hidden=!eventPass();if(guide.hidden)return;
+    const events=take?.events||[],holding=take?.pendingStartMs!=null;
+    guide.querySelector('[data-capture-key=syllable]').dataset.active=String(holding);
+    guide.querySelector('[data-capture-count=syllable]').textContent=events.filter(e=>e.kind==='syllable-entrance').length+(holding?1:0);
+    guide.querySelector('[data-capture-count=note]').textContent=events.filter(e=>e.kind==='note-change').length;
+    guide.querySelector('[data-capture-key=syllable] small').textContent=syllableHold(take)||!take&&syncButton('tap-syllable-flow').value==='holds'?'Hold while you sing it · release at its end':'Tap once at its entrance';
+    syncButton('tap-note').disabled=timing.busy||take?.status!=='armed'||(syllableHold(take)?!holding:!events.some(e=>e.kind==='syllable-entrance'));
+  }
+  function flashCaptureKey(kind,text){
+    const guide=syncPanel.querySelector('.lvx-capture-keys');guide.querySelector('.lvx-capture-feedback').textContent=text;
+    const key=guide.querySelector('[data-capture-key='+kind+']');key.getAnimations().forEach(a=>a.cancel());
+    if(!bloomMotion.matches)key.animate([{filter:'brightness(1.7)'},{filter:'brightness(1)'}],{duration:220});
   }
   function phraseSpellingState() {
     const key=`${timing.draft?.token}:${timingPhrase()?.id}`;
@@ -2377,13 +2403,14 @@
     if(media.seeking){setSyncNotice('Wait for the seek to finish, then press to record.');return;}
     try {
       const clock=Math.max(0,Math.round(media.currentTime*1000-(rawTake(take)?0:timingOffsetMs())));
-      if(event.shiftKey){tapping.take=LvTapTiming.markEvent(take,clock,{kind:'note-change',playbackRate:media.playbackRate});refreshTimingPanel();setSyncNotice('Pitch change recorded within the current syllable; word counts unchanged.');return;}
+      if(event.shiftKey){if(syllableHold(take)&&take.pendingStartMs===null||!syllableHold(take)&&!take.events.some(e=>e.kind==='syllable-entrance')){flashCaptureKey('note','Start a syllable with Space first');return;}tapping.take=LvTapTiming.markEvent(take,clock,{kind:'note-change',playbackRate:media.playbackRate});refreshTimingPanel();flashCaptureKey('note','N · Performance event recorded · same syllable');setSyncNotice('Performance event recorded within the current syllable; word counts unchanged.');return;}
       const early=eventTake(take)&&take.units.some(u=>u.phraseId===timingPhrase()?.id&&clock<u.minMs);
       const rewound=take.pendingStartMs==null&&clock<(take.lastMs??-1);
       const punching=!event.release&&(tapping.listening||early||rewound);
       if(punching)take=LvTapTiming.punchIn(take,clock,{phraseId:timingPhrase()?.id});
       if (event.release) tapping.heldInput = null;
       tapping.take = (wordTake(take)?(event.release?LvTapTiming.releaseWord:LvTapTiming.pressWord):eventTake(take)?(syllableHold(take)?(event.release?LvTapTiming.releaseEventHold:LvTapTiming.pressEventHold):LvTapTiming.markEvent):event.release ? LvTapTiming.release : LvTapTiming.mark)(take, Math.round(media.currentTime * 1000 - (rawTake(take)?0:timingOffsetMs())), {playbackRate:media.playbackRate});
+      if(eventTake(tapping.take))flashCaptureKey('syllable',event.release?'Released · ready for the next syllable':'Space · New syllable recorded');
       if(punching){tapping.eventApplied=[];tapping.listening=false;tapping.backAnchorMs=null;tapping.backIndex=null;tapping.backPhraseId=null;tapping.rewindPhraseId=null;}
       if(!rawTake(tapping.take))followTapUnit();
       timing.auditioned = false;
@@ -2798,6 +2825,7 @@
   syncButton('capture-restart').addEventListener('click',restartPlayback);
   syncButton('capture-phrase').addEventListener('click',()=>rewindCapturePhrase(true));
   syncButton('tap-arm').addEventListener('click', armTapTake);
+  syncButton('tap-note').onclick=()=>markTapTime({shiftKey:true});
   syncButton('tap-mark').addEventListener('click', event => { if (!holdCapture()) markTapTime(event); });
   syncButton('tap-mark').addEventListener('pointerdown', event => {
     if (!holdCapture() || tapping.take?.status !== 'armed' || tapping.heldInput || tapping.take.pendingStartMs !== null || event.button !== 0) return;
@@ -3786,7 +3814,7 @@
       backingLabels=Object.fromEntries(Object.entries(result?.lvxBackingLabels||{}).filter(([key,value])=>['hidden','header','prefix'].includes(value)));
       syncButton('record-other-parts').checked=result?.lvxRecordUnrecordedParts===true;
       linger=LvBeatTrack.lingerSettings(result?.lvxLinger);
-      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={beatPulse:c.beatPulse!==false,landing:Object.hasOwn(LvChoreography.landingStyles,c.landing)?c.landing:'settle',dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic===true,autoFire:c.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,c.fireColor)?c.fireColor:'ember',fireSmoke:c.fireSmoke!==false,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:Object.hasOwn(LvChoreography.layoutOrigins,c.origin)?c.origin:'top-left'};}
+      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={...heldSettings(c),beatPulse:c.beatPulse!==false,landing:Object.hasOwn(LvChoreography.landingStyles,c.landing)?c.landing:'settle',dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic===true,autoFire:c.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,c.fireColor)?c.fireColor:'ember',fireSmoke:c.fireSmoke!==false,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:Object.hasOwn(LvChoreography.layoutOrigins,c.origin)?c.origin:'top-left'};}
       bloomEnabled=result?.lvxBloomEnabled!==false;
       void loadPlacement(true);
       if (result && result.lvxTheme && THEMES.includes(result.lvxTheme)) {
@@ -5213,7 +5241,7 @@
   let beatDisplayCache={score:null,map:null,ends:{}};
   const beatStyledNodes=new Set();
   let expressionPlan={score:null,cues:{}};
-  function expressionCues(score){if(expressionPlan.score!==score||expressionPlan.library!==wordRuleSets){const set=LvChoreography.wordSetFor(wordRuleSets,score.source);expressionPlan={score,library:wordRuleSets,cues:LvChoreography.compose(score,set.rules,set)};}return expressionPlan.cues;}
+  function expressionCues(score){if(expressionPlan.score!==score||expressionPlan.library!==wordRuleSets||expressionPlan.heldKey!==JSON.stringify(heldSettings(choreography))){const set=LvChoreography.wordSetFor(wordRuleSets,score.source);expressionPlan={score,library:wordRuleSets,heldKey:JSON.stringify(heldSettings(choreography)),cues:LvChoreography.compose(score,set.rules,{...set,...heldSettings(choreography)})};}return expressionPlan.cues;}
   function ensureDanceLetters(node){
     if(!node.dataset.flexLetters){const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT),texts=[];while(walker.nextNode())texts.push(walker.currentNode);
       for(const text of texts){if(text.parentElement.closest('.lvx-dance-letter'))continue;const fragment=document.createDocumentFragment();for(const char of Array.from(text.textContent)){const letter=document.createElement('span');letter.className='lvx-dance-letter';letter.textContent=char;fragment.append(letter);}text.replaceWith(fragment);}node.dataset.flexLetters='true';}
@@ -5270,8 +5298,8 @@
   function expressLine(line,words,clock,cues,settings=choreography){
     if(typeof LvChoreography==='undefined')return;
     const paint=(node,cue,effects,automatic,danceAllowed=false,heldMotion=true,motion)=>{
-      const value=LvChoreography.expressionAt(cue,clock,{mode:settings.mode,reduced:bloomMotion.matches,effects,automatic});
-      if(settings.beatPulse!==false&&tempo.map&&!effects?.length&&value.reason==='sustained')value.scale=1;
+      const value=LvChoreography.expressionAt(cue,clock,{mode:settings.mode,reduced:bloomMotion.matches,effects,automatic,heldEffect:settings.heldEffect});
+      if(settings.beatPulse!==false&&tempo.map&&!effects?.length&&value.reason==='sustained'&&settings.heldEffect!=='pulse')value.scale=1;
       node.classList.add('lvx-expression');node.dataset.expression=value.reason;node.dataset.authoredExpression=String(Boolean(effects?.length));
       const angle=(parseFloat(node.style.rotate)||0)*Math.PI/180,x=value.x*Math.cos(angle)+value.y*Math.sin(angle),y=-value.x*Math.sin(angle)+value.y*Math.cos(angle);
       node.style.transform=`translate(${x.toFixed(3)}px,${y.toFixed(3)}px) rotate(${value.turn.toFixed(3)}deg) scale(${value.scale.toFixed(4)}) perspective(8em) rotateY(calc(${(value.spin||0).toFixed(3)}deg + var(--lvx-beat-spin,0deg)))`;
@@ -5367,6 +5395,7 @@
     <button type="button" data-live-arm>Arm · Enter</button><button type="button" data-live-play>Play · Space</button>
     <label>Mode<select data-live-mode aria-label="Live choreography mode"><option value="effects">Effects · 1–9</option><option value="placement">Place · click stage</option></select></label>
     <details data-live-pop="look"><summary>Look & motion</summary><div class="lvx-live-pop"><label>Vocal track<select data-live-lane aria-label="Live vocal track"></select></label><label>Look<select data-live-look aria-label="Live display look"></select></label><label>Layout<select data-live-layout aria-label="Live layout"><option value="classic">Classic</option><option value="fall">Falling</option><option value="puzzle">Puzzle</option><option value="vinyl">Vinyl</option></select></label><label>Word dance<select data-live-dance aria-label="Live word dance"></select></label><label><input type="checkbox" data-live-auto> Automatic expression</label><label>Word look<select data-live-word-look aria-label="Selected word look"></select></label><label>Word emoji<input data-live-emoji aria-label="Selected word emoji" maxlength="32" placeholder="Emoji or blank"></label><button type="button" data-live-emoji-apply>Apply emoji to word</button><small>Word changes stay in this song’s preview until Save.</small></div></details>
+    <details data-live-pop="held"><summary>Held notes</summary><div class="lvx-live-pop"><label><input type="checkbox" data-live-held-auto> Automatic expression</label><label>Held effect for this word<select data-live-word-held aria-label="Selected word held effect"><option value="">Follow global rule</option><option value="always">Always qualify</option><option value="never">Never qualify</option></select></label><small>Selected-word changes use Save / Undo. Global settings save immediately.</small></div></details>
     <details data-live-pop="effects"><summary>Effects</summary><div class="lvx-live-pop lvx-live-effect-grid"></div></details>
     <details data-live-pop="placement"><summary>Landing</summary><div class="lvx-live-pop"><label>Entry<select data-live-landing aria-label="Live landing profile"></select></label><label>Motion<select data-live-motion aria-label="Live motion profile"></select></label><p>Arm, choose Place, then click where the current word or syllable should land. Existing timing stays fixed.</p></div></details>
     <details data-live-pop="layers"><summary>Layers <span data-live-count>0</span></summary><div class="lvx-live-pop"><label><input type="checkbox" data-live-all> All song layers</label><div data-live-layers></div><div class="lvx-live-pages"><button type="button" data-live-prev aria-label="Previous layers">‹</button><output data-live-page></output><input type="range" data-live-rail aria-label="Layer page" min="0" max="0" value="0"><button type="button" data-live-next aria-label="Next layers">›</button></div><small>Selected layer: Backspace removes it. Base effects are labeled separately. Undo restores the last change.</small></div></details>
@@ -5411,7 +5440,7 @@
       if(liveStage.ops.length&&(liveStage.mediaKey!==key||liveStage.token!==timing.draft.token||liveStage.revision!==timing.draft.previewRevision))throw Error('A retained choreography take belongs to another preview. Its recovery copy is intact.');
       liveStage.mediaKey=key;liveStage.token=timing.draft.token;liveStage.revision=timing.draft.previewRevision;liveStage.active=true;liveStage.armed=false;liveStage.laneId=timingPhrase()?.laneId||timing.draft.score.lanes.find(l=>l.role==='lead')?.id;liveStage.pinned=null;railState.follow=true;railState.recordReady=false;
       timing.view='proposed';syncPanel.hidden=true;stageEdit.active=false;stagePanel.hidden=true;stageSurface.hidden=true;root.classList.remove('lvx-stage-editing','lvx-sync-open','lvx-tempo-required');toggleThemePicker(false);stopEffectPreview();liveDock.hidden=false;root.classList.add('lvx-live-stage');
-      liveOptions(liveControl('lane'),Object.fromEntries(timing.draft.score.lanes.map(l=>[l.id,l.label])),liveStage.laneId);liveControl('look').value=state.theme;liveControl('layout').value=choreography.mode;liveControl('dance').value=choreography.dance;liveControl('auto').checked=choreography.automatic;
+      liveOptions(liveControl('lane'),Object.fromEntries(timing.draft.score.lanes.map(l=>[l.id,l.label])),liveStage.laneId);liveControl('look').value=state.theme;liveControl('layout').value=choreography.mode;liveControl('dance').value=choreography.dance;liveControl('auto').checked=choreography.automatic;const held=liveDock.querySelector('.lvx-held-settings');if(held)held.replaceWith(buildHeldControls());else liveDock.querySelector('[data-live-pop=held] .lvx-live-pop').append(buildHeldControls());liveControl('held-auto').checked=choreography.automatic;
       liveMessage('Stage follows the song. Arm to perform; click a lyric to select it while stopped.');
     }catch(error){setHud(error.message,true,true);}finally{timing.busy=false;refreshLiveStage();syncSidebarState();state.scoreSignature='';if(state.score)renderScore(getMediaTimeMs());}
   }
@@ -5450,8 +5479,8 @@
     for(const key of ['mode','save','close','arm'])liveControl(key).disabled=timing.busy||Boolean(liveStage.drag);
     liveControl('save').disabled=timing.busy||Boolean(liveStage.drag)||liveStage.armed||!hasUnsavedWork();liveControl('undo').disabled=timing.busy||Boolean(liveStage.drag)||!liveStage.history.length&&!timing.draft?.undoScores?.length;
     const targetKey=target?.word.id+':'+(liveScore()?.revision||0);
-    if(liveDock.dataset.target!==targetKey){liveDock.dataset.target=targetKey;liveControl('word-look').value=target?.word.appearance?.look||'';if(document.activeElement!==liveControl('emoji'))liveControl('emoji').value=target?.word.appearance?.emoji||'';}
-    for(const name of ['word-look','emoji','emoji-apply'])liveControl(name).disabled=timing.busy||!target;
+    if(liveDock.dataset.target!==targetKey){liveDock.dataset.target=targetKey;liveControl('word-look').value=target?.word.appearance?.look||'';liveControl('word-held').value=target?.word.appearance?.held||'';if(document.activeElement!==liveControl('emoji'))liveControl('emoji').value=target?.word.appearance?.emoji||'';}
+    for(const name of ['word-look','word-held','emoji','emoji-apply'])liveControl(name).disabled=timing.busy||!target;
     const rows=liveLayerRows(),pages=Math.max(1,Math.ceil(rows.length/6));liveStage.page=Math.min(liveStage.page,pages-1);liveControl('count').textContent=rows.length;
     const key=JSON.stringify([rows,liveStage.page,liveStage.selected]);if(liveDock.__layersKey!==key){liveDock.__layersKey=key;const list=liveControl('layers');list.replaceChildren();for(const row of rows.slice(liveStage.page*6,liveStage.page*6+6)){const item=document.createElement('div'),select=document.createElement('button'),remove=document.createElement('button');item.className='lvx-live-layer';select.type=remove.type='button';select.textContent=row.label;select.dataset.layerId=row.id;select.setAttribute('aria-pressed',String(row.id===liveStage.selected));select.onclick=()=>{liveStage.selected=row.id;refreshLiveStage();};remove.textContent='×';remove.setAttribute('aria-label','Remove '+row.label);remove.onclick=()=>removeLiveLayer(row.id);item.append(select,remove);list.append(item);}if(!rows.length)list.textContent='No recorded layers on this target.';}
     liveControl('page').textContent=(liveStage.page+1)+' / '+pages;liveControl('rail').max=String(pages-1);liveControl('rail').value=String(liveStage.page);liveControl('prev').disabled=liveStage.page===0;liveControl('next').disabled=liveStage.page===pages-1;
@@ -5470,9 +5499,9 @@
   liveControl('arm').onclick=()=>void toggleLiveArmed();liveControl('play').onclick=()=>{const media=getMedia();if(media?.paused)void media.play().catch(e=>liveMessage(e.message));else media?.pause();refreshLiveStage();};
   liveControl('lane').onchange=e=>{liveStage.laneId=e.target.value;liveStage.pinned=null;railState.page=0;railState.follow=true;refreshLiveStage();};
   liveControl('mode').onchange=e=>{liveStage.mode=e.target.value;refreshLiveStage();};
-  liveControl('look').onchange=e=>applyTheme(e.target.value);liveControl('layout').onchange=e=>{setChoreography({...choreography,mode:e.target.value});state.scoreSignature='';};liveControl('dance').onchange=e=>setChoreography({...choreography,dance:e.target.value});liveControl('auto').onchange=e=>setChoreography({...choreography,automatic:e.target.checked});
+  liveControl('look').onchange=e=>applyTheme(e.target.value);liveControl('layout').onchange=e=>{setChoreography({...choreography,mode:e.target.value});state.scoreSignature='';};liveControl('dance').onchange=e=>setChoreography({...choreography,dance:e.target.value});liveControl('auto').onchange=e=>{setChoreography({...choreography,automatic:e.target.checked});liveControl('held-auto').checked=choreography.automatic;};liveControl('held-auto').onchange=e=>{setChoreography({...choreography,automatic:e.target.checked});liveControl('auto').checked=choreography.automatic;};
   const changeLiveWord=change=>{const t=liveTarget();if(!t)return;const appearance={...t.word.appearance,...change};for(const key of Object.keys(appearance))if(appearance[key]===null)delete appearance[key];if(queueLiveOperation({type:'setWordAppearance',wordId:t.word.id,appearance:Object.keys(appearance).length?appearance:null}))liveMessage('Word appearance updated in this song’s preview.');};
-  liveControl('word-look').onchange=e=>changeLiveWord({look:e.target.value||null});liveControl('emoji-apply').onclick=()=>changeLiveWord({emoji:liveControl('emoji').value.trim()});
+  liveControl('word-held').onchange=e=>changeLiveWord({held:e.target.value||null});liveControl('word-look').onchange=e=>changeLiveWord({look:e.target.value||null});liveControl('emoji-apply').onclick=()=>changeLiveWord({emoji:liveControl('emoji').value.trim()});
   liveControl('all').onchange=e=>{liveStage.all=e.target.checked;liveStage.page=0;refreshLiveStage();};liveControl('prev').onclick=()=>{liveStage.page=Math.max(0,liveStage.page-1);refreshLiveStage();};liveControl('next').onclick=()=>{liveStage.page++;refreshLiveStage();};liveControl('rail').oninput=e=>{liveStage.page=Number(e.target.value);refreshLiveStage();};
   liveControl('rail').onpointerdown=e=>{const rect=e.currentTarget.getBoundingClientRect(),max=Number(e.currentTarget.max);if(!max)return;const at=(e.clientX-rect.left)/rect.width,current=liveStage.page/max;if(Math.abs(at-current)>.05){e.preventDefault();liveStage.page=Math.max(0,Math.min(max,liveStage.page+(at>current?1:-1)));refreshLiveStage();}};
   liveControl('undo').onclick=()=>void undoLiveStage();liveControl('save').onclick=()=>void commitLiveStage(true);liveControl('close').onclick=async()=>{if(!await commitLiveStage())return;liveStage.active=false;liveDock.hidden=true;lyricRail.hidden=true;pathControls.hidden=true;railState.recordReady=false;root.classList.remove('lvx-live-stage','lvx-live-placing');syncSidebarState();};

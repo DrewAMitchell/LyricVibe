@@ -140,3 +140,19 @@ or its Land handle. The song plays from that unit's cue; release to finish, or l
 it stop at the unit's end. Escape cancels. One Undo restores the prior path.
 **Save** keeps the result. **Follow song** follows the playhead again; the arrow
 beside Lyrics collapses the rail when you need the full stage.
+
+### Capture keys and held notes
+
+In syllable event capture, **Space** marks a new syllable and **N** marks a
+new note within that syllable. Hold Space through its duration; the key stays
+lit, and N flashes separately without advancing the syllable count.
+For one “oh” across three notes: hold Space, tap N twice, then release.
+
+Open **Stage live → Held notes** for global qualification (relative length,
+minimum duration per syllable, or explicit words only) and the effect (Breathe,
+Wave, Glow, Pulse, or None). Select a word in the rail for **Follow global /
+Always / Never**. Global defaults save immediately; word overrides use Save/Undo.
+Automatic expression must be enabled. Authored effects and word rules take
+priority. The rule uses saved timing and estimated counts for unsplit words,
+not detected pitch. Existing scores remain valid; scores with explicit held
+word overrides require this version or newer.

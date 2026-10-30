@@ -119,7 +119,7 @@
   }
   // Unknown syllable counts remain estimates; they never become timing evidence.
   function syllableCount(word){return word.syllables?.length||Math.max(1,(token(word.text).replace(/e$/,'').match(/[aeiouy]+/g)||[]).length);}
-  function compose(score,rules=defaultWordRules,{emojiMap=[],emojiDictionary=true,emojiHold='word'}={}){
+  function compose(score,rules=defaultWordRules,{emojiMap=[],emojiDictionary=true,emojiHold='word',heldRule='relative',heldMinMs=800}={}){
     const ruleMap=new Map(validateWordRules(rules).map(rule=>[rule.word,rule]));
     const emojiRules=new Map(validateEmojiMap(emojiMap).flatMap(group=>group.terms.map(term=>[term,group.emoji])));
     const phrases=score.phrases.map(phrase=>{
@@ -136,7 +136,8 @@
       p.words.forEach((word,i)=>{
         const count=syllableCount(word),duration=word.endMs-word.startMs;
         const units=word.syllables?.length?word.syllables:[word];
-        const sustained=units.filter(u=>u.endMs-u.startMs>=Math.min(1100,Math.max(600,perSyllable*1.65))*(u===word?count:1));
+        const threshold=heldRule==='duration'?heldMinMs:Math.min(1100,Math.max(600,perSyllable*1.65));
+        const sustained=units.filter(u=>word.appearance?.held==='never'?false:word.appearance?.held==='always'?true:heldRule==='off'?false:u.endMs-u.startMs>=threshold*(u===word?count:1));
         const text=token(word.text),previous=p.words.slice(Math.max(0,i-2),i).map(w=>token(w.text));
         const direction=text==='up'?[0,-1]:text==='down'?[0,1]:['left','right'].includes(text)&&previous.includes('the')&&previous.includes('to')?[text==='left'?-1:1,0]:null;
         const impact=fast&&gap>=550&&i===p.words.length-1;
@@ -146,7 +147,7 @@
         cues[word.id]={emoji,emojiCount:glyphParts(emoji).length,emojiEndMs:emojiHold==='phrase'?Math.max(word.endMs,p.end,p.phrase.endMs??p.end):word.endMs,doubled:!!(word.doubled||p.phrase.doubled),wordId:word.id,phraseId:p.phrase.id,startMs:word.startMs,endMs:word.endMs,
           weight:(lightWords.has(text)?.78:1)+Math.min(.25,text.length*.018)+Math.min(.16,(count-1)*.06)+(impact?.4:0)+(sustained.length?.18:0),
           sustained:sustained.map(u=>({id:u.id,startMs:u.startMs,endMs:u.endMs})),impact,direction,reasons,...(rule?{rule}:{}),
-          evidence:{phraseSyllablesPerSecond:p.rate,pauseAfterMs:gap,syllableBasis:word.syllables?.length?'authored':'estimated-from-spelling'}};
+          evidence:{phraseSyllablesPerSecond:p.rate,pauseAfterMs:gap,syllableBasis:word.syllables?.length?'authored':'estimated-from-spelling',heldRule,heldThresholdMs:threshold,heldOverride:word.appearance?.held||'auto'}};
       });
     }
     return cues;
@@ -169,13 +170,13 @@
   // One eased full turn, held face-on at either end; source clock owns replay.
   function coinSpin(progress){const u=clamp((progress-.1)/.8);return 360*u*u*(3-2*u);}
   // Geometry, expression, and authored beat accents use separate transform layers.
-  function expressionAt(cue,now,{mode='classic',reduced=false,effects=[],automatic=true}={}){
+  function expressionAt(cue,now,{mode='classic',reduced=false,effects=[],automatic=true,heldEffect='breathe'}={}){
     const out={x:0,y:0,turn:0,scale:1,color:null,brightness:1,wave:0,wavePhase:0,spin:0,reason:''};
     if(!cue||now<cue.startMs||now>=cue.endMs)return out;
     const elapsed=now-cue.startMs,t=elapsed/1000,duration=cue.endMs-cue.startMs;
     const envelope=Math.min(1,elapsed/90,(cue.endMs-now)/100),intensity=mode==='puzzle'?1:mode==='fall'?.72:.55;
     if(effects.some(e=>e._layer)){
-      const base=expressionAt(cue,now,{mode,reduced,automatic,effects:effects.filter(e=>!e._layer)}),added=expressionAt(cue,now,{mode,reduced,automatic:false,effects:effects.filter(e=>e._layer).map(({_layer,...e})=>e)});
+      const base=expressionAt(cue,now,{mode,reduced,automatic,heldEffect,effects:effects.filter(e=>!e._layer)}),added=expressionAt(cue,now,{mode,reduced,automatic:false,effects:effects.filter(e=>e._layer).map(({_layer,...e})=>e)});
       return {...base,x:base.x+added.x,y:base.y+added.y,turn:base.turn+added.turn,scale:base.scale*added.scale,spin:(base.spin||0)+(added.spin||0),brightness:base.brightness*added.brightness,wave:Math.max(base.wave,added.wave),wavePhase:added.wave?added.wavePhase:base.wavePhase,waveAxis:added.wave?added.waveAxis:base.waveAxis,shadow:[base.shadow,added.shadow].filter(Boolean).join(','),reason:(base.reason?base.reason+' + ':'')+'layer'};
     }
     if(effects.length){
@@ -198,7 +199,10 @@
       return {...value,reason:'word-rule:'+cue.rule.word};
     }
     const held=cue.sustained?.find(u=>now>=u.startMs&&now<u.endMs);
-    if(held){
+    if(held&&heldEffect!=='off'&&heldEffect!=='breathe'){
+      Object.assign(out,expressionAt({...cue,startMs:held.startMs,endMs:held.endMs},now,{mode,reduced,automatic:false,effects:[{type:heldEffect,strength:.55}]}),{reason:'sustained'});
+    }
+    if(held&&heldEffect==='breathe'){
       const phase=(now-held.startMs)/1000,breath=reduced?.5:(1-Math.cos(phase*Math.PI*2/1.15))/2;
       out.scale+=reduced?0:breath*.055*intensity*envelope;
       out.color=`hsl(${(42+breath*24).toFixed(2)} 92% ${(83-breath*15).toFixed(2)}%)`;
