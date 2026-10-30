@@ -355,6 +355,7 @@
   const sidebarView = (key,label,title,activate) => { const button=document.createElement('button');button.type='button';button.dataset.sidebarView=key;button.textContent=label;button.title=title;button.onclick=activate;sidebarItems.append(button);return button; };
   const displayLookView=sidebarView('display-look','Look','Display · choose a look',()=>{studio.view='look';toggleThemePicker(true);syncSidebarState();});
   const displayMotionView=sidebarView('display-motion','Motion','Display · tune motion',()=>{studio.view='motion';toggleThemePicker(true);syncSidebarState();});
+  const displayWordsView=sidebarView('display-words','Words','Display · word rules and emoji maps',()=>{studio.view='words';toggleThemePicker(true);syncSidebarState();});
   const displayStageView=sidebarView('display-stage','Stage','Display · adjust placement and stage',()=>{studio.view='stage';toggleThemePicker(true);syncSidebarState();});
   const timingRecordView=sidebarView('timing-record','Record','Timing · record a take',()=>void openTimingView('record'));
   const timingRefineView=sidebarView('timing-refine','Refine','Timing · refine saved or recorded timing',()=>void openTimingView('review'));
@@ -425,8 +426,8 @@
   sidebarPin.onclick=()=>{const pinned=sidebar.classList.toggle('lvx-sidebar-pinned');sidebarPin.setAttribute('aria-pressed',String(pinned));sidebarPin.setAttribute('aria-label',pinned?'Unpin controls':'Pin controls open');};
   const syncSidebarState=()=>{
     const locked=timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active;
-    for(const button of [displayLookView,displayMotionView,displayStageView,stageEditView,timingRecordView,timingRefineView,timingEffectsView,timingBeatView])button.disabled=locked;
-    for(const [button,on] of [[displayLookView,themePicker.hidden===false&&studio.view==='look'],[displayMotionView,themePicker.hidden===false&&studio.view==='motion'],[displayStageView,themePicker.hidden===false&&studio.view==='stage'],[timingRecordView,!syncPanel.hidden&&timingWorkspace.view==='record'],[timingRefineView,!syncPanel.hidden&&timingWorkspace.view==='review'],[timingEffectsView,!syncPanel.hidden&&timingWorkspace.view==='effects'],[timingBeatView,!syncPanel.hidden&&timingWorkspace.view==='beat'],[stageEditView,stageEdit.active]])button.setAttribute('aria-current',on?'page':'false');
+    for(const button of [displayLookView,displayMotionView,displayWordsView,displayStageView,stageEditView,timingRecordView,timingRefineView,timingEffectsView,timingBeatView])button.disabled=locked;
+    for(const [button,on] of [[displayLookView,themePicker.hidden===false&&studio.view==='look'],[displayMotionView,themePicker.hidden===false&&studio.view==='motion'],[displayWordsView,themePicker.hidden===false&&studio.view==='words'],[displayStageView,themePicker.hidden===false&&studio.view==='stage'],[timingRecordView,!syncPanel.hidden&&timingWorkspace.view==='record'],[timingRefineView,!syncPanel.hidden&&timingWorkspace.view==='review'],[timingEffectsView,!syncPanel.hidden&&timingWorkspace.view==='effects'],[timingBeatView,!syncPanel.hidden&&timingWorkspace.view==='beat'],[stageEditView,stageEdit.active]])button.setAttribute('aria-current',on?'page':'false');
   };
   sidebar.addEventListener('pointerenter',syncSidebarState);
   for(const button of sidebarItems.children)button.addEventListener('click',syncSidebarState);
@@ -604,8 +605,10 @@
       const clock=selected?previewTime%(words.length*450+1600):words.length*450+700;
       words.forEach((word,i)=>paintWordTexture(line.children[i],word,clock,tile.dataset.theme));
       const previewHeight=Math.max(60,tile.querySelector('.lvx-tile-stage').clientHeight-16);
-      choreographLine(line,words,clock,tile.querySelector('.lvx-tile-stage').clientWidth-16,previewHeight,Math.min(64,previewHeight*.7),{},Math.min(48,previewHeight*.54));
-      if(typeof LvChoreography!=='undefined')expressLine(line,words,clock,LvChoreography.compose({source:{durationMs:words.length*450+1800},phrases:[{id:'preview',laneId:'lead',words}]},editingWordSet().rules,editingWordSet()),{...choreography,theme:tile.dataset.theme,emojiTags:!!editingWordSet().emojiTags});
+      const settings={...choreography,theme:tile.dataset.theme,emojiTags:!!editingWordSet().emojiTags},cues=LvChoreography.compose({source:{durationMs:words.length*450+1800},phrases:[{id:'preview',laneId:'lead',words}]},editingWordSet().rules,editingWordSet());
+      // Layout and painting must agree on emoji space and expression weights.
+      choreographLine(line,words,clock,tile.querySelector('.lvx-tile-stage').clientWidth-16,previewHeight,Math.min(64,previewHeight*.7),cues,Math.min(48,previewHeight*.54),settings);
+      expressLine(line,words,clock,cues,settings);
     }
   }
   function setPreviewPlaying(value){previewPlaying=value;cancelAnimationFrame(previewFrame);previewFrame=0;previewLast=0;themePicker.dataset.playing=String(value);const b=themePicker.querySelector('[data-preview-play]');if(b){b.textContent=value?'Pause preview':'Play preview';b.setAttribute('aria-pressed',String(value));}renderStylePreview();if(value&&!themePicker.hidden)previewFrame=requestAnimationFrame(previewTick);}
@@ -693,10 +696,10 @@
     heading.querySelector('button').onclick=()=>{toggleThemePicker(false);themeButton.focus();};
     const tabs=document.createElement('div');tabs.className='lvx-studio-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Display studio');
     const panels={};
-    for(const [id,label]of [['look','Look'],['motion','Motion'],['stage','Stage']]){
-      const tab=document.createElement('button');tab.type='button';tab.textContent=label;tab.id='lvx-style-tab-'+id;tab.dataset.studioTab=id;tab.setAttribute('role','tab');tab.setAttribute('aria-controls','lvx-style-'+id);tabs.append(tab);
+    for(const [id,label,hint]of [['look','Look','Font & color'],['motion','Motion','Layout & dance'],['words','Words','Rules & emoji'],['stage','Stage','Position & exits']]){
+      const tab=document.createElement('button');tab.type='button';tab.textContent=label;tab.setAttribute('aria-label',label);const sub=document.createElement('small');sub.textContent=hint;tab.append(sub);tab.id='lvx-style-tab-'+id;tab.dataset.studioTab=id;tab.setAttribute('role','tab');tab.setAttribute('aria-controls','lvx-style-'+id);tabs.append(tab);
       const panel=document.createElement('section');panel.className='lvx-studio-page';panel.id='lvx-style-'+id;panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby',tab.id);panels[id]=panel;
-      tab.onclick=()=>{studio.view=id;show();};
+      tab.onclick=()=>{studio.view=id;show();syncSidebarState();};
     }
     tabs.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;const buttons=[...tabs.children],at=buttons.indexOf(document.activeElement);if(at<0)return;event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?buttons.length-1:(at+(event.key==='ArrowRight'?1:-1)+buttons.length)%buttons.length;buttons[next].click();buttons[next].focus();};
     const caption=document.createElement('p');caption.className='lvx-studio-caption';caption.textContent='Hover to preview · click to apply.';
@@ -713,7 +716,8 @@
     const tip=danceLabel.querySelector('option[value=tip]');if(tip)tip.textContent='Topple · backward fall';
     const sample=tiles.find(t=>t.dataset.theme===state.theme).cloneNode(true);sample.removeAttribute('aria-pressed');sample.removeAttribute('type');sample.setAttribute('aria-label','Current lyric motion preview');sample.classList.add('lvx-motion-sample');sample.onclick=()=>setPreviewPlaying(!previewPlaying);
     sample.querySelector('.lvx-tile-name').textContent='CURRENT LOOK · '+THEME_LABELS[state.theme];
-    panels.motion.append(buildWordRulesEditor(),layoutRow,effects);
+    panels.words.append(buildWordRulesEditor());
+    panels.motion.append(layoutRow,effects);
     const fireLabel=document.createElement('label');fireLabel.className='lvx-auto-fire';fireLabel.innerHTML='<input type="checkbox" aria-label="Automatic fire words"> Fire texture on the word “fire”';fireLabel.querySelector('input').checked=choreography.autoFire;fireLabel.querySelector('input').onchange=event=>{setChoreography({...choreography,autoFire:event.target.checked});renderStylePreview();};panels.look.append(fireLabel);
     const fireOptions=document.createElement('div');fireOptions.className='lvx-fire-options';fireOptions.innerHTML='<label>Fire color <select aria-label="Fire color"></select></label><label><input type="checkbox" aria-label="Fire smoke"> Smoke</label>';
     const fireColor=fireOptions.querySelector('select'),fireSmoke=fireOptions.querySelector('input');
@@ -732,7 +736,7 @@
     panels.stage.append(performanceControls,backing,settings,exits,buildOverlayExportControls());
     const footer=document.createElement('footer');footer.className='lvx-studio-footer';const current=document.createElement('span');current.className='lvx-studio-current';current.textContent=THEME_LABELS[state.theme]+' · applied';footer.append(current,play,bloomLabel);
     themePicker.replaceChildren(heading,tabs,sample,...Object.values(panels),footer);
-    function show(){for(const [id,panel]of Object.entries(panels)){panel.hidden=id!==studio.view;const tab=tabs.querySelector(`[data-studio-tab="${id}"]`);tab.setAttribute('aria-selected',String(!panel.hidden));tab.tabIndex=panel.hidden?-1:0;}sample.hidden=studio.view==='stage';previewTheme=studio.view==='motion'?state.theme:previewTheme;renderStylePreview();}
+    function show(){for(const [id,panel]of Object.entries(panels)){panel.hidden=id!==studio.view;const tab=tabs.querySelector(`[data-studio-tab="${id}"]`);tab.setAttribute('aria-selected',String(!panel.hidden));tab.tabIndex=panel.hidden?-1:0;}sample.hidden=['stage','words'].includes(studio.view);previewTheme=studio.view==='motion'?state.theme:previewTheme;renderStylePreview();}
     show();
   }
   function buildOverlayPackage(clip){

@@ -2392,7 +2392,7 @@
 #lvx-root .lvx-theme-tile[aria-pressed="true"]{border-color:var(--lvx-color-accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--lvx-color-accent) 45%,transparent)}
 #lvx-root .lvx-tile-stage{position:relative;display:flex;align-items:center;justify-content:center;height:86px;padding:8px;border-radius:8px;background:var(--lvx-bg-overlay);overflow:hidden}
 #lvx-root .lvx-tile-line{font-family:var(--lvx-font-main);text-transform:var(--lvx-text-case);letter-spacing:var(--lvx-main-tracking);font-size:15px;line-height:1.25;text-align:center;color:var(--lvx-color-main)}
-#lvx-root .lvx-tile-word{display:inline-block;opacity:.4;animation-name:lvx-tile-karaoke;animation-iteration-count:infinite;animation-timing-function:ease-out}
+#lvx-root .lvx-tile-word{display:inline-block;white-space:nowrap;opacity:.4;animation-name:lvx-tile-karaoke;animation-iteration-count:infinite;animation-timing-function:ease-out}
 #lvx-root .lvx-tile-name{font-size:11px;letter-spacing:.1em;color:rgba(255,255,255,.75);padding:0 2px}
 @keyframes lvx-tile-karaoke{0%{opacity:.4;color:var(--lvx-color-main);text-shadow:none;transform:none}6%{opacity:1;color:var(--lvx-color-accent);text-shadow:var(--lvx-glow-accent);transform:scale(1.06)}22%{opacity:1;color:var(--lvx-color-main);text-shadow:var(--lvx-glow-main);transform:none}85%{opacity:1;color:var(--lvx-color-main)}100%{opacity:.4;color:var(--lvx-color-main);text-shadow:none}}
 @media (prefers-reduced-motion:reduce){#lvx-root .lvx-tile-word{animation:none;opacity:1}}
@@ -3204,3 +3204,15 @@
 #lvx-root .lvx-word-set-quick [data-set-inherit] { color:#dae6e5; border-color:#5c747d; background:#23353d; }
 
 #lvx-root .lvx-word-set-quick label { min-width:min(100%,180px); }
+
+/* Display controls follow the job: appearance, movement, vocabulary, placement. */
+#lvx-root .lvx-studio-tabs>button{padding:8px 6px;transition:background .18s ease,color .18s ease}
+#lvx-root .lvx-studio-tabs>button small{display:block;margin-top:4px;font:400 10px/1.3 system-ui;opacity:.8}
+#lvx-root .lvx-theme-picker :is(button,select,input,textarea,summary):focus-visible{outline:2px solid #d9edc1;outline-offset:3px}
+#lvx-root .lvx-theme-grid .lvx-theme-tile{min-height:44px;transition:border-color .18s ease,background .18s ease}
+#lvx-root .lvx-theme-grid .lvx-theme-tile:hover{background:#22363d;border-color:#7c9d9d}
+#lvx-root .lvx-theme-grid .lvx-tile-name{font-family:var(--lvx-font-main,system-ui);font-size:14px;letter-spacing:.035em}
+#lvx-root .lvx-studio-page:not([hidden]){animation:lvx-studio-enter .16s ease-out}
+@keyframes lvx-studio-enter{from{opacity:.4;transform:translateY(3px)}to{opacity:1;transform:none}}
+@media(max-width:520px){#lvx-root .lvx-studio-tabs>button small{display:none}}
+@media(prefers-reduced-motion:reduce){#lvx-root .lvx-studio-page:not([hidden]){animation:none}#lvx-root .lvx-studio-tabs>button,#lvx-root .lvx-theme-grid .lvx-theme-tile{transition:none}}

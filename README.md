@@ -107,3 +107,7 @@ Prepared syllable practice skips fully completed phrases; partial phrases keep
 its existing whole-phrase review. Free-running syllable capture is unchanged.
 The run stops when remaining targets are complete, even with Repeat enabled.
 Use Save timings to keep the preview. The new choice starts off and is remembered.
+
+Display studio: **Look** chooses font/color, **Motion** chooses layout/dance,
+**Words** edits word rules and emoji maps, and **Stage** controls placement/exits.
+The sidebar opens each directly; arrow keys move between studio tabs.
