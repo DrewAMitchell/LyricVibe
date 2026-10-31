@@ -8,7 +8,7 @@ const { buildPronunciation, SOURCE_COMMIT, SOURCE_SHA256, GZIP_SHA256 } = requir
 
 const counts = {
   metadata: { source: 'fixture', language: 'en' },
-  entries: { about: [2], baby: [2], stone: [1], twenty: [2], four: [1], variant: [2, 3] },
+  entries: { about: [2], baby: [2], stone: [1], twenty: [2], four: [1], variant: [2, 3], insane: [2] },
 };
 
 test('build compiles pinned CMUdict variants into sorted unique positive vowel counts and copies its license', (t) => {
@@ -55,6 +55,7 @@ test('build compiles pinned CMUdict variants into sorted unique positive vowel c
 });
 
 test('unique dictionary count gates heuristic splits and preserves original case and punctuation', () => {
+  assert.deepEqual(pronunciation.suggest('Insane,', counts).parts, ['In', 'sane,']);
   const about = pronunciation.suggest('About!', counts);
   assert.equal(about.status, 'suggested');
   assert.equal(about.spokenText, 'About!');

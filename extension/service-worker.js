@@ -4,7 +4,11 @@ const sessions = new Map();
 const pausedTabs = new Set(), deferredDetections = new Set();
 let pronunciationIndexPromise;
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
-  if(!['LV_PRONUNCIATION_SUGGEST','LV_PRONUNCIATION_COUNT'].includes(message?.type))return;
+  if(!['LV_PRONUNCIATION_SUGGEST','LV_PRONUNCIATION_COUNT','LV_PRONUNCIATION_BATCH'].includes(message?.type))return;
+  if(message.type==='LV_PRONUNCIATION_BATCH'){
+    if(!Array.isArray(message.words)||message.words.length>128||message.words.some(w=>typeof w!=='string'||!w.trim()||w.length>256)){respond({ok:false,error:{code:'INVALID_TEXT',message:'Provide at most 128 words.'}});return;}
+    (async()=>{pronunciationIndexPromise ||= fetch(chrome.runtime.getURL('data/pronunciation-counts.json')).then(r=>{if(!r.ok)throw Error('Packaged pronunciation dictionary could not load.');return r.json();}).catch(e=>{pronunciationIndexPromise=null;throw e;});const index=await pronunciationIndexPromise;return {ok:true,suggestions:message.words.map(w=>LvPronunciation.suggest(w,index.entries))};})().then(respond,()=>respond({ok:false}));return true;
+  }
   if(typeof message.text!=='string'||!message.text.trim()||message.text.length>256||
     message.spokenText!==undefined&&(typeof message.spokenText!=='string'||message.spokenText.length>256)){
     respond({ok:false,error:{code:'INVALID_TEXT',message:'Use a word or spoken form of at most256characters.'}});return;

@@ -5398,6 +5398,7 @@
   // Drop references only after a source change is admitted or the overlay is
   // hidden; unsaved work remains owned by its existing recovery path.
   function clearDerivedSongRender(){
+    displaySyllables={key:null,basis:null,score:null,suggestions:new Map(),pending:false};
     beatDisplayCache={score:null,map:null,ends:{}};
     expressionPlan={score:null,cues:{}};
     savedPromptCache={score:null,lane:null,events:[]};
@@ -5834,7 +5835,8 @@
     if(trackWatch?.loading()&&trackWatch?.status().generation>0)return;
     refreshRecordingTransport();refreshLiveStage();
     if ((countIn.previewTake||tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete')) && timing.draft && !syncPanel.hidden && !stageEdit.active) {clearStagePerformance();renderCaptureScore();return;}
-    const score = syncDisplayScore((liveStage.active&&liveStage.preview) || syllableTakeScore() || (timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score));
+    const selectedScore=(liveStage.active&&liveStage.preview) || syllableTakeScore() || (timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score);
+    const score = syncDisplayScore(estimatedDisplayScore(selectedScore));
     renderStagePerformance(score,mediaMs);
     const regionFrame=(score.stageRegions||[]).filter(r=>mediaMs>=r.startMs&&mediaMs<r.endMs).map(r=>({...r,rect:LvScore.resolveStageRegionRect(score,r)}));
     if(stageEdit.active&&stageEdit.subject!=='performance'&&stageEdit.drag){const p=stagePhrase(),area=selectedStageArea();if(area)for(const r of regionFrame)if(r.areaId===area.id)r.rect=stageEdit.drag.rect;if(p){const existing=regionFrame.findIndex(r=>r.target.id===p.id),draft={id:'drag',target:{kind:'phrase',id:p.id},rect:stageEdit.drag.rect};if(existing>=0)regionFrame[existing]=draft;else regionFrame.push(draft);}}
@@ -5882,6 +5884,7 @@
               const part = document.createElement('span');
               part.className = 'lvx-score-syllable';
               part.dataset.syllable = syllable.id;
+              if(syllable.id.includes('-display-estimate-')){part.dataset.estimated='true';part.title='Estimated syllable timing';}
               part.textContent = syllable.text;
               for (const effect of syllable.effects) {
                 part.classList.add(`lvx-effect-${effect.type}`);
@@ -6517,6 +6520,31 @@
     setSyncOffset(state.syncOffsetMs + deltaMs);
   }
 
+  // These divisions are presentation estimates, never score edits or timing evidence.
+  let displaySyllables={key:null,basis:null,score:null,suggestions:new Map(),pending:false};
+  function estimatedDisplayScore(score){
+    if(!score||score!==state.score||!syncPanel.hidden||stageEdit.active||liveStage.active)return score;
+    const key=LvScore.mediaKey(score.source);
+    if(displaySyllables.key!==key)displaySyllables={key,basis:null,score:null,suggestions:new Map(),pending:false};
+    const cache=displaySyllables;
+    const eligible=w=>!w.excluded&&w.displayMode!=='whole'&&!w.syllables?.length&&!w.spokenText&&typeof w.text==='string'&&w.text.length<=256&&w.endMs-w.startMs>=2;
+    if(!cache.pending){
+      const missing=[...new Set(score.phrases.flatMap(p=>p.words.filter(eligible).map(w=>w.text)).filter(t=>!cache.suggestions.has(t)))].slice(0,128);
+      if(missing.length){cache.pending=true;for(const t of missing)cache.suggestions.set(t,null);
+        Promise.resolve().then(()=>chrome.runtime.sendMessage({type:'LV_PRONUNCIATION_BATCH',words:missing})).then(result=>{
+          if(displaySyllables!==cache||!root.isConnected)return;
+          if(result?.ok&&Array.isArray(result.suggestions)&&result.suggestions.length===missing.length)missing.forEach((t,i)=>{const q=result.suggestions[i];if(q?.status==='suggested'&&q.parts?.length>1&&q.parts.join('')===t)cache.suggestions.set(t,q.parts);});
+          cache.pending=false;cache.basis=null;state.scoreSignature='';
+        }).catch(()=>{if(displaySyllables===cache)cache.pending=false;});
+      }
+    }
+    if(cache.basis===score)return cache.score;
+    const ids=new Set(score.phrases.flatMap(p=>[p.id,...p.words.flatMap(w=>[w.id,...(w.syllables||[]).map(s=>s.id)])]));let changed=false;
+    const phrases=score.phrases.map(p=>{let altered=false;const words=p.words.map(w=>{const parts=eligible(w)&&cache.suggestions.get(w.text);if(!parts||w.endMs-w.startMs<parts.length)return w;
+      const generated=parts.map((text,i)=>({id:`${w.id}-display-estimate-${i}`,text,startMs:w.startMs+Math.round((w.endMs-w.startMs)*i/parts.length),endMs:w.startMs+Math.round((w.endMs-w.startMs)*(i+1)/parts.length),provenance:'estimated',locked:false,effects:[]}));
+      if(generated.some(s=>ids.has(s.id)))return w;generated.forEach(s=>ids.add(s.id));altered=changed=true;return {...w,syllables:generated};});return altered?{...p,words}:p;});
+    cache.basis=score;cache.score=changed?{...score,phrases}:score;return cache.score;
+  }
   function syncDisplayScore(score) {
     const pending = syncSave.pending;
     if (!pending || !score || pending.key !== LvScore.mediaKey(score.source) || pending.hash !== score.lyrics.contentHash) return score;

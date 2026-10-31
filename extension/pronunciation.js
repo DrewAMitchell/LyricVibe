@@ -17,7 +17,7 @@
     'seventeen', 'eighteen', 'nineteen',
   ];
   const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
-  const CURATED_TWO_PARTS = Object.freeze({ hour: 'hou', hours: 'hou', our: 'ou', fire: 'fi' });
+  const CURATED_TWO_PARTS = Object.freeze({ hour: 'hou', hours: 'hou', our: 'ou', fire: 'fi', insane: 'in' });
 
   function failure(status, spokenText, syllableCounts, method, reason) {
     return { status, spokenText, syllableCounts, parts: [], method, reason };
@@ -233,7 +233,8 @@
     }
 
     const count = componentCounts[0][0];
-    const parts = spellingParts(spokenText, count);
+    const curatedPrefix = count === 2 ? CURATED_TWO_PARTS[spokenText.toLowerCase()] : null;
+    const parts = curatedPrefix ? [spokenText.slice(0, curatedPrefix.length), spokenText.slice(curatedPrefix.length)] : spellingParts(spokenText, count);
     if (!parts) return failure('unavailable', spokenText, syllableCounts, method, 'orthographic-split-unavailable');
     const punctuatedParts = withPunctuation(parts, prefix, suffix);
     return { status: 'suggested', spokenText: punctuatedParts.join(''), syllableCounts, parts: punctuatedParts, method, reason: null };
