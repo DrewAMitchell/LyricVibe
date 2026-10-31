@@ -5836,7 +5836,8 @@
     refreshRecordingTransport();refreshLiveStage();
     if ((countIn.previewTake||tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete')) && timing.draft && !syncPanel.hidden && !stageEdit.active) {clearStagePerformance();renderCaptureScore();return;}
     const selectedScore=(liveStage.active&&liveStage.preview) || syllableTakeScore() || (timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score);
-    const score = syncDisplayScore(estimatedDisplayScore(selectedScore));
+    const displayScore=estimatedDisplayScore(selectedScore);
+    const score = syncDisplayScore(displayScore);
     renderStagePerformance(score,mediaMs);
     const regionFrame=(score.stageRegions||[]).filter(r=>mediaMs>=r.startMs&&mediaMs<r.endMs).map(r=>({...r,rect:LvScore.resolveStageRegionRect(score,r)}));
     if(stageEdit.active&&stageEdit.subject!=='performance'&&stageEdit.drag){const p=stagePhrase(),area=selectedStageArea();if(area)for(const r of regionFrame)if(r.areaId===area.id)r.rect=stageEdit.drag.rect;if(p){const existing=regionFrame.findIndex(r=>r.target.id===p.id),draft={id:'drag',target:{kind:'phrase',id:p.id},rect:stageEdit.drag.rect};if(existing>=0)regionFrame[existing]=draft;else regionFrame.push(draft);}}
@@ -5865,7 +5866,7 @@
     }
     LvScore.projectChoreographyLayers(score,active.phrases);
     if(useVinyl)active.phrases=[];
-    const signature = `${score.revision}:${timing.draft?.previewRevision ?? 'saved'}:${timing.view}:${state.theme}:${useVinyl}:${regionFrame.map(r=>r.id).join(',')}:` + active.phrases.map(p => p.id).join('|');
+    const signature = `${score.revision}:${timing.draft?.previewRevision ?? 'saved'}:${timing.view}:${state.theme}:${useVinyl}:${displayScore!==selectedScore}:${regionFrame.map(r=>r.id).join(',')}:` + active.phrases.map(p => p.id).join('|');
     if (signature !== state.scoreSignature || !stage.classList.contains('lvx-score-stage')) {
       stage.textContent = '';
       stage.classList.add('lvx-score-stage');
