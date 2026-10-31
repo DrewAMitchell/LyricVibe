@@ -17,8 +17,10 @@ test('worker accepts only its own top-frame source song and rechecks navigation 
   const chrome={runtime:{id:'fixture',onMessage:{addListener:fn=>listeners.push(fn)}},tabs:{get:async()=>({url})},storage:{local:{get:async keys=>structuredClone(typeof keys==='string'?{[keys]:f.data[keys]}:Object.fromEntries(keys.map(k=>[k,f.data[k]]))),set:async changes=>Object.assign(f.data,structuredClone(changes))}}};
   const context=vm.createContext({chrome,URL,LvEmojiMapHistory:h,crypto:crypto.webcrypto});
   const source=fs.readFileSync(require.resolve('../extension/emoji-map-host.js'),'utf8');vm.runInContext(source,context);vm.runInContext(source,context);assert.equal(listeners.length,1);
-  const sender={id:'fixture',frameId:0,url,tab:{id:1,url}},send=(message,origin=sender)=>new Promise(resolve=>listeners[0](message,origin,resolve)),message={type:'LV_EMOJI_MAP_SAVE',...f.request()};
+  const sender={id:'fixture',frameId:0,url,tab:{id:1,url}},send=(message,origin=sender)=>new Promise(resolve=>listeners[0](message,origin,resolve)),message={type:'LV_EMOJI_MAP_SAVE',...f.request('shared')};
   for(const origin of [{...sender,id:'other'},{...sender,frameId:1},{...sender,url:'https://unrelated.example/watch?v=TESTVIDEO01'}])assert.equal((await send(message,origin)).ok,false);
   let gets=0;chrome.tabs.get=async()=>({url:++gets===1?url:'https://www.youtube.com/watch?v=TESTVIDEO02'});assert.equal((await send(message)).ok,false);assert.equal(f.data.lvxWordRuleSets.sets.length,1);
-  chrome.tabs.get=async()=>({url});assert.equal((await send(message)).ok,true);assert.equal(f.data.lvxWordRuleSets.sets.length,2);
+  // Chrome retains sender.url from the original document after SPA navigation.
+  chrome.tabs.get=async()=>({url});const staleDocument={...sender,url:'https://www.youtube.com/watch?v=TESTVIDEO02'};
+  assert.equal((await send(message,staleDocument)).ok,true);assert.equal(f.data.lvxWordRuleSets.sets.length,1);assert.deepEqual(f.data.lvxWordRuleSets.sets[0].emojiMap,message.emojiMap);
 });
