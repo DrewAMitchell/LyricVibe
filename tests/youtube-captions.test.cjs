@@ -2,17 +2,32 @@ const test=require('node:test'),assert=require('node:assert/strict'),vm=require(
 const captions=require('../extension/youtube-captions.js'),core=require('../extension/score-core.js');
 const id='TESTVIDEO01',packet=events=>({state:'available',videoId:id,language:'en',kind:'automatic',format:'json3',body:JSON.stringify({events})});
 
-test('caption segments keep gaps, repeated phrases and literal text while word timings remain estimates',()=>{
+test('caption notes and balanced parentheses become clean lead and inferred backing with estimated timings',()=>{
  const c=captions.decode(packet([
-  {tStartMs:1000,dDurationMs:2000,wWinId:1,segs:[{utf8:'(hello) <world>'}]},
-  {tStartMs:1000,dDurationMs:2000,wWinId:1,segs:[{utf8:'(hello) <world>'}]},
-  {tStartMs:6000,dDurationMs:12000,segs:[{utf8:'(hello) <world>'}]}
+  {tStartMs:1000,dDurationMs:2000,wWinId:1,segs:[{utf8:'♪ Hello (soft Echo) World ♫'}]},
+  {tStartMs:1000,dDurationMs:2000,wWinId:1,segs:[{utf8:'♪ Hello (soft Echo) World ♫'}]},
+  {tStartMs:6000,dDurationMs:12000,segs:[{utf8:'(soft Echo)'}]},
+  {tStartMs:9000,dDurationMs:500,segs:[{utf8:'♪ ♫'}]}
  ]),id,10000);
  assert.equal(c.cues.length,2);assert.deepEqual(c.cues.map(c=>[c.startMs,c.endMs]),[[1000,3000],[6000,10000]]);
  const score=captions.createScore(core,{videoId:id,durationMs:10000},c,'a'.repeat(64));
- assert.equal(score.lanes.length,1);assert.equal(score.phrases[0].words[0].text,'(hello)');assert.equal(score.phrases[0].words[1].text,'<world>');
+ assert.equal(score.lanes.find(l=>l.role==='backing').label,'Suggested backing (inferred)');
+ const first=score.phrases.filter(p=>p.startMs===1000),lead=first.find(p=>p.laneId==='lead'),back=first.find(p=>p.laneId==='backing');
+ assert.deepEqual(lead.words.map(w=>w.text),['Hello','World']);assert.deepEqual(back.words.map(w=>w.text),['soft','Echo']);
+ assert.equal(lead.endMs,3000);assert.equal(back.endMs,3000);assert.equal(score.phrases.find(p=>p.startMs===6000).laneId,'backing');
  assert.ok(score.phrases.every(p=>!p.endEstimated&&p.words.every(w=>w.provenance==='estimated'&&!w.locked)));
  assert.equal(core.activeAt(score,4000).phrases.length,0);
+});
+test('a parenthetical that spans caption cues remains backing across the boundary',()=>{
+ const c=captions.decode(packet([{tStartMs:1000,dDurationMs:1000,segs:[{utf8:'We are (so'}]},{tStartMs:2500,dDurationMs:1000,segs:[{utf8:'happy) today'}]}]),id,10000);
+ const score=captions.createScore(core,{videoId:id,durationMs:10000},c,'a'.repeat(64));
+ assert.deepEqual(score.phrases.filter(p=>p.laneId==='backing').map(p=>p.words.map(w=>w.text)),[['so'],['happy']]);
+ assert.deepEqual(score.phrases.filter(p=>p.laneId==='lead').map(p=>p.words.map(w=>w.text)),[['We','are'],['today']]);
+});
+test('unmatched parentheses and speaker labels remain literal',()=>{
+ const c=captions.decode(packet([{tStartMs:100,dDurationMs:1000,segs:[{utf8:'[Singer] Keep () (unfinished'}]}]),id,10000);
+ const score=captions.createScore(core,{videoId:id,durationMs:10000},c,'a'.repeat(64));
+ assert.deepEqual(score.phrases[0].words.map(w=>w.text),['[Singer]','Keep','()','(unfinished']);assert.equal(score.phrases[0].laneId,'lead');
 });
 
 test('caption parser rejects foreign, empty and oversized results, and joins append events without losing time',()=>{

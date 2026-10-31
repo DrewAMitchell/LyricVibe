@@ -3340,3 +3340,7 @@
 @container (max-width:450px){#lvx-root .lvx-capture-keys{grid-template-columns:1fr}}
 
 #lvx-root [data-live-pop=held] .lvx-live-pop{grid-template-columns:1fr;width:min(370px,calc(100vw - 48px));max-height:calc(100vh - 220px);overflow-y:auto;overscroll-behavior:contain}
+
+/* Preserve the case provided by caption authors, including per-word looks. */
+#lvx-root .lvx-score-phrase[data-caption-case="source"],
+#lvx-root .lvx-score-phrase[data-caption-case="source"] .lvx-score-word[data-look]{text-transform:none}

@@ -5875,6 +5875,7 @@
         const lane = score.lanes.find(l => l.id === phrase.laneId);
         line.className = `lvx-score-phrase lvx-score-${lane?.role || 'lead'}`;
         line.dataset.phrase = phrase.id;
+        if(score.lyrics?.timingBasis==='caption-segments')line.dataset.captionCase='source';
         for (const word of phrase.words) {
           const span = document.createElement('span');
           span.className = 'lvx-score-word';

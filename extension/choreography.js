@@ -392,16 +392,16 @@
   // The newest word keeps a fixed readable size. Only accumulated history compresses.
   const emojiSegments=new Intl.Segmenter('en',{granularity:'grapheme'}),glyphParts=text=>[...emojiSegments.segment(text)].map(s=>s.segment);
   function vinylTrack(score,measure,{emojiTags=false,cues={}}={}){
-    const tokens=[];let order=0;
+    const tokens=[];let order=0;const preserveCase=score.lyrics?.timingBasis==='caption-segments';
     for(const phrase of score.phrases){
       const words=phrase.words.filter(word=>!word.excluded);if(!words.length)continue;
-      const parts=words.map(word=>({word,text:String(word.text).trim().toUpperCase(),tag:emojiTags?cues[word.id]?.emoji||'':''}));
+      const parts=words.map(word=>({word,text:preserveCase?String(word.text).trim():String(word.text).trim().toUpperCase(),tag:emojiTags?cues[word.id]?.emoji||'':''}));
       if(score.lanes?.find(lane=>lane.id===phrase.laneId)?.role==='backing'){
         // One phrase enters and leaves the shared feed as a single block. Keep
         // the source words and their timing intact; this is presentation only.
         const text=parts.map(p=>p.text+(p.tag?' '+p.tag:'')).join(' ').replace(/^\((.*)\)$/,'$1');
         let at=1;const emojiRanges=[],doubledRanges=parts.map(p=>{const start=at,end=at+glyphParts(p.text).length;if(p.tag)emojiRanges.push({start:end+1,end:end+1+glyphParts(p.tag).length,startMs:p.word.startMs,endMs:cues[p.word.id]?.emojiEndMs??p.word.endMs});at+=glyphParts(p.text+(p.tag?' '+p.tag:'')).length+1;return p.word.doubled?[start,end]:null;}).filter(Boolean);
-        tokens.push({doubled:!!phrase.doubled,doubledRanges,emojiRanges,id:words[0].id,wordIds:words.map(word=>word.id),phraseId:phrase.id,laneId:phrase.laneId,backing:true,text:'('+text.toUpperCase()+')',startMs:Math.min(...words.map(w=>w.startMs)),endMs:Math.max(...words.map(w=>w.endMs)),order:order++});
+        tokens.push({doubled:!!phrase.doubled,doubledRanges,emojiRanges,id:words[0].id,wordIds:words.map(word=>word.id),phraseId:phrase.id,laneId:phrase.laneId,backing:true,text:'('+text+')',startMs:Math.min(...words.map(w=>w.startMs)),endMs:Math.max(...words.map(w=>w.endMs)),order:order++});
       }else for(const part of parts){const {word,text,tag}=part,start=glyphParts(text).length+1;tokens.push({doubled:!!(phrase.doubled||word.doubled),id:word.id,phraseId:phrase.id,laneId:phrase.laneId,text:text+(tag?' '+tag:''),emojiRanges:tag?[{start,end:start+glyphParts(tag).length,startMs:word.startMs,endMs:cues[word.id]?.emojiEndMs??word.endMs}]:[],startMs:word.startMs,endMs:word.endMs,order:order++});}
     }
     tokens.sort((a,b)=>a.startMs-b.startMs||a.order-b.order);let total=0;

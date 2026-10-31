@@ -83,7 +83,7 @@
     for(const row of rows){
       if(!row||typeof row!=='object')continue;
       const startMs=Math.round(Number(row.startMs)),duration=Math.round(Number(row.durationMs));
-      const text=typeof row.text==='string'?row.text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g,'').replace(/\s+/g,' ').trim():'';
+      const text=typeof row.text==='string'?row.text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f♪♫♬♩]/g,'').replace(/\s+/g,' ').trim():'';
       if(!text||!Number.isFinite(startMs)||startMs<0||!Number.isFinite(duration)||duration<=0||startMs>=durationMs)continue;
       const endMs=Math.min(durationMs,startMs+duration);if(endMs<=startMs)continue;
       total+=text.length;if(total>200000)return null;
@@ -106,9 +106,30 @@
     const score=core.createScore(source,'',{provider:`YouTube captions (${caption.kind}, ${caption.language})`,entryId:caption.videoId+':'+caption.language+':'+caption.kind,contentHash});
     score.lyrics.timingBasis='caption-segments';score.lyrics.captionSource={language:caption.language,kind:caption.kind};
     score.lanes=[{id:'lead',role:'lead',label:'Captions · review words'}];
-    // Captions are text, not authoring syntax: parentheses and speaker labels
-    // must not silently become inferred vocal tracks or formatting commands.
-    score.phrases=caption.cues.map((cue,i)=>{const tokens=cue.text.split(/\s+/),width=tokens.reduce((n,t)=>n+t.length,0);let used=0;return {id:`caption-${i+1}`,laneId:'lead',startMs:cue.startMs,endMs:cue.endMs,endEstimated:false,fadeOutMs:120,words:tokens.map((text,j)=>{const startMs=cue.startMs+Math.round((cue.endMs-cue.startMs)*used/width);used+=text.length;return {id:`caption-${i+1}-word-${j+1}`,text,startMs,endMs:cue.startMs+Math.round((cue.endMs-cue.startMs)*used/width),provenance:'estimated',locked:false,effects:[]};})};});
+    score.phrases=[];let hasBacking=false;
+    // Find balanced spans across cue boundaries; unmatched opening parentheses
+    // stay literal, and inner punctuation is kept as source text.
+    const texts=caption.cues.map(c=>c.text.replace(/[♪♫♬♩]/gu,'').trim());
+    const joined=texts.join('\n'),ranges=[];let depth=0,start=0;
+    for(let n=0;n<joined.length;n++){if(joined[n]==='('){if(depth++===0)start=n;}else if(joined[n]===')'&&depth&&--depth===0&&joined.slice(start+1,n).trim())ranges.push({start,end:n});}
+    let base=0,rangeIndex=0;
+    for(const [i,cue] of caption.cues.entries()){
+      const text=texts[i],limit=base+text.length,groups={lead:[],backing:[]};let pos=base;
+      const add=(lane,a,b)=>{if(b>a)groups[lane].push(...joined.slice(a,b).trim().split(/\s+/u).filter(Boolean));};
+      while(rangeIndex<ranges.length&&ranges[rangeIndex].end<base)rangeIndex++;
+      for(let j=rangeIndex;j<ranges.length&&ranges[j].start<limit;j++){
+        const range=ranges[j];add('lead',pos,Math.max(pos,range.start));
+        add('backing',Math.max(pos,range.start+1),Math.min(limit,range.end));
+        pos=Math.min(limit,range.end+1);
+      }
+      add('lead',pos,limit);base=limit+1;
+      for(const laneId of ['lead','backing']){const tokens=groups[laneId];if(!tokens.length)continue;if(laneId==='backing')hasBacking=true;
+        const width=tokens.reduce((n,t)=>n+t.length,0);let used=0;
+        const words=tokens.map((text,j)=>{const startMs=cue.startMs+Math.round((cue.endMs-cue.startMs)*used/width);used+=text.length;return {id:`caption-${i+1}-${laneId}-word-${j+1}`,text,startMs,endMs:cue.startMs+Math.round((cue.endMs-cue.startMs)*used/width),provenance:'estimated',locked:false,effects:[]};});
+        score.phrases.push({id:`caption-${i+1}-${laneId}`,laneId,startMs:cue.startMs,endMs:cue.endMs,endEstimated:false,fadeOutMs:120,words});
+      }
+    }
+    if(hasBacking)score.lanes.push({id:'backing',role:'backing',label:'Suggested backing (inferred)'});
     return core.validateScore(score);
   }
   const api={readFromPage,decode,lrc,createScore};root.LvYoutubeCaptions=api;if(typeof module!=='undefined')module.exports=api;

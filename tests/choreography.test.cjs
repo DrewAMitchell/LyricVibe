@@ -271,3 +271,9 @@ test('Coin spin completes one eased turn on the source interval and replay, with
  assert.equal(B.cueAt(beat,null,0,false,5).spin,180);assert.equal(B.cueAt(beat,null,0,true,5).spin,undefined);assert.equal(B.cueAt(beat,null,0,false,7),null);
  assert.equal(C.expressionAt({...cue,rule:{word:'coin',effects:['spin']}},2000).spin,180);
 });
+
+
+test('vinyl preserves source caption case for lead and backing',()=>{
+ const c=require('../extension/choreography.js');const score={lyrics:{timingBasis:'caption-segments'},lanes:[{id:'lead',role:'lead'},{id:'back',role:'backing'}],phrases:[{id:'a',laneId:'lead',words:[word('w','Hello',1000,2000)]},{id:'b',laneId:'back',words:[word('b','Echo',1000,2000)]}]};
+ const tokens=c.vinylTrack(score,()=>.5).tokens;assert.ok(tokens.some(t=>t.text==='Hello'));assert.ok(tokens.some(t=>t.text==='(Echo)'));
+});
