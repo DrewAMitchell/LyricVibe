@@ -2365,6 +2365,10 @@
 #lvx-root .lvx-score-word.lvx-score-current{color:var(--lvx-color-main);text-shadow:var(--lvx-glow-main)}
 #lvx-root .lvx-score-syllable{color:color-mix(in srgb,var(--lvx-color-main) 82%,#7f7f7f)}
 #lvx-root .lvx-score-syllable.lvx-score-current{color:var(--lvx-color-accent);text-shadow:var(--lvx-glow-accent)}
+/* Clean's translucent accent made the current syllable as dim as its recent
+   trail. Keep the active part bright, including per-word Clean overrides. */
+#lvx-root[data-lvx-theme="clean"] .lvx-score-word:not([data-look]) .lvx-score-syllable.lvx-score-current,
+#lvx-root .lvx-score-word[data-look="clean"] .lvx-score-syllable.lvx-score-current{color:#fff;text-shadow:0 0 .12em rgba(255,255,255,.65)}
 #lvx-root .lvx-score-word:not(.lvx-score-current),#lvx-root .lvx-score-syllable:not(.lvx-score-current){text-shadow:0 0 calc(var(--lvx-presence,0) * 12px) color-mix(in srgb,var(--lvx-color-accent) calc(var(--lvx-presence,0) * 60%),transparent)}
 #lvx-root .lvx-score-syllable.lvx-score-recent{color:color-mix(in srgb,var(--lvx-color-accent) calc(var(--lvx-presence,0) * 100%),color-mix(in srgb,var(--lvx-color-main) 82%,#7f7f7f))}
 
