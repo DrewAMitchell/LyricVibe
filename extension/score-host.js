@@ -225,6 +225,36 @@
       if (!record) throw fail('SCORE_MISSING', 'No timed score is loaded yet. Wait for lyrics or import a score.');
       if (message.type === 'LV_SCORE_GET') return { ok: true, score: record.score, review: record.review || [], diagnostics: record.diagnostics || null, tabId, mediaKey: key, analysis: await root.LvAnalysis?.analysisStatus() };
       if (message.expectedRevision !== record.score.revision) throw fail('REVISION_CONFLICT', 'The score changed. Reload it before editing.');
+      if(message.type==='LV_CAPTION_NOTES_CLEAN'){
+        if(!timingControlBound(sender,tabId,key))throw fail('SOURCE_REQUIRED','Open the current song to clean its caption notes.');
+        if(message.lyricsHash!==record.score.lyrics.contentHash||record.score.lyrics.timingBasis!=='caption-segments')throw fail('LYRIC_REVISION_MISMATCH','This score is not the expected caption source.');
+        const guard=await chrome.tabs.sendMessage(tabId,{type:'LV_TIMING_EDIT_CHECK',mediaKey:key});
+        if(!guard?.ok||guard.mediaKey!==key||guard.canEdit!==true)throw fail('CAPTURE_PENDING','Finish the current take or typed edit before cleanup.');
+        const draft=await readTimingPreview(key);
+        if((draft?.token||null)!==(message.previewToken||null)||(draft?.previewRevision??null)!==(message.previewRevision??null))throw fail('PREVIEW_CONFLICT','The timing preview changed; refresh before cleanup.');
+        if(draft&&(draft.baseRevision!==record.score.revision||draft.baseHash!==record.score.lyrics.contentHash))throw fail('PREVIEW_EXPIRED','The existing timing preview needs review; nothing was changed.');
+        const clean=score=>{
+          let next=score,count=0;const words=score.phrases.flatMap(p=>p.words);
+          for(const word of words){if(!/[♪♫♬♩]/u.test(word.text))continue;
+            const text=word.text.replace(/[♪♫♬♩]/gu,'');let op;
+            if(!text.replace(/[\s()[\]]/gu,'')){if(word.excluded)continue;op={type:'setWordExcluded',wordId:word.id,excluded:true};}
+            else {if(word.syllables?.length||word.spokenText)throw fail('CAPTION_NOTE_NEEDS_REVIEW','A marked word has syllables; review it manually before cleanup.');op={type:'setWordText',wordId:word.id,text};}
+            next=LvScore.applyOperation(next,op,next.revision);count++;
+          }
+          if(count)next.revision=score.revision;return {score:next,count};
+        };
+        const cleaned=clean(record.score),previewClean=draft?clean(draft.score):null,undoClean=draft?(draft.undoScores||[]).map(clean):[];
+        if(!cleaned.count&&!previewClean?.count&&!undoClean.some(x=>x.count))return {ok:true,changed:0,score:record.score,preview:draft};
+        const newRevision=record.score.revision+(cleaned.count?1:0);cleaned.score.revision=newRevision;LvScore.validateScore(cleaned.score);
+        const updated=cleaned.count?{...record,score:cleaned.score,history:[...(record.history||[]),record.score].slice(-30)}:record;
+        let nextDraft=null;if(draft){const preview=previewClean.score;preview.revision=newRevision;nextDraft={...draft,score:preview,baseRevision:newRevision,previewRevision:draft.previewRevision+1,undoScores:undoClean.map(x=>x.score)};LvScore.validateScore(preview);}
+        await liveIdentity(tabId,key);
+        const finalGuard=await chrome.tabs.sendMessage(tabId,{type:'LV_TIMING_EDIT_CHECK',mediaKey:key});if(!finalGuard?.ok||finalGuard.mediaKey!==key||finalGuard.canEdit!==true)throw fail('CAPTURE_PENDING','Editing began during cleanup; nothing was changed.');
+        const writes={[keyFor(key)]:updated};if(nextDraft)writes[previewStorageKey(key)]=nextDraft;
+        await chrome.storage.local.set(writes);if(nextDraft)timingPreviews.set(key,nextDraft);
+        await publish(tabId,updated);if(nextDraft)await publishTimingPreview(tabId,key,nextDraft);
+        return {ok:true,changed:cleaned.count,score:updated.score,preview:nextDraft};
+      }
       if (message.type.startsWith('LV_TIMING_')) {
         if (!timingControlBound(sender, tabId, key)) throw fail('SOURCE_REQUIRED', 'This editor is not connected to the current video. Open Edit timing on that video to reconnect.');
         if (message.lyricsHash !== record.score.lyrics.contentHash) throw fail('LYRIC_REVISION_MISMATCH', 'Saved lyric revision changed. Refresh the preview.');
@@ -373,7 +403,7 @@
     });
   }
   const types = new Set(['LV_ANALYSIS_CACHE_CLEAR_REQUEST', 'LV_EDITOR_OPEN', 'LV_LIGHT_EDITOR_OPEN', 'LV_SCORE_GET', 'LV_SCORE_OPERATION', 'LV_SCORE_IMPORT', 'LV_NATIVE_ALIGNMENT_IMPORT', 'LV_SCORE_UNDO', 'LV_SCORE_SEEK', 'LV_SCORE_TRANSPORT', 'LV_SCORE_REVIEW_APPLY', 'LV_ANALYSIS_START', 'LV_ANALYSIS_STOP', 'LV_ANALYSIS_STATUS', 'LV_NATIVE_ANALYSIS_START', 'LV_NATIVE_ANALYSIS_STOP', 'LV_NATIVE_ANALYSIS_STATUS', 'LV_ALIGNMENT_PROPOSALS']);
-  types.add('LV_TEMPO_GET');types.add('LV_TEMPO_SET');types.add('LV_SCORE_AUTHOR');
+  types.add('LV_CAPTION_NOTES_CLEAN');types.add('LV_TEMPO_GET');types.add('LV_TEMPO_SET');types.add('LV_SCORE_AUTHOR');
   for (const type of ['LV_TIMING_SOURCES', 'LV_TIMING_COPY', 'LV_TIMING_PREPARE', 'LV_TIMING_CURRENT', 'LV_TIMING_TUNE', 'LV_TIMING_UNDO', 'LV_TIMING_APPLY', 'LV_TIMING_CANCEL']) types.add(type);
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!types.has(message?.type)) return;

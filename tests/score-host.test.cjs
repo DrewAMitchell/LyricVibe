@@ -888,3 +888,25 @@ test('new caption score retains exact segment ends and estimated words through s
  const score=await h.ensure(1,ID_A,{caption,lyrics:{synced:'[00:01.000](Literal) words\n[00:02.500]\n[00:06.000]After a gap\n[00:09.000]',provider:'YouTube captions'}});
  assert.equal(score.lyrics.timingBasis,'caption-segments');assert.equal(score.phrases[0].endMs,2500);assert.equal(score.phrases.find(p=>p.startMs===6000).startMs,6000);assert.equal(score.lanes.find(l=>l.id==='backing').role,'backing');assert.equal(score.phrases.find(p=>p.startMs===1000&&p.laneId==='backing').words[0].text,'Literal');assert.ok(score.phrases.every(p=>p.words.every(w=>w.provenance==='estimated'&&!w.locked)));h.restartWorker();assert.equal((await h.context.LvScoreHost.packageFor(1,{videoId:ID_A})).lyrics.captionSource.language,'en');
 });
+
+test('caption-note cleanup updates saved score and durable preview atomically without changing timings or undo',async()=>{
+ const h=makeHarness(),source=await h.ensure(),stored=recordFor(h);const words=stored.score.phrases[0].words;
+ words[0].text='♪';words[1].text='hello♪';stored.score.lyrics.timingBasis='caption-segments';h.context.LvScore.validateScore(stored.score);
+ const original=structuredClone(stored.score),sender={id:'test-extension',url:'chrome-extension://test/light-editor.html?sourceTab=1&mediaKey='+encodeURIComponent('youtube:'+ID_A)},base={tabId:1,mediaKey:'youtube:'+ID_A,expectedRevision:original.revision,lyricsHash:original.lyrics.contentHash};
+ const prepared=await h.dispatch({type:'LV_TIMING_PREPARE',...base,fromSaved:true},sender);assert.equal(prepared.ok,true);
+ const tuned=await h.dispatch({type:'LV_TIMING_TUNE',...base,token:prepared.preview.token,previewRevision:0,operation:{type:'setOffset',offsetMs:120}},sender);assert.equal(tuned.ok,true);
+ const before=JSON.stringify(h.values);let r=await h.dispatch({type:'LV_CAPTION_NOTES_CLEAN',...base,previewToken:tuned.preview.token,previewRevision:0},sender);assert.equal(r.error.code,'PREVIEW_CONFLICT');assert.equal(JSON.stringify(h.values),before);
+ h.setCopyBlocked(true);r=await h.dispatch({type:'LV_CAPTION_NOTES_CLEAN',...base,previewToken:tuned.preview.token,previewRevision:1},sender);assert.equal(r.error.code,'CAPTURE_PENDING');assert.equal(JSON.stringify(h.values),before);h.setCopyBlocked(false);
+ const set=h.context.chrome.storage.local.set;h.context.chrome.storage.local.set=async()=>{throw Error('disk failure')};r=await h.dispatch({type:'LV_CAPTION_NOTES_CLEAN',...base,previewToken:tuned.preview.token,previewRevision:1},sender);assert.equal(r.ok,false);assert.equal(JSON.stringify(h.values),before);h.context.chrome.storage.local.set=set;
+
+ r=await h.dispatch({type:'LV_CAPTION_NOTES_CLEAN',...base,previewToken:tuned.preview.token,previewRevision:1},sender);assert.equal(r.ok,true,r.error?.message);assert.equal(r.changed,2);assert.equal(r.score.revision,1);assert.equal(r.score.phrases[0].words[0].excluded,true);assert.equal(r.score.phrases[0].words[1].text,'hello');assert.equal(r.preview.score.offsetMs,120);assert.equal(r.preview.baseRevision,1);assert.equal(r.preview.previewRevision,2);assert.equal(r.preview.undoScores.length,1);assert.equal(r.preview.undoScores[0].phrases[0].words[0].excluded,true);assert.equal(JSON.stringify(r.score.phrases[0].words.map(w=>[w.startMs,w.endMs])),JSON.stringify(original.phrases[0].words.map(w=>[w.startMs,w.endMs])));assert.equal(recordFor(h).history.length,1);
+ h.restartWorker();const current=await h.dispatch({type:'LV_TIMING_CURRENT',...base,expectedRevision:1},sender);assert.equal(current.preview.token,tuned.preview.token);assert.equal(current.preview.score.offsetMs,120);assert.equal(current.preview.score.phrases[0].words[1].text,'hello');
+ const again=await h.dispatch({type:'LV_CAPTION_NOTES_CLEAN',...base,expectedRevision:1,previewToken:current.preview.token,previewRevision:current.preview.previewRevision},sender);assert.equal(again.ok,true);assert.equal(again.changed,0);
+});
+
+test('caption-note cleanup skips non-caption scores, rejects syllable-bearing markers and preserves unrelated state',async()=>{
+ const h=makeHarness(),s=await h.ensure(),sender={id:'test-extension',url:'chrome-extension://test/light-editor.html?sourceTab=1&mediaKey='+encodeURIComponent('youtube:'+ID_A)},base={tabId:1,mediaKey:'youtube:'+ID_A,expectedRevision:s.revision,lyricsHash:s.lyrics.contentHash,previewToken:null,previewRevision:null};
+ let before=JSON.stringify(h.values),r=await h.dispatch({type:'LV_CAPTION_NOTES_CLEAN',...base},sender);assert.equal(r.error.code,'LYRIC_REVISION_MISMATCH');assert.equal(JSON.stringify(h.values),before);
+ const word=recordFor(h).score.phrases[0].words[0];word.text='hi♪';word.syllables=[{id:'hi1',text:'hi♪',startMs:word.startMs,endMs:word.endMs,provenance:'manual',locked:true,effects:[]}];recordFor(h).score.lyrics.timingBasis='caption-segments';before=JSON.stringify(h.values);
+ r=await h.dispatch({type:'LV_CAPTION_NOTES_CLEAN',...base},sender);assert.equal(r.error.code,'CAPTION_NOTE_NEEDS_REVIEW');assert.equal(JSON.stringify(h.values),before);
+});
