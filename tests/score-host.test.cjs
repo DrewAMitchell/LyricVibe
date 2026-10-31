@@ -22,7 +22,7 @@ function makeHarness() {
   const runtimeMessages = [];
   const popupWindows = [];
   let listener;
-  let copyBlocked = false;
+  let copyBlocked = false, overlayOpen = false;
   const analysisCalls = [];
   let analysisStatus = { state: 'capturing', tabId: 1, mediaKey: `youtube:${ID_A}`, sessionId: 'session-1' };
   const chrome = {
@@ -41,7 +41,9 @@ function makeHarness() {
       async set(items) { for (const [key, value] of Object.entries(items)) sessionValues[key] = structuredClone(value); },
       async remove(key) { for (const k of [].concat(key)) delete sessionValues[k]; },
     } },
+    scripting: { async executeScript() { return [{result:overlayOpen}]; } },
     tabs: {
+      async query() { return [...tabs.entries()].map(([id,tab])=>({id,...tab})); },
       async sendMessage(tabId, message) {
         if (message.type === 'LV_GET_HINTS') return { ...tabs.get(tabId) };
         if (message.type === 'LV_TIMING_EDIT_CHECK') return {ok:true,mediaKey:message.mediaKey,canEdit:!copyBlocked};
@@ -88,6 +90,7 @@ function makeHarness() {
   }
   return { context, values, sessionValues, tabs, tabMessages, runtimeMessages, popupWindows, analysisCalls, dispatch, ensure,
     setCopyBlocked(value) { copyBlocked=value; },
+    setOverlayOpen(value) { overlayOpen=value; },
     restartWorker() { vm.runInContext(hostSource, context, { filename: 'score-host.js' }); },
     setAnalysisStatus(value) { analysisStatus = value; } };
 }
@@ -909,4 +912,12 @@ test('caption-note cleanup skips non-caption scores, rejects syllable-bearing ma
  let before=JSON.stringify(h.values),r=await h.dispatch({type:'LV_CAPTION_NOTES_CLEAN',...base},sender);assert.equal(r.error.code,'LYRIC_REVISION_MISMATCH');assert.equal(JSON.stringify(h.values),before);
  const word=recordFor(h).score.phrases[0].words[0];word.text='hi♪';word.syllables=[{id:'hi1',text:'hi♪',startMs:word.startMs,endMs:word.endMs,provenance:'manual',locked:true,effects:[]}];recordFor(h).score.lyrics.timingBasis='caption-segments';before=JSON.stringify(h.values);
  r=await h.dispatch({type:'LV_CAPTION_NOTES_CLEAN',...base},sender);assert.equal(r.error.code,'CAPTION_NOTE_NEEDS_REVIEW');assert.equal(JSON.stringify(h.values),before);
+});
+
+
+test('offline caption cleanup requires the extension options page and refuses an open song overlay',async()=>{
+ const h=makeHarness(),score=await h.ensure();const w=recordFor(h).score.phrases[0].words[0];w.text='♪';recordFor(h).score.lyrics.timingBasis='caption-segments';
+ const message={type:'LV_CAPTION_NOTES_CLEAN',mediaKey:'youtube:'+ID_A,expectedRevision:score.revision,lyricsHash:score.lyrics.contentHash,previewToken:null,previewRevision:null},sender={id:'test-extension',url:'chrome-extension://test/options.html'};
+ const before=JSON.stringify(h.values);h.setOverlayOpen(true);let r=await h.dispatch(message,sender);assert.equal(r.error.code,'CAPTURE_PENDING');assert.equal(JSON.stringify(h.values),before);
+ h.setOverlayOpen(false);r=await h.dispatch(message,sender);assert.equal(r.ok,true,r.error?.message);assert.equal(r.changed,1);assert.equal(r.score.phrases[0].words[0].excluded,true);assert.equal(recordFor(h).history.length,1);
 });

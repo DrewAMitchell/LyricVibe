@@ -163,6 +163,19 @@
       return score;
     });
   }
+  async function captionCleanupIdle(key){
+    const tabs=await chrome.tabs.query({});
+    for(const tab of tabs){
+      if(typeof tab.url!=='string')continue;
+      if(tab.url.startsWith(chrome.runtime.getURL('editor.html'))||tab.url.startsWith(chrome.runtime.getURL('light-editor.html'))){
+        try{if(new URL(tab.url).searchParams.get('mediaKey')===key)throw fail('CAPTURE_PENDING','Close the song editor before cleaning its caption notes.');}catch(error){if(error.code)throw error;}
+      }
+      if(LvScore.mediaKey({url:tab.url})!==key)continue;
+      if(!Number.isInteger(tab.id))throw fail('CAPTURE_PENDING','Cannot inspect the open song tab.');
+      try{const result=await chrome.scripting.executeScript({target:{tabId:tab.id,frameIds:[0]},func:()=>Boolean(document.querySelector('#lvx-root'))});if(result?.[0]?.result!==false)throw fail('CAPTURE_PENDING','Close LyricVibe on this song before cleaning its caption notes.');}
+      catch(error){if(error.code)throw error;throw fail('CAPTURE_PENDING','Cannot inspect the open song tab; nothing was changed.');}
+    }
+  }
   async function handle(message, sender) {
     if (message.type === 'LV_ANALYSIS_CACHE_CLEAR_REQUEST') return root.LvAnalysis.clearModelCache();
     const tabId = message.tabId ?? sender.tab?.id;
@@ -184,7 +197,8 @@
         ? { ok: true, analysis: await root.LvAnalysis.stopAnalysis({ tabId, mediaKey: requested }) }
         : { ok: true, analysis: await root.LvAnalysis.analysisStatus() };
     }
-    const { key } = await liveIdentity(tabId, message.mediaKey);
+    const offlineCleanup=message.type==='LV_CAPTION_NOTES_CLEAN'&&exactExtensionPage(sender,'options.html');
+    let key;if(offlineCleanup){const match=/^youtube:([A-Za-z0-9_-]{11})$/.exec(message.mediaKey||'');if(!match)throw fail('SOURCE_REQUIRED','Choose an exact YouTube score.');key=message.mediaKey;}else ({key}=await liveIdentity(tabId,message.mediaKey));
     if(message.type==='LV_SCORE_AUTHOR'){
       if(!sourceOverlayBound(sender,tabId,key))throw fail('SOURCE_REQUIRED','Start recording from the lyric overlay on this video.');
       return serial(key,async()=>{
@@ -226,10 +240,10 @@
       if (message.type === 'LV_SCORE_GET') return { ok: true, score: record.score, review: record.review || [], diagnostics: record.diagnostics || null, tabId, mediaKey: key, analysis: await root.LvAnalysis?.analysisStatus() };
       if (message.expectedRevision !== record.score.revision) throw fail('REVISION_CONFLICT', 'The score changed. Reload it before editing.');
       if(message.type==='LV_CAPTION_NOTES_CLEAN'){
-        if(!timingControlBound(sender,tabId,key))throw fail('SOURCE_REQUIRED','Open the current song to clean its caption notes.');
+        if(!offlineCleanup&&!timingControlBound(sender,tabId,key))throw fail('SOURCE_REQUIRED','Open the current song to clean its caption notes.');
         if(message.lyricsHash!==record.score.lyrics.contentHash||record.score.lyrics.timingBasis!=='caption-segments')throw fail('LYRIC_REVISION_MISMATCH','This score is not the expected caption source.');
-        const guard=await chrome.tabs.sendMessage(tabId,{type:'LV_TIMING_EDIT_CHECK',mediaKey:key});
-        if(!guard?.ok||guard.mediaKey!==key||guard.canEdit!==true)throw fail('CAPTURE_PENDING','Finish the current take or typed edit before cleanup.');
+        const check=async()=>{if(offlineCleanup){await captionCleanupIdle(key);return;}const guard=await chrome.tabs.sendMessage(tabId,{type:'LV_TIMING_EDIT_CHECK',mediaKey:key});if(!guard?.ok||guard.mediaKey!==key||guard.canEdit!==true)throw fail('CAPTURE_PENDING','Finish the current take or typed edit before cleanup.');};
+        await check();
         const draft=await readTimingPreview(key);
         if((draft?.token||null)!==(message.previewToken||null)||(draft?.previewRevision??null)!==(message.previewRevision??null))throw fail('PREVIEW_CONFLICT','The timing preview changed; refresh before cleanup.');
         if(draft&&(draft.baseRevision!==record.score.revision||draft.baseHash!==record.score.lyrics.contentHash))throw fail('PREVIEW_EXPIRED','The existing timing preview needs review; nothing was changed.');
@@ -248,11 +262,11 @@
         const newRevision=record.score.revision+(cleaned.count?1:0);cleaned.score.revision=newRevision;LvScore.validateScore(cleaned.score);
         const updated=cleaned.count?{...record,score:cleaned.score,history:[...(record.history||[]),record.score].slice(-30)}:record;
         let nextDraft=null;if(draft){const preview=previewClean.score;preview.revision=newRevision;nextDraft={...draft,score:preview,baseRevision:newRevision,previewRevision:draft.previewRevision+1,undoScores:undoClean.map(x=>x.score)};LvScore.validateScore(preview);}
-        await liveIdentity(tabId,key);
-        const finalGuard=await chrome.tabs.sendMessage(tabId,{type:'LV_TIMING_EDIT_CHECK',mediaKey:key});if(!finalGuard?.ok||finalGuard.mediaKey!==key||finalGuard.canEdit!==true)throw fail('CAPTURE_PENDING','Editing began during cleanup; nothing was changed.');
+        if(!offlineCleanup)await liveIdentity(tabId,key);
+        await check();
         const writes={[keyFor(key)]:updated};if(nextDraft)writes[previewStorageKey(key)]=nextDraft;
         await chrome.storage.local.set(writes);if(nextDraft)timingPreviews.set(key,nextDraft);
-        await publish(tabId,updated);if(nextDraft)await publishTimingPreview(tabId,key,nextDraft);
+        if(!offlineCleanup){await publish(tabId,updated);if(nextDraft)await publishTimingPreview(tabId,key,nextDraft);}
         return {ok:true,changed:cleaned.count,score:updated.score,preview:nextDraft};
       }
       if (message.type.startsWith('LV_TIMING_')) {
