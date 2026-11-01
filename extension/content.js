@@ -5459,7 +5459,7 @@
     const score=timing.draft?.score||state.score;panel.hidden=!score;if(!score)return;
     const completeness=LvScore.timingCompleteness(score),allLanes=completeness.lanes,lanes=allLanes.filter(l=>l.phrases.length||!allLanes.some(other=>other.role===l.role&&other.phrases.length)),saved=state.score?LvScore.timingCoverage(state.score):[],mode=syncButton('tap-mode').value,blocked=completionBlockReason(),buffered=takePhraseIds().size;
     if(!lanes.some(l=>l.role==='backing'))lanes.push({id:'',role:'backing',label:'Backing',modes:Object.fromEntries(['phrase','word','syllable'].map(m=>[m,{done:0,total:0,status:'empty'}]))});
-    const alignment=score.alignmentTiming?.candidates?.length?alignmentFor(score):null;
+    const alignment=score.alignmentTiming?alignmentFor(score):null;
     const signature=JSON.stringify([lanes.map(l=>[l.id,l.label,l.modes]),saved.map(l=>l.modes),mode,blocked,buffered,Boolean(timing.draft),alignment,timingPhrase()?.id]);if(panel.dataset.signature===signature)return;panel.dataset.signature=signature;
     panel.replaceChildren();const heading=document.createElement('div');heading.className='lvx-completion-heading';
     const title=document.createElement('strong');title.textContent='Timing completeness';const basis=document.createElement('small');basis.textContent=timing.draft?'Preview · unsaved':'Saved';heading.append(title,basis);panel.append(heading);
