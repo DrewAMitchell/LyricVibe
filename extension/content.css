@@ -3365,6 +3365,11 @@
 #lvx-root .lvx-completion-grid button{min-height:26px;padding:2px;gap:0}
 #lvx-root .lvx-completion-grid button progress{margin:1px 0;height:3px}
 #lvx-root .lvx-completion-hint{margin-top:3px}
+#lvx-root .lvx-auto-review{display:grid;gap:4px;margin-top:8px;padding-top:7px;border-top:1px solid #a3e3ec66}
+#lvx-root .lvx-auto-review>strong{color:#c5f2f6;font-size:12px}
+#lvx-root .lvx-auto-review>small{color:#c3ccd5;line-height:1.35}
+#lvx-root .lvx-auto-review-actions{display:flex;flex-wrap:wrap;gap:4px}
+#lvx-root .lvx-auto-review-actions button{min-height:28px;padding:4px 7px;font-size:11px}
 #lvx-root dialog.lvx-transcript-editor{position:fixed;box-sizing:border-box;z-index:90;top:8vh;left:calc(50vw - min(360px,46vw));right:auto;bottom:auto;margin:0;width:min(720px,92vw);max-height:84vh;padding:0 14px 12px;border:1px solid #7b9ba4;border-radius:12px;background:#14232af7;box-shadow:0 12px 40px #000b;overflow:auto;scrollbar-width:none}
 #lvx-root dialog.lvx-transcript-editor::backdrop{background:transparent}
 #lvx-root .lvx-transcript-head{position:sticky;top:0;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 -14px 8px;padding:7px 14px;background:#203842;border-bottom:2px solid #8ba9a3;box-shadow:0 4px 10px #0005}

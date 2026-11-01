@@ -5452,12 +5452,15 @@
   function completionBlockReason(){
     return timing.busy?'Wait for the preview update.':!timing.draft?'Open a timing preview first.':tempoSourceKey()!==LvScore.mediaKey(timing.draft.score.source)?'Return to this preview’s video.':countIn.active||countIn.preparing?'Finish the count-in first.':tapPending()?'Use or discard the current recording before jumping.':timing.dirty||tapping.splitDirty||transcript.dirty?'Apply your typed edits before jumping.':'';
   }
+  let alignmentCoverageScore=null, alignmentCoverageCache=null;
+  function alignmentFor(score){if(alignmentCoverageScore!==score){alignmentCoverageScore=score;alignmentCoverageCache=LvScore.alignmentCoverage(score);}return alignmentCoverageCache;}
   function refreshCompletion(){
     const panel=syncPanel.querySelector('.lvx-completion');if(!panel)return;
     const score=timing.draft?.score||state.score;panel.hidden=!score;if(!score)return;
     const completeness=LvScore.timingCompleteness(score),allLanes=completeness.lanes,lanes=allLanes.filter(l=>l.phrases.length||!allLanes.some(other=>other.role===l.role&&other.phrases.length)),saved=state.score?LvScore.timingCoverage(state.score):[],mode=syncButton('tap-mode').value,blocked=completionBlockReason(),buffered=takePhraseIds().size;
     if(!lanes.some(l=>l.role==='backing'))lanes.push({id:'',role:'backing',label:'Backing',modes:Object.fromEntries(['phrase','word','syllable'].map(m=>[m,{done:0,total:0,status:'empty'}]))});
-    const signature=JSON.stringify([lanes.map(l=>[l.id,l.label,l.modes]),saved.map(l=>l.modes),mode,blocked,buffered,Boolean(timing.draft)]);if(panel.dataset.signature===signature)return;panel.dataset.signature=signature;
+    const alignment=score.alignmentTiming?.candidates?.length?alignmentFor(score):null;
+    const signature=JSON.stringify([lanes.map(l=>[l.id,l.label,l.modes]),saved.map(l=>l.modes),mode,blocked,buffered,Boolean(timing.draft),alignment,timingPhrase()?.id]);if(panel.dataset.signature===signature)return;panel.dataset.signature=signature;
     panel.replaceChildren();const heading=document.createElement('div');heading.className='lvx-completion-heading';
     const title=document.createElement('strong');title.textContent='Timing completeness';const basis=document.createElement('small');basis.textContent=timing.draft?'Preview · unsaved':'Saved';heading.append(title,basis);panel.append(heading);
     const summary=document.createElement('div');summary.className='lvx-completion-summary';
@@ -5481,7 +5484,28 @@
       }
     }
     panel.append(grid);const hint=document.createElement('small');hint.className='lvx-completion-hint';hint.textContent=buffered?`${buffered} phrase${buffered===1?'':'s'} in recording · use in preview to count.`:blocked||'Click a percentage to find unfinished timing.';panel.append(hint);
+    if(alignment){
+      const box=document.createElement('section');box.className='lvx-auto-review';box.setAttribute('aria-label','Automatic timing coverage');
+      const line=document.createElement('strong'),percent=alignment.total?Math.round(100*alignment.selected/alignment.total):0;line.textContent=`Auto ${percent}% · ${alignment.selected}/${alignment.total} words`;box.append(line);
+      const info=document.createElement('small');info.textContent=`${alignment.available} compatible · ${alignment.needsReview} phrase${alignment.needsReview===1?'':'s'} to check`;box.append(info);
+      const actions=document.createElement('div');actions.className='lvx-auto-review-actions';
+      const choose=document.createElement('button');choose.type='button';choose.textContent='Use auto';choose.title='Use compatible automatic estimates for playback, including words currently set to saved timing. Your saved timings remain intact; protected syllables still take precedence.';choose.disabled=Boolean(blocked||!alignment.available);choose.onclick=()=>void editAlignmentPreview({useAvailable:true},'Compatible automatic estimates selected. Save timings to keep this choice.');
+      const next=document.createElement('button');next.type='button';next.textContent='Next to check';next.disabled=Boolean(blocked||!alignment.needsReview);next.onclick=()=>jumpAlignmentReview();
+      const current=alignment.phrases.find(p=>p.id===timingPhrase()?.id),review=document.createElement('button');review.type='button';review.textContent=current?.reviewed?'Reviewed':'Mark reviewed';review.disabled=Boolean(blocked||!current?.total||current.reviewed);review.onclick=()=>void editAlignmentPreview({reviewPhraseId:current.id},'Phrase marked reviewed in preview. Save timings to keep it.');
+      const exportButton=document.createElement('button');exportButton.type='button';exportButton.textContent='Export score';exportButton.onclick=()=>syncButton('export').click();actions.append(choose,next,review,exportButton);box.append(actions);
+      const detail=document.createElement('small');detail.textContent=`${current?.flags.length?'Check: '+current.flags.join(', ')+' · ':''}Auto is unverified.`;detail.title='Flags identify missing or saved timing, interpolation, overlapping vocals and rapid phrasing. They are not calibrated model confidence.';box.append(detail);panel.append(box);
+    }
     const scope=document.createElement('small');scope.className='lvx-completion-hint';scope.textContent='Listed lyrics only · coverage, not accuracy. Missing lyrics are not scored.';panel.append(scope);
+  }
+  async function editAlignmentPreview(preference,notice){
+    const blocked=completionBlockReason();if(blocked){setSyncNotice(blocked);return;}
+    timing.busy=true;refreshTimingPanel();try{const result=await timingRequest('LV_TIMING_TUNE',{operation:{type:'setAlignmentPreference',preference}});timing.draft=result.preview;state.scoreSignature='';setSyncNotice(notice);}catch(error){setSyncNotice(error.message,'error');}finally{timing.busy=false;refreshTimingPanel();}
+  }
+  function jumpAlignmentReview(){
+    const blocked=completionBlockReason();if(blocked){setSyncNotice(blocked);return;}
+    const rows=alignmentFor(timing.draft.score).phrases,current=rows.findIndex(p=>p.id===timingPhrase()?.id),target=[...rows.slice(current+1),...rows.slice(0,current+1)].find(p=>p.needsReview);if(!target)return;
+    const index=timing.draft.score.phrases.findIndex(p=>p.id===target.id);if(!navigateTiming(index-timing.phraseIndex))return;
+    syncButton('tap-mode').value='word';syncButton('tap-scope').value='phrase';tapping.wordId=timingPhrase().words.find(w=>!w.excluded)?.id;setTimingWorkspace('record');refreshTimingPanel();setSyncNotice(`Check this phrase: ${target.flags.join(', ')}. Record its words or mark it reviewed.`);
   }
   function jumpUnfinished(laneId,mode){
     const blocked=completionBlockReason();if(blocked){setSyncNotice(blocked);return;}

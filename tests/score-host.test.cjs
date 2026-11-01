@@ -516,6 +516,20 @@ test('a source-bound LyricVibe overlay can import review evidence without openin
   assert.equal(rejected.error.code, 'EDITOR_REQUIRED');
 });
 
+test('saving a timing preview retains compatible automatic evidence and review state', async () => {
+  const h=makeHarness(), original=await h.ensure(), receipt=nativeReceipt(original);
+  const sender={id:'test-extension',frameId:0,url:`https://www.youtube.com/watch?v=${ID_A}`,tab:{id:1,url:`https://www.youtube.com/watch?v=${ID_A}`}};
+  await h.dispatch({type:'LV_NATIVE_ALIGNMENT_IMPORT',mediaKey:receipt.mediaKey,expectedRevision:original.revision,receipt},sender);
+  const selected=await h.dispatch({type:'LV_ALIGNMENT_PREFERENCE_SET',mediaKey:receipt.mediaKey,expectedRevision:original.revision,lyricsHash:original.lyrics.contentHash,preference:{mode:'auto',includeProposals:true}},sender);
+  assert.equal(selected.ok,true);
+  const envelope={mediaKey:receipt.mediaKey,expectedRevision:selected.score.revision,lyricsHash:selected.score.lyrics.contentHash};
+  const prepared=await h.dispatch({type:'LV_TIMING_PREPARE',...envelope,fromSaved:true},sender);
+  const tuned=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:prepared.preview.token,previewRevision:prepared.preview.previewRevision,operation:{type:'setAlignmentPreference',preference:{reviewPhraseId:selected.score.phrases[0].id}}},sender);
+  assert.equal(tuned.ok,true);
+  const saved=await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:prepared.preview.token,previewRevision:tuned.preview.previewRevision},sender);
+  assert.equal(saved.ok,true);assert.equal(recordFor(h).review.length,1);assert.equal(saved.score.alignmentTiming.candidates.length,1);assert.equal(h.context.LvScore.alignmentCoverage(saved.score).phrases[0].reviewed,true);
+});
+
 test('accepting a timing keeps unrelated pending proposals on the same phrase', async () => {
   const h = makeHarness(), original = await h.ensure(), receipt = nativeReceipt(original);
   const second = original.phrases[0].words[1];

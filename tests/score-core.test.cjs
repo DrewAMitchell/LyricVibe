@@ -400,6 +400,28 @@ test('automatic playback keeps saved timings and supports per-word manual overri
   assert.equal(score.projectAlignmentTiming(edited).phrases[0].words[1].startMs, 2100);
 });
 
+test('automatic coverage distinguishes candidates, playback selection, human review and changed evidence', () => {
+  const source=makeScore('[00:01.00]one two three\n[00:04.00]'), [one,two,three]=source.phrases[0].words;
+  const proposals=[{wordId:one.id,startMs:1100,endMs:1500,accepted:false,evidenceId:'fresh-ctc'}, {wordId:two.id,startMs:2000,endMs:2500,accepted:false,evidenceId:'fresh-interpolated'}];
+  let selected=score.setAlignmentTiming(source,proposals,{mode:'auto',includeProposals:true},source.revision);
+  selected=score.setAlignmentTiming(selected,[],{wordId:one.id,choice:'manual'},selected.revision);
+  const before=structuredClone(selected.phrases),summary=score.alignmentCoverage(selected);
+  assert.deepEqual([summary.total,summary.available,summary.selected,summary.missing,summary.needsReview],[3,2,1,1,1]);
+  assert.deepEqual(summary.phrases[0].flags,['saved timing','interpolated','no usable auto']);
+  const auto=score.applyOperation(selected,{type:'setAlignmentPreference',preference:{useAvailable:true}},selected.revision);
+  assert.equal(score.alignmentCoverage(auto).selected,2);assert.deepEqual(auto.phrases,before,'selection does not overwrite manual timing');
+  const reviewed=score.applyOperation(auto,{type:'setAlignmentPreference',preference:{reviewPhraseId:auto.phrases[0].id}},auto.revision);
+  assert.equal(score.alignmentCoverage(reviewed).needsReview,0);
+  const corrected=score.applyOperation(reviewed,{type:'setWordTiming',wordId:three.id,startMs:three.startMs,endMs:three.endMs},reviewed.revision);
+  assert.equal(score.alignmentCoverage(corrected).needsReview,1,'a changed phrase invalidates the prior review');
+  const fresh=score.setAlignmentTiming(corrected,proposals,{includeProposals:true,replaceCandidates:true,evidenceIds:['fresh-ctc']},corrected.revision);
+  assert.equal(fresh.alignmentTiming.candidates.length,1);assert.equal(fresh.alignmentTiming.candidates[0].evidenceId,'fresh-ctc');
+  const changedBounds=structuredClone(auto);changedBounds.phrases[0].endMs+=100;
+  const stale=score.alignmentCoverage(changedBounds);assert.equal(stale.available,0);assert.equal(stale.incompatible,2);assert.equal(stale.selected,0);
+  assert.deepEqual(score.projectAlignmentTiming(changedBounds).phrases,changedBounds.phrases,'old-boundary candidates are never silently reused');
+  errorCode(()=>score.setAlignmentTiming(auto,proposals,{includeProposals:true,replaceCandidates:true,evidenceIds:['missing-evidence']},auto.revision),'INVALID_PROPOSALS');
+});
+
 test('automatic timing falls back when its phrase or offset changes, and preserves protected syllables', () => {
   const original = makeScore('[00:01.00]hello there\n[00:04.00]');
   const word = original.phrases[0].words[0];

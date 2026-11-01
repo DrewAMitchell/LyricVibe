@@ -350,8 +350,11 @@
         if (message.type !== 'LV_TIMING_APPLY') throw fail('MESSAGE_UNKNOWN', 'Unknown timing preview action.');
         await liveIdentity(tabId, key);
         record.history = [...(record.history || []), record.score].slice(-30);
-        record.score = { ...draft.score, revision: record.score.revision + 1 };
-        record.review = []; record.diagnostics = null; delete record.lyricRevisionAvailable;
+        const updatedScore = { ...draft.score, revision: record.score.revision + 1 };
+        record.review = LvScore.retainAlignmentProposals(record.score, updatedScore, record.review || []);
+        record.score = updatedScore;
+        if (!record.review.length) record.diagnostics = null;
+        delete record.lyricRevisionAvailable;
         await chrome.storage.local.set({ [keyFor(key)]: record });
         await clearTimingPreview(previewKey); await publish(tabId, record);
         return { ok: true, score: record.score, tabId, mediaKey: key };

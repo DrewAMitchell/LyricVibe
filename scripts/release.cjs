@@ -155,6 +155,8 @@ async function main(command, args) {
   await run(process.execPath, ['scripts/quick-mixer-proof.cjs', '--narrow'], source);
   await run(process.execPath, ['scripts/alignment-preference-proof.cjs'], source);
   await run(process.execPath, ['scripts/alignment-preference-proof.cjs', '--narrow'], source);
+  await run(process.execPath, ['scripts/automatic-review-proof.cjs'], source);
+  await run(process.execPath, ['scripts/automatic-review-proof.cjs', '--narrow'], source);
   await run(process.execPath, ['scripts/alignment-workspace-proof.cjs'], source);
   await run(process.execPath, ['scripts/alignment-workspace-proof.cjs', '--narrow'], source);
   await run(process.execPath, ['scripts/live-stage-proof.cjs'], source);
