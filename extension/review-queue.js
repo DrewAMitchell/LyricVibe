@@ -126,6 +126,8 @@
     if (proposedDuration < 60) flags.push("SHORT_WORD");
     if (proposedDuration > 3000) flags.push("LONG_WORD");
     if (Math.max(Math.abs(proposal.startMs - word.startMs), Math.abs(proposal.endMs - word.endMs)) > 500) flags.push("LARGE_SHIFT");
+    if (proposal.evidenceId.startsWith('song-interpolated:')) flags.push("INTERPOLATED_WORD");
+    if (score.phrases.some(other => other.id !== phrase.id && other.laneId !== phrase.laneId && other.startMs < phrase.endMs && other.endMs > phrase.startMs)) flags.push("MIXED_VOCALS");
     if (proposedDuration > 0) {
       const overlaps = score.phrases.some(otherPhrase => otherPhrase.laneId === phrase.laneId &&
         otherPhrase.words.some(otherWord => otherWord.id !== word.id && proposal.startMs < otherWord.endMs && proposal.endMs > otherWord.startMs));

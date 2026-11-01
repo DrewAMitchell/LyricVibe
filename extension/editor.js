@@ -342,7 +342,7 @@
     $('proposal-times').textContent = `${seconds(proposal.startMs)}–${seconds(proposal.endMs)} s · ${proposal.startMs - word.startMs >= 0 ? '+' : ''}${proposal.startMs - word.startMs} ms at start`;
     const protection = proposalProtection(proposal);
     const flags = globalThis.LvReviewQueue.diagnosticsForProposal(state.score, proposal).flags;
-    const hints = { SHORT_WORD: 'Very short interval', LONG_WORD: 'Long interval: check sustain and silence', LARGE_SHIFT: 'Large timing shift', SAME_LANE_OVERLAP: 'Overlaps saved words' };
+    const hints = { SHORT_WORD: 'Very short interval', LONG_WORD: 'Long interval: check sustain and silence', LARGE_SHIFT: 'Large timing shift', SAME_LANE_OVERLAP: 'Overlaps saved words', MIXED_VOCALS: 'Overlapping vocals: model heard the mix', INTERPOLATED_WORD: 'Interpolated between model anchors' };
     $('proposal-protection').textContent = protection || (flags.length ? `${flags.map(flag => hints[flag]).join(' · ')}. Unverified model timing.` : 'Supplied lyric word · unverified model timing · audition before accepting');
     $('proposal-accept').textContent = reviewQueue?.selectedWordIds.includes(state.wordId) ? 'Kept · next' : 'Keep & next';
     $('proposal-accept').disabled = Boolean(protection) || state.busy;
@@ -473,9 +473,11 @@
       const word = phrase?.words.find(word => word.id === proposal.wordId);
       const outside = phrase && !phrase.endEstimated && (proposal.startMs < phrase.startMs || proposal.endMs > phrase.endMs);
       const protection = helpers.reviewProtection(word) || (outside ? 'Adjust phrase bounds before accepting' : '');
+      const mixedVocals = phrase && state.score.phrases.some(other => other.id !== phrase.id && other.laneId !== phrase.laneId && other.startMs < phrase.endMs && other.endMs > phrase.startMs);
+      const basis = proposal.evidenceId.startsWith('song-interpolated:') ? 'Interpolated between model anchors' : 'Needs review';
       const row = el('div', 'review-row'); const check = el('input'); check.type = 'checkbox'; check.value = proposal.wordId; check.disabled = Boolean(protection); check.setAttribute('aria-label', `Accept timing for ${word?.text || proposal.wordId}`);
       if (localMode) check.checked = Boolean(reviewQueue?.selectedWordIds.includes(proposal.wordId));
-      const details = el('span'); details.append(el('strong', '', word?.text || proposal.wordId), el('span', 'muted small', `${word ? `${seconds(word.startMs)}–${seconds(word.endMs)} → ` : ''}${seconds(proposal.startMs)}–${seconds(proposal.endMs)}s`), el('span', 'muted small', protection || 'Needs review'));
+      const details = el('span'); details.append(el('strong', '', word?.text || proposal.wordId), el('span', 'muted small', `${word ? `${seconds(word.startMs)}–${seconds(word.endMs)} → ` : ''}${seconds(proposal.startMs)}–${seconds(proposal.endMs)}s`), el('span', 'muted small', protection || `${basis}${mixedVocals ? ' · overlapping vocals; mixed audio' : ''}`));
       const audition = el('button', 'quiet', live || localMode ? 'Audition' : 'Silent preview'); audition.type = 'button'; audition.disabled = localMode && !mediaReady;
       audition.onclick = async () => {
         const startMs = helpers.seekTarget(proposal.startMs + state.score.offsetMs - 250, state.score.source.durationMs);

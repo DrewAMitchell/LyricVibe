@@ -84,6 +84,24 @@ test('prevents selecting locked words, locked children, or proposals outside exp
   code(() => queueApi.toggle(queueApi.create(explicit, outside), outside[0].wordId, true, explicit), 'INVALID_TIME');
 });
 
+test('identifies a mixed-vocal phrase without implying speaker separation or confidence', () => {
+  const { score, proposals } = fixture();
+  if (!score.lanes.some(lane => lane.id === 'backing')) score.lanes.push({ id: 'backing', label: 'Backing', role: 'backing' });
+  const backing = structuredClone(score.phrases[0]);
+  backing.id = 'backing-phrase'; backing.laneId = 'backing';
+  backing.words.forEach((word, index) => { word.id = `backing-word-${index}`; });
+  score.phrases.push(backing);
+  const diagnostic = queueApi.diagnosticsForProposal(score, proposals[0]);
+  assert.ok(diagnostic.flags.includes('MIXED_VOCALS'));
+  assert.equal('confidence' in diagnostic, false);
+  const interpolated = queueApi.diagnosticsForProposal(score, { ...proposals[0], evidenceId: 'song-interpolated:fixture' });
+  assert.ok(interpolated.flags.includes('INTERPOLATED_WORD'));
+  backing.startMs = score.phrases[0].endMs;
+  backing.endMs = backing.startMs + 1000;
+  backing.words.forEach((word, index) => { word.startMs = backing.startMs + index * 300; word.endMs = word.startMs + 200; });
+  assert.ok(!queueApi.diagnosticsForProposal(score, proposals[0]).flags.includes('MIXED_VOCALS'));
+});
+
 test('reports anomaly cues without scores or confidence claims', () => {
   const { score, proposals } = fixture();
   const word = score.phrases[0].words[0];

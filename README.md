@@ -1,4 +1,4 @@
-# LyricVibe â€” editable video lyrics
+# LyricVibe — editable video lyrics
 
 A development fork of [riteshzz29/LyricVibe](https://github.com/riteshzz29/LyricVibe), licensed under MIT. It adds exact-video timing, separate vocal tracks, word and syllable recording, lyric editing, visual effects, and a local song library.
 

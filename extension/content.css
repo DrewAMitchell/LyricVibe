@@ -3404,3 +3404,16 @@
 /* Vocal identities sit outside animated words; word-specific looks can override the track. */
 #lvx-root .lvx-vocal-identity{position:absolute;display:flex;align-items:center;justify-content:center;gap:5px;color:var(--lvx-track-color);font:600 11px/1.1 'Segoe UI',system-ui,sans-serif;letter-spacing:.02em;text-transform:none;text-shadow:0 1px 4px #000;pointer-events:none;overflow:hidden;white-space:nowrap}
 #lvx-root .lvx-vocal-identity::before{content:"";width:14px;height:3px;border-radius:2px;background:currentColor;flex:none}
+
+/* Fast independent cycling of the existing display settings. */
+#lvx-root .lvx-quick-mixer{margin:0 0 12px;padding:9px 10px;background:#142b35;border:1px solid #5b7b88;border-radius:8px}
+#lvx-root .lvx-quick-mixer header{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:6px;color:#eff8fa;font:600 13px system-ui}
+#lvx-root .lvx-quick-mixer header small{color:#aac4cf;font:10px system-ui}
+#lvx-root .lvx-quick-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px 8px}
+#lvx-root .lvx-quick-axis{display:grid;grid-template-columns:64px 28px minmax(0,1fr) 28px;align-items:center;gap:3px;min-width:0}
+#lvx-root .lvx-quick-axis span{color:#cbdae0;font:11px system-ui}
+#lvx-root .lvx-quick-axis button{min-width:0;min-height:29px;padding:0;border:1px solid #6c8992;border-radius:4px;background:#24404a;color:#f1f9fb;font:20px/1 system-ui}
+#lvx-root .lvx-quick-axis select{box-sizing:border-box;width:100%;min-width:0;height:29px;padding:2px 4px;background:#10232b;color:#edf7fa;border:1px solid #547581;border-radius:4px;font:11px system-ui}
+#lvx-root .lvx-quick-axis button:disabled{opacity:.35}
+#lvx-root .lvx-quick-axis :focus-visible{outline:2px solid #f7cc70;outline-offset:1px}
+@media(max-width:760px){#lvx-root .lvx-quick-grid{grid-template-columns:1fr}}
