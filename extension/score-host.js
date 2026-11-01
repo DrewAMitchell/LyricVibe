@@ -411,7 +411,7 @@
         const guard = await chrome.tabs.sendMessage(tabId, {type:'LV_TIMING_EDIT_CHECK',mediaKey:key});
         if (!guard?.ok || guard.mediaKey !== key || guard.canEdit !== true) throw fail('CAPTURE_PENDING','Finish the current timing edit before changing playback preference.');
         const pending = await readTimingPreview(key);
-        if (pending) throw fail('PREVIEW_PENDING','Apply or close the saved timing preview before changing playback preference.');
+        if (pending) throw fail('PREVIEW_PENDING','Apply or discard the saved timing preview before changing playback preference.');
         next = LvScore.setAlignmentTiming(record.score, record.review || [], message.preference, record.score.revision);
         record.review = LvScore.retainAlignmentProposals(record.score, next, record.review || []);
       } else throw fail('MESSAGE_UNKNOWN', 'Unknown score operation.');

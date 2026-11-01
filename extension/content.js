@@ -6673,7 +6673,7 @@
   // These divisions are presentation estimates, never score edits or timing evidence.
   let displaySyllables={key:null,basis:null,score:null,suggestions:new Map(),pending:false};
   function estimatedDisplayScore(score){
-    if(!score||score!==state.score||!syncPanel.hidden||stageEdit.active||liveStage.active)return score;
+    if(!score||(score!==state.score&&score!==alignmentProjection)||!syncPanel.hidden||stageEdit.active||liveStage.active)return score;
     const key=LvScore.mediaKey(score.source);
     if(displaySyllables.key!==key)displaySyllables={key,basis:null,score:null,suggestions:new Map(),pending:false};
     const cache=displaySyllables;

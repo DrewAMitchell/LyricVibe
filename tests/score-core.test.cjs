@@ -417,6 +417,16 @@ test('automatic timing falls back when its phrase or offset changes, and preserv
   assert.deepEqual(score.projectAlignmentTiming(withSyllables).phrases[0].words[0].syllables, target.syllables);
 });
 
+test('an override applies to one occurrence, not every instance of the same word', () => {
+  const source = makeScore('[00:01.00]again again\n[00:04.00]'), [first, second] = source.phrases[0].words;
+  const proposals = [first, second].map(word => ({ wordId: word.id, startMs: word.startMs + 40, endMs: word.endMs, accepted: false, evidenceId: word.id }));
+  const automatic = score.setAlignmentTiming(source, proposals, { mode: 'auto', includeProposals: true }, source.revision);
+  const override = score.setAlignmentTiming(automatic, [], { wordId: first.id, choice: 'manual' }, automatic.revision);
+  const words = score.projectAlignmentTiming(override).phrases[0].words;
+  assert.equal(words[0].startMs, first.startMs);
+  assert.equal(words[1].startMs, second.startMs + 40);
+});
+
 test('alignment may expand an estimated phrase, while explicit ends stay hard and locked timings stay put', () => {
   let estimated = makeScore('[00:01.00]one two\n[00:04.00]');
   const estimatedPhrase = estimated.phrases[0];
