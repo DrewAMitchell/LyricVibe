@@ -123,7 +123,7 @@
   const effectGesture = { input:null, type:'clear', samples:new Map(), base:[], groupId:null };
   const liveStage={active:false,armed:false,scope:'word',mode:'effects',laneId:null,ops:[],history:[],preview:null,token:null,revision:null,selected:null,pinned:null,page:0,all:false,status:''};
   const effectTracks=[];
-  const effectColors={pulse:'#63cbd5',tilt:'#b59aeb',shake:'#ed8d8d',bounce:'#8ed39c',glow:'#e9c66f',groove:'#7eacf0',echo:'#75d4bb',glitch:'#ef87cf',spin:'#f3b77d',breath:'#c7a2dc',color:'#e5a3cb',blank:'#7f919a'};
+  const effectColors={pulse:'#63cbd5',tilt:'#b59aeb',shake:'#ed8d8d',bounce:'#8ed39c',glow:'#e9c66f',groove:'#7eacf0',echo:'#75d4bb',glitch:'#ef87cf',spin:'#f3b77d',rotor:'#80d9cc',breath:'#c7a2dc',color:'#e5a3cb',blank:'#7f919a'};
 
   /* ══════════════════════════════════════
      DOM CONSTRUCTION
@@ -323,7 +323,7 @@
   quickSyncButton.className = 'lvx-quick-sync-btn';
   quickSyncButton.textContent = '✎ Edit timing';
   quickSyncButton.title = 'Open the timing sidebar: record and refine this video\u2019s lyric timing';
-  quickSyncButton.addEventListener('click', () => openTimingReview());
+  quickSyncButton.addEventListener('click', async () => {const fresh=!timing.draft;await openTimingReview();if(fresh&&!syncPanel.hidden&&timing.draft)setTimingWorkspace('prepare');});
   // Auto-calibrating the offset applies only to lyrics without a timed score; it lives with the Sync offset.
   const autoSyncButton = document.createElement('button');
   autoSyncButton.className = 'lvx-sync-btn lvx-auto-sync';
@@ -906,11 +906,11 @@
     <div class="lvx-sync-nav"><button data-sync="previous" aria-label="Previous lyric phrase">‹</button><span class="lvx-sync-position"></span><button data-sync="next" aria-label="Next lyric phrase">›</button></div>
     <p class="lvx-sync-phrase"></p><div class="lvx-sync-range"></div>
     <div class="lvx-sync-transport"><button data-sync="audition">▶ Audition preview</button><button data-sync="pause">Ⅱ Pause</button><output class="lvx-sync-clock" aria-label="Source playback time" aria-live="off">0.000s</output></div>
-    <label class="lvx-sync-loop"><input type="checkbox" data-sync="loop"> Loop this phrase</label>
+    <label class="lvx-sync-loop"><input type="checkbox" data-sync="loop"> Loop this phrase · L</label>
     <details class="lvx-tempo-panel"><summary>Beat clicker <span>T · tap the beat</span></summary><div class="lvx-clicker-controls"><button data-sync="tempo-tap">Tap · T</button><button data-sync="tempo-downbeat">Beat 1 here</button><label>BPM<input data-sync="tempo-bpm" type="number" min="20" max="400" step="1" value="120"></label><button data-sync="tempo-save">Set BPM</button><label class="lvx-sync-loop"><input type="checkbox" data-sync="tempo-click"> Click</label><button data-sync="tempo-sections">Sections ↗</button></div><p class="lvx-sync-hint">First tap sets beat 1. Keep tapping to fit BPM, or type an exact integer.</p><p class="lvx-tempo-status" role="status"></p><button data-sync="tempo-undo">↶ Undo tempo</button></details>
     <details class="lvx-tap-panel"><summary>Record by ear <span>phrase → syllables · words optional</span></summary>
       <div class="lvx-capture-phases" role="group" aria-label="Syncing phase"><button data-phase="phrase">1 · Phrases</button><button data-phase="syllable">2 · Syllables</button><button data-phase="word">Words · optional</button></div>
-      <div class="lvx-record-choices"><label><input type="checkbox" data-sync="record-repeat"> Repeat recording</label><small data-sync="record-repeat-hint"></small></div>
+      <div class="lvx-record-choices"><label><input type="checkbox" data-sync="record-repeat"> Loop this phrase · L</label><small data-sync="record-repeat-hint"></small></div>
       <p class="lvx-sync-hint">Hold Space while each word is sung. On the next pass, tap at syllable changes inside its saved boundaries.</p>
       <div class="lvx-perform-cue"><small>READY</small><strong class="lvx-perform-phrase"></strong><div class="lvx-upcoming-phrases" aria-label="Upcoming lyrics"></div><span class="lvx-perform-instruction">Then start performing</span><p class="lvx-estimated-phrase" aria-live="off"></p><p class="lvx-cue-legend">Blue follows your recording cue</p><div class="lvx-live-recovery" hidden><button data-sync="tap-back">← Back one</button><button data-sync="tap-skip">Skip one →</button><button data-sync="tap-reassign-back">Last tap ← word</button><button data-sync="tap-reassign-next">Last tap → word</button><small>Left / Right moves the cue; Ctrl + Left / Right reassigns the last tap. The song keeps playing.</small></div></div>
       <label class="lvx-practice-speed">YouTube practice speed <select data-sync="tap-speed" aria-label="Practice playback speed"><option value="0.5">½× · Half speed</option><option value="0.25">¼× · Quarter speed</option><option value="0.75">¾× · Slower</option><option value="1">1× · Normal</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
@@ -923,7 +923,7 @@
       <div class="lvx-capture-keys" hidden><div data-capture-key="syllable"><kbd>SPACE</kbd><strong>New syllable</strong><small>Hold while you sing it · release at its end</small><output data-capture-count="syllable">0</output></div><button type="button" data-sync="tap-note" data-capture-key="note"><kbd>N</kbd><strong>Same syllable, new note</strong><small>Performance event · keep holding Space</small><output data-capture-count="note">0</output></button><p class="lvx-capture-feedback" role="status">One “oh” across three notes: hold Space, tap N twice.</p></div><div class="lvx-tap-status" role="status" aria-live="polite">Choose a word to begin.</div>
       <div class="lvx-tap-actions"><button data-sync="tap-use">Use take in preview</button><button data-sync="tap-undo">↶ Undo mark</button><button data-sync="tap-discard">Discard take</button><button data-sync="take-export" disabled>Export take</button></div>
       <button data-sync="events-restore" title="Reopen the latest syllable or word-hold recording for this video. Changed phrases remain separate for review.">Review last recording ↗</button>
-      <button data-sync="transcript-open" class="lvx-transcript-open">✎ Lyrics text</button><dialog class="lvx-transcript-editor" aria-label="Lyrics text"><h3>Lyrics</h3><p class="lvx-sync-hint">One phrase per line. <code>[Bubi]</code> alone sets the singer for following lines; inside a line it switches singers from that word onward. Names are not sung. Multiple Main tracks can overlap.</p><details class="lvx-transcript-help"><summary>Text shortcuts &amp; timing</summary><p class="lvx-sync-hint">Use <code>[lead]</code> for the original Main track or <code>[backing]</code> for backing. Parentheses add backing lyrics; Apply asks where they begin. Prefix a word with <code>=</code> to show it whole. <code>word(d)</code> doubles one word; <code>(doubled)</code> at the phrase start doubles the phrase. These markers are not sung. Singer assignments preserve existing word timing. New words and lines get estimated timing; deleted words are hidden. Undo preview reverts.</p></details><div class="lvx-transcript-tracks"></div><textarea data-sync="transcript-text" rows="12" spellcheck="true" aria-label="Lyrics, one phrase per line"></textarea><ul class="lvx-transcript-changes" aria-live="polite"></ul><div class="lvx-tap-actions"><button data-sync="transcript-apply">Apply to preview</button><button data-sync="transcript-close">Close</button></div></dialog><section class="lvx-event-review" hidden aria-label="Assign recorded events"><p class="lvx-event-summary" role="status"></p><div class="lvx-event-phrases"></div><div class="lvx-tap-actions"><button data-sync="events-review">Use reviewed assignments</button><button data-sync="events-export">Export events</button></div><p class="lvx-sync-hint">Your counts override dictionary guesses. Pitch events stay within their syllable. Amber means uncertain or changed. Raw timestamps never move. A word starts at its first entrance; its end stays provisional until word-boundary cleanup. Long gaps are flagged because a held syllable can look like the next word. Unresolved phrases stay in the take.</p></section>
+      <button data-sync="transcript-open" class="lvx-transcript-open">✎ Lyrics text</button><dialog class="lvx-transcript-editor" aria-label="Lyrics text"><header class="lvx-transcript-head"><button type="button" class="lvx-transcript-move" aria-label="Move lyrics editor" title="Drag to move · arrow keys to move">⠿ Lyrics</button><span class="lvx-transcript-head-actions"><button type="button" data-transcript-play>Ⅱ Pause</button><button type="button" data-sync="transcript-close" aria-label="Close lyrics editor">✕</button></span></header><p class="lvx-sync-hint">One phrase per line. <code>[Bubi]</code> alone sets the singer for following lines; inside a line it switches singers from that word onward. Names are not sung. Multiple Main tracks can overlap.</p><details class="lvx-transcript-help"><summary>Text shortcuts &amp; timing</summary><p class="lvx-sync-hint">Use <code>[lead]</code> for the original Main track or <code>[backing]</code> for backing. Parentheses add backing lyrics; Apply asks where they begin. Prefix a word with <code>=</code> to show it whole. <code>word(d)</code> doubles one word; <code>(doubled)</code> at the phrase start doubles the phrase. These markers are not sung. Singer assignments preserve existing word timing. New words and lines get estimated timing; deleted words are hidden. Undo preview reverts.</p></details><div class="lvx-transcript-tracks"></div><textarea data-sync="transcript-text" rows="12" spellcheck="true" aria-label="Lyrics, one phrase per line"></textarea><div class="lvx-transcript-pager"></div><ul class="lvx-transcript-changes" aria-live="polite"></ul><div class="lvx-tap-actions"><button data-sync="transcript-apply">Apply to preview</button></div></dialog><section class="lvx-event-review" hidden aria-label="Assign recorded events"><p class="lvx-event-summary" role="status"></p><div class="lvx-event-phrases"></div><div class="lvx-tap-actions"><button data-sync="events-review">Use reviewed assignments</button><button data-sync="events-export">Export events</button></div><p class="lvx-sync-hint">Your counts override dictionary guesses. Pitch events stay within their syllable. Amber means uncertain or changed. Raw timestamps never move. A word starts at its first entrance; its end stays provisional until word-boundary cleanup. Long gaps are flagged because a held syllable can look like the next word. Unresolved phrases stay in the take.</p></section>
       <section class="lvx-mark-correction" hidden aria-label="Correct recorded timing"><label>Recorded <select data-sync="correct-mark" aria-label="Recorded mark to correct"></select></label><div class="lvx-correction-times"><label>Start ms <input data-sync="correct-start" type="number" min="0" step="10"></label><label>End ms <input data-sync="correct-end" type="number" min="0" step="10"></label></div><div class="lvx-tap-actions"><button data-sync="correct-hear">▶ Hear this mark</button><button data-sync="correct-save">Use exact times</button></div><label>Adjust <select data-sync="correct-edge"><option value="move">Whole mark</option><option value="start">Start only</option><option value="end">End only</option></select></label><div class="lvx-tap-actions"><button data-sync="correct-earlier">← Earlier 10 ms</button><button data-sync="correct-later">Later 10 ms →</button><button data-sync="correct-undo">↶ Undo correction</button></div><p class="lvx-sync-hint">Alt + ← / → adjusts the selected edge by 10 ms; add Shift for 50 ms. Corrections use original song time. Hear this mark plays a short loop at practice speed.</p></section>
       <details class="lvx-perform-options"><summary>Performance options <span>units · grid · clicks</span></summary>
       <div class="lvx-tap-settings"><label>Word gesture <select data-sync="tap-cadence"><option value="hold">Hold for word duration</option><option value="flow">Space → next lyric</option><option value="pairs">Separate start / end</option></select></label><label>Word pass <select data-sync="tap-scope"><option value="lane">Continue through vocal track</option><option value="phrase">This phrase only</option></select></label></div>
@@ -932,7 +932,7 @@
       <label class="lvx-sync-loop"><input type="checkbox" data-sync="tap-click"> Audible marks · words only</label>
       </details>
     </details>
-    <details class="lvx-effect-panel"><summary>Perform effects <span>second pass</span></summary><p class="lvx-sync-hint">Hold Space to overwrite. Space alone clears; press 1–9 while holding to apply an effect. Release to listen.</p><div class="lvx-beat-settings"><label>Clock <select data-sync="effect-clock"><option value="interval">Sung intervals</option><option value="beat">Beats · through gaps</option></select></label><label>Target <select data-sync="beat-target"><option value="active">Visible lyrics</option><option value="screen">Screen glow</option><option value="lane">Current vocal lane</option><option value="phrase">This phrase</option><option value="word">Selected word</option><option value="syllable">Selected syllable</option></select></label><label>Length · beats <input data-sync="beat-duration" type="number" min="0.25" max="64" step="0.25" value="4"></label><label class="lvx-sync-loop"><input data-sync="beat-snap" type="checkbox" checked> Snap effect to ¼ beat</label></div><label class="lvx-sync-loop lvx-interval-target">Target <select data-sync="effect-scope"><option value="phrase">Phrase</option><option value="word" selected>Word</option><option value="syllable">Authored syllable</option></select></label><div class="lvx-tap-actions"><button data-sync="effect-start">▶ Start effects pass · Enter</button><button data-sync="effect-stop">■ Stop · Enter</button></div><details class="lvx-landing-editor"><summary>Landing override · word or syllable</summary><label>Target <select data-sync="landing-target" aria-label="Landing target"></select></label><label>Style <select data-sync="landing-style" aria-label="Landing style"><option value="">Use display default</option><option value="settle">Soft settle</option><option value="glide">Glide</option><option value="drop">Drop</option><option value="still">Still</option></select></label><button data-sync="landing-apply">Apply landing to preview</button><p class="lvx-sync-hint">Syllable overrides take priority over their word. Other effects and timings stay unchanged.</p></details><label class="lvx-groove-direction">Groove direction <select data-sync="groove-axis" aria-label="Groove direction"><option value="vertical">Vertical ↕</option><option value="horizontal">Horizontal ↔</option></select></label><div class="lvx-effect-pads"><button data-effect="pulse">1 · Pulse</button><button data-effect="tilt">2 · Tilt</button><button data-effect="shake">3 · Shake</button><button data-effect="bounce">4 · Bounce</button><button data-effect="glow">5 · Glow</button><button data-effect="groove">6 · Groove</button><button data-effect="echo">7 · Echo</button><button data-effect="glitch">8 · Glitch</button><button data-effect="spin">9 · Spin</button></div><p class="lvx-effect-status" role="status">Effects are buffered until you use the pass.</p><div class="lvx-beat-cue-list"></div><label class="lvx-gap-setting">Phrase linger override · beats<input data-sync="gap-beats" type="number" min="0" max="64" step="0.25" value="0"></label><button data-sync="gap-use">Use phrase override</button><button data-sync="gap-default">Use display default</button><p class="lvx-sync-hint">0 disables linger for this phrase. A beat override ends at the next lyric in this lane. Use display default removes the override; sung timings stay fixed.</p><div class="lvx-tap-actions"><button data-sync="effect-use">Use effects in preview</button><button data-sync="effect-undo">↶ Undo effect</button><button data-sync="effect-discard">Discard effects</button></div></details>
+    <details class="lvx-effect-panel"><summary>Perform effects <span>second pass</span></summary><p class="lvx-sync-hint">Hold Space to overwrite. Space alone clears; press 0–9 while holding to apply an effect. Release to listen.</p><div class="lvx-beat-settings"><label>Clock <select data-sync="effect-clock"><option value="interval">Sung intervals</option><option value="beat">Beats · through gaps</option></select></label><label>Target <select data-sync="beat-target"><option value="active">Visible lyrics</option><option value="screen">Screen glow</option><option value="lane">Current vocal lane</option><option value="phrase">This phrase</option><option value="word">Selected word</option><option value="syllable">Selected syllable</option></select></label><label>Length · beats <input data-sync="beat-duration" type="number" min="0.25" max="64" step="0.25" value="4"></label><label class="lvx-sync-loop"><input data-sync="beat-snap" type="checkbox" checked> Snap effect to ¼ beat</label></div><label class="lvx-sync-loop lvx-interval-target">Target <select data-sync="effect-scope"><option value="phrase">Phrase</option><option value="word" selected>Word</option><option value="syllable">Authored syllable</option></select></label><div class="lvx-tap-actions"><button data-sync="effect-start">▶ Start effects pass · Enter</button><button data-sync="effect-stop">■ Stop · Enter</button></div><details class="lvx-landing-editor"><summary>Landing override · word or syllable</summary><label>Target <select data-sync="landing-target" aria-label="Landing target"></select></label><label>Style <select data-sync="landing-style" aria-label="Landing style"><option value="">Use display default</option><option value="settle">Soft settle</option><option value="glide">Glide</option><option value="drop">Drop</option><option value="still">Still</option></select></label><button data-sync="landing-apply">Apply landing to preview</button><p class="lvx-sync-hint">Syllable overrides take priority over their word. Other effects and timings stay unchanged.</p></details><label class="lvx-groove-direction">Groove direction <select data-sync="groove-axis" aria-label="Groove direction"><option value="vertical">Vertical ↕</option><option value="horizontal">Horizontal ↔</option></select></label><div class="lvx-effect-pads"><button data-effect="pulse">1 · Pulse</button><button data-effect="tilt">2 · Tilt</button><button data-effect="shake">3 · Shake</button><button data-effect="bounce">4 · Bounce</button><button data-effect="glow">5 · Glow</button><button data-effect="groove">6 · Groove</button><button data-effect="echo">7 · Echo</button><button data-effect="glitch">8 · Glitch</button><button data-effect="spin">9 · Coin spin</button><button data-effect="rotor">0 · Rotor</button></div><p class="lvx-effect-status" role="status">Effects are buffered until you use the pass.</p><div class="lvx-beat-cue-list"></div><label class="lvx-gap-setting">Phrase linger override · beats<input data-sync="gap-beats" type="number" min="0" max="64" step="0.25" value="0"></label><button data-sync="gap-use">Use phrase override</button><button data-sync="gap-default">Use display default</button><p class="lvx-sync-hint">0 disables linger for this phrase. A beat override ends at the next lyric in this lane. Use display default removes the override; sung timings stay fixed.</p><div class="lvx-tap-actions"><button data-sync="effect-use">Use effects in preview</button><button data-sync="effect-undo">↶ Undo effect</button><button data-sync="effect-discard">Discard effects</button></div></details>
     <details><summary>Exact word timings <span>milliseconds</span></summary><p class="lvx-sync-hint">One word per line: word, start, end. These changes affect the preview until you apply.</p><label class="lvx-sync-protected"><input type="checkbox" data-sync="protected"> Edit saved timings in this phrase</label><textarea aria-label="Exact word timings in milliseconds" spellcheck="false" rows="5"></textarea><div class="lvx-sync-text-actions"><button data-sync="tune">Use these times</button><button data-sync="reset">Reset text</button></div></details>
     <div class="lvx-sync-text-actions"><button data-sync="export">↓ Export preview JSON</button><button data-sync="discard-all" class="lvx-danger">Discard all changes</button></div>
     <footer><button data-sync="undo">↶ Undo saved change</button><span class="lvx-save-wrap" tabindex="-1"><span class="lvx-save-tooltip" role="tooltip" id="lvx-save-reason"></span><button data-sync="apply" class="lvx-sync-primary" aria-describedby="lvx-save-reason"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/></svg> Save timings</button></span></footer>`;
@@ -941,6 +941,32 @@
   const transcriptDialog = syncPanel.querySelector(".lvx-transcript-editor");
   const transcriptOpen = syncPanel.querySelector('[data-sync="transcript-open"]');
   const syncButton = name => name === "transcript-open" ? transcriptOpen : syncPanel.querySelector(`[data-sync="${name}"]`) || transcriptDialog.querySelector(`[data-sync="${name}"]`);
+  // Page through long work areas without replacing the editable text or draft.
+  function makePager(scroller, host, label, inset=0){
+    const nav=document.createElement('nav');nav.className='lvx-page-nav';nav.setAttribute('aria-label',label+' pages');
+    nav.innerHTML='<button type="button" data-page="prev" aria-label="Previous page">‹</button><span data-page="position"></span><div class="lvx-page-rail" role="slider" tabindex="0" aria-label="'+label+' page" aria-valuemin="1"><span class="lvx-page-thumb"></span></div><button type="button" data-page="next" aria-label="Next page">›</button>';
+    host.append(nav);const previous=nav.querySelector('[data-page=prev]'),next=nav.querySelector('[data-page=next]'),position=nav.querySelector('[data-page=position]'),rail=nav.querySelector('.lvx-page-rail'),thumb=nav.querySelector('.lvx-page-thumb');let step=1,max=0,pages=1;
+    function refresh(){step=Math.max(40,scroller.clientHeight-inset);max=Math.max(0,scroller.scrollHeight-scroller.clientHeight);pages=Math.max(1,Math.ceil(max/step)+1);const page=Math.min(pages,Math.floor((scroller.scrollTop+step*.35)/step)+1);nav.hidden=pages===1;previous.disabled=scroller.scrollTop<1;next.disabled=scroller.scrollTop>=max-1;position.textContent=page+' / '+pages;rail.setAttribute('aria-valuemax',String(pages));rail.setAttribute('aria-valuenow',String(page));rail.setAttribute('aria-valuetext','Page '+page+' of '+pages);thumb.style.width=Math.max(12,100/pages)+'%';thumb.style.left=(max?scroller.scrollTop/max*(100-parseFloat(thumb.style.width)):0)+'%';}
+    const go=delta=>scroller.scrollBy({top:delta*step,behavior:bloomMotion.matches?'auto':'smooth'});
+    previous.onclick=()=>go(-1);next.onclick=()=>go(1);scroller.addEventListener('scroll',refresh,{passive:true});scroller.addEventListener('input',refresh);
+    rail.addEventListener('keydown',event=>{const k=event.key;if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','PageUp','PageDown','Home','End'].includes(k))return;event.preventDefault();event.stopPropagation();if(k==='Home')scroller.scrollTop=0;else if(k==='End')scroller.scrollTop=max;else go(['ArrowLeft','ArrowUp','PageUp'].includes(k)?-1:1);});
+    let dragging=false;const seek=event=>{const rect=rail.getBoundingClientRect(),ratio=Math.max(0,Math.min(1,(event.clientX-rect.left)/Math.max(1,rect.width)));scroller.scrollTop=ratio*max;};
+    rail.addEventListener('pointerdown',event=>{if(event.button!==0)return;event.preventDefault();rail.focus();if(event.target===thumb){dragging=true;rail.setPointerCapture(event.pointerId);}else{const r=thumb.getBoundingClientRect();go(event.clientX<r.left?-1:1);}});
+    rail.addEventListener('pointermove',event=>{if(dragging)seek(event);});rail.addEventListener('pointerup',()=>{dragging=false;});rail.addEventListener('pointercancel',()=>{dragging=false;});
+    const observer=new ResizeObserver(refresh);observer.observe(scroller);return {refresh,observe:node=>observer.observe(node),dispose:()=>observer.disconnect()};
+  }
+  const panelPager=makePager(syncPanel,syncPanel.querySelector('header'),'Timing',125);
+  const transcriptPager=makePager(syncButton('transcript-text'),transcriptDialog.querySelector('.lvx-transcript-pager'),'Lyrics',24);
+  const transcriptMove=transcriptDialog.querySelector('.lvx-transcript-move'),transcriptPlay=transcriptDialog.querySelector('[data-transcript-play]');
+  function refreshTranscriptTransport(){const media=getMedia();transcriptPlay.disabled=!media||isAdvertisement();transcriptPlay.textContent=media&&!media.paused?'Ⅱ Pause':'▶ Play';transcriptPlay.setAttribute('aria-label',media&&!media.paused?'Pause video':'Play video');}
+  transcriptPlay.onclick=()=>{const media=getMedia();if(!media||isAdvertisement())return;if(media.paused)media.play().catch(error=>setHud(error.message,true,true));else media.pause();refreshTranscriptTransport();};
+  listenGlobal(document,'play',event=>{if(event.target===getMedia())refreshTranscriptTransport();},true);listenGlobal(document,'pause',event=>{if(event.target===getMedia())refreshTranscriptTransport();},true);
+  function placeTranscript(x,y){const box=transcriptDialog.getBoundingClientRect(),w=document.documentElement.clientWidth,h=document.documentElement.clientHeight;transcriptDialog.style.left=Math.max(0,Math.min(x,Math.max(0,w-box.width)))+'px';transcriptDialog.style.top=Math.max(0,Math.min(y,Math.max(0,h-box.height)))+'px';transcriptDialog.style.right='auto';transcriptDialog.style.bottom='auto';transcriptDialog.style.margin='0';}
+  let transcriptDrag=null;transcriptMove.addEventListener('pointerdown',event=>{if(event.button!==0)return;event.preventDefault();const box=transcriptDialog.getBoundingClientRect();transcriptDrag={id:event.pointerId,x:event.clientX-box.left,y:event.clientY-box.top};transcriptMove.setPointerCapture(event.pointerId);});
+  transcriptMove.addEventListener('pointermove',event=>{if(transcriptDrag?.id===event.pointerId)placeTranscript(event.clientX-transcriptDrag.x,event.clientY-transcriptDrag.y);});
+  for(const name of ['pointerup','pointercancel','lostpointercapture'])transcriptMove.addEventListener(name,()=>{transcriptDrag=null;});
+  transcriptMove.addEventListener('keydown',event=>{const d={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[event.key];if(!d)return;event.preventDefault();event.stopPropagation();const b=transcriptDialog.getBoundingClientRect(),step=event.shiftKey?64:16;placeTranscript(b.left+d[0]*step,b.top+d[1]*step);});
+
   const toggleButtons=new Map();
   for(const input of syncPanel.querySelectorAll('input[type=checkbox]')){
     const label=input.closest('label'),host=document.createElement('div'),button=document.createElement('button');
@@ -1085,16 +1111,17 @@
   }
   // Whole-transcript text editing over the unsaved preview.
   const transcript={dirty:false,shownFor:null};
+  const prepareWords={drafts:new Map(),suggestions:new Map(),token:null,scanning:false,selected:''};
   // A stopped take and a take already used in the preview are still unsaved.
   // Keep this independent of tapPending(), which only gates editor operations.
   function hasUnsavedWork() {
-    return Boolean(liveStage.drag || liveStage.ops.length || liveStage.armed || syncSave.pending || [...captureTracks.slots.values()].some(slot=>tapCount(slot.state.take)) || stageEdit?.fieldsDirty || stageEdit?.drag || timing.dirty || transcript.dirty || tapping.splitDirty || effectPending() ||
+    return Boolean(prepareWords.drafts.size || liveStage.drag || liveStage.ops.length || liveStage.armed || syncSave.pending || [...captureTracks.slots.values()].some(slot=>tapCount(slot.state.take)) || stageEdit?.fieldsDirty || stageEdit?.drag || timing.dirty || transcript.dirty || tapping.splitDirty || effectPending() ||
       tapping.take && (tapping.take.status === 'armed' || tapCount(tapping.take) || tapping.take.pendingStartMs != null) ||
       timing.draft && LvTimingVariant.hasChanges(timing.draft.score, state.score));
   }
   let navigationApproval = null;
   let navigationHold = null, navigationGestureUntil = 0;
-  const navigationWork = () => JSON.stringify([timing.draft?.token, timing.draft?.previewRevision,
+  const navigationWork = () => JSON.stringify([timing.draft?.token, timing.draft?.previewRevision, [...prepareWords.drafts],
     timing.dirty && syncText.value, transcript.dirty && syncButton('transcript-text').value,
     tapping.splitDirty && [syncButton('tap-spoken').value, syncButton('tap-split').value], tapping.take, [...captureTracks.slots], performanceTake.armed, performanceTake.marks, syncSave.pending,liveStage.ops,liveStage.drag&&{target:liveStage.drag.target.target,layer:liveStage.drag.layer}]);
   const navigationSource = () => LvScore.mediaKey(timing.draft?.score.source || state.score?.source);
@@ -1703,7 +1730,7 @@
     refreshTranscriptEditor();
     if(state.score&&retimeFlags.mediaKey!==LvScore.mediaKey(state.score.source))void loadRetimeFlags();
     if(state.score&&tempo.mediaKey!==LvScore.mediaKey(state.score.source))void loadTempo();
-    renderEventReview();renderPerformPhrase(); renderTapTimeline(); refreshMarkCorrection(); refreshEffectPanel();
+    renderEventReview();renderPerformPhrase(); renderTapTimeline(); refreshMarkCorrection(); refreshEffectPanel(); refreshPrepareWords(); refreshStageSteps();
   }
   function refreshCaptureKeys(){
     const guide=syncPanel.querySelector('.lvx-capture-keys'),take=tapping.take,isEvents=eventPass(),mode=syncButton('tap-mode').value;guide.hidden=false;
@@ -2969,7 +2996,7 @@
       timing.busy=false;
       const area=syncButton('transcript-text');
       if(!timing.draft&&!transcript.dirty){area.value='';state.plainLyrics={text:'',mediaKey:LvScore.mediaKey({url:location.href}),provider:'Manual paste'};}
-      transcript.shownFor=transcript.dirty?transcript.shownFor:null;refreshTranscriptEditor();transcriptDialog.showModal();
+      transcript.shownFor=transcript.dirty?transcript.shownFor:null;refreshTranscriptEditor();if(!transcriptDialog.open)transcriptDialog.show();refreshTranscriptTransport();requestAnimationFrame(transcriptPager.refresh);
       if(!transcript.dirty){area.select();const pending=transcriptReview();if(pending?.operations.length)transcript.dirty=true;else transcriptDialog.querySelector('.lvx-transcript-changes').replaceChildren();}
     }catch(error){setHud(error.message,true,true);}finally{timing.busy=false;refreshTranscriptEditor();}
   }
@@ -3216,18 +3243,18 @@
       performanceTake.armed = true; performanceTake.binding = binding; performanceTake.laneId = phrase.laneId; performanceTake.rate = media.playbackRate;
       performanceTake.clock=syncButton('effect-clock').value;
       timing.view = 'proposed'; timing.auditioned = false; state.scoreSignature = '';
-      setSyncNotice('Listening. Hold Space alone to clear; press 1–9 during the hold to apply an effect. Release Space to listen. Enter or Stop adds edits to preview.');
+      setSyncNotice('Listening. Hold Space alone to clear; press 0–9 during the hold to apply an effect. Release Space to listen. Enter or Stop adds edits to preview.');
     } catch (error) { setSyncNotice(error.message,'error'); }
     finally { timing.busy = false; refreshTimingPanel(); syncButton('effect-stop').focus(); }
   }
   function markEffect(type, event = {}, sample=null) {
-    if (!performanceTake.armed || event.repeat || !['pulse','tilt','shake','bounce','glow','groove','echo','glitch','spin','clear'].includes(type)) return;
+    if (!performanceTake.armed || event.repeat || !['pulse','tilt','shake','bounce','glow','groove','echo','glitch','spin','rotor','clear'].includes(type)) return;
     if (!effectSourceReady()) { stopEffects('Effects stopped because playback or its source changed. Gestures retained.'); return; }
     const target = sample?.target||activeEffectTarget();
     if (!target) { setSyncNotice('No unique active lyric in this vocal track. Nothing added during this gap or overlap.'); return; }
     if (performanceTake.marks.length >= 512) { stopEffects('Gesture buffer is full. Use or discard this pass before continuing.'); return; }
     if(performanceTake.clock==='beat'){
-      if(['groove','echo','glitch','spin'].includes(type)&&target.target.kind==='screen'){setSyncNotice('This effect uses letters. Choose Phrase, Word, Syllable or visible lyrics.');return;}
+      if(['groove','echo','glitch','spin','rotor'].includes(type)&&target.target.kind==='screen'){setSyncNotice('This effect uses letters. Choose Phrase, Word, Syllable or visible lyrics.');return;}
       const rawSourceMs=sample?.mediaMs??Math.round(getMediaTimeMs()),at=LvTapTiming.tempoAt(tempo.map,rawSourceMs);if(!at)return;
       const beat=syncButton('beat-snap').checked?Math.round(at.beat*4)/4:at.beat,durationBeats=Number(syncButton('beat-duration').value);
       if(!Number.isFinite(durationBeats)||durationBeats<=0||durationBeats>64){setSyncNotice('Effect length must be more than 0 and at most 64 beats.');return;}
@@ -3237,7 +3264,7 @@
         for(const mark of performanceTake.marks){if(mark.operation.type==='setBeatCue')cues.set(mark.operation.cue.id,mark.operation.cue);else if(mark.operation.type==='deleteBeatCue')cues.delete(mark.operation.cueId);}
         for(const cue of [...cues.values()].filter(match))performanceTake.marks.push({targetId:cue.id,atMs:rawSourceMs,operation:{type:'deleteBeatCue',cueId:cue.id}});
       }else{
-        const cue={id:'beat-'+crypto.randomUUID(),beat,durationBeats,effect:{pulse:'pulse',tilt:'breath',shake:'color',bounce:'bounce',glow:'glow',groove:'groove',echo:'echo',glitch:'glitch',spin:'spin'}[type],strength:.6,...(type==='groove'?{axis:syncButton('groove-axis').value}:{}),target:target.target,rawSourceMs,snappedSourceMs:Math.max(0,Math.round(LvTapTiming.tempoTimeAtBeat(tempo.map,beat))),provenance:'manual'};
+        const cue={id:'beat-'+crypto.randomUUID(),beat,durationBeats,effect:{pulse:'pulse',tilt:'breath',shake:'color',bounce:'bounce',glow:'glow',groove:'groove',echo:'echo',glitch:'glitch',spin:'spin',rotor:'rotor'}[type],strength:.6,...(type==='groove'?{axis:syncButton('groove-axis').value}:{}),target:target.target,rawSourceMs,snappedSourceMs:Math.max(0,Math.round(LvTapTiming.tempoTimeAtBeat(tempo.map,beat))),provenance:'manual'};
         performanceTake.marks.push({targetId:cue.id,atMs:rawSourceMs,operation:{type:'setBeatCue',cue}});
       }
       timing.auditioned=false;state.scoreSignature='';if(!sample){refreshEffectPanel();setSyncNotice(`Beat effect → ${target.text} · ${durationBeats} beats · buffered`);}return;
@@ -3270,10 +3297,10 @@
   const effectTargets=document.createElement('div');effectTargets.className='lvx-effect-targets';effectTargets.setAttribute('role','group');effectTargets.setAttribute('aria-label','Effect target');
   for(const [value,label]of [['phrase','Phrase'],['word','Word'],['syllable','Syllable']]){const button=document.createElement('button');button.type='button';button.dataset.effectTarget=value;button.textContent=label;button.onclick=()=>{syncButton('effect-scope').value=value;syncButton('beat-target').value=value;refreshEffectPanel();};effectTargets.append(button);}
   syncPanel.querySelector('.lvx-effect-panel>.lvx-sync-hint').after(effectTargets);
-  syncPanel.querySelector('.lvx-effect-panel>.lvx-sync-hint').textContent='Hold Space to overwrite. Space alone clears; press 1–9 while holding to apply an effect. Release Space to listen. Enter starts / stops playback.';
+  syncPanel.querySelector('.lvx-effect-panel>.lvx-sync-hint').textContent='Hold Space to overwrite. Space alone clears; press 0–9 while holding to apply an effect. Release Space to listen. Enter starts / stops playback.';
   syncButton('effect-start').textContent='▶ Start effects pass · Enter';syncButton('effect-stop').textContent='■ Stop · Enter';
   const effectHold=document.createElement('button');effectHold.dataset.sync='effect-hold';effectHold.textContent='Hold to overwrite · Space';effectHold.type='button';effectHold.setAttribute('aria-pressed','false');syncButton('effect-stop').after(effectHold);
-  const effectLive=document.createElement('div');effectLive.className='lvx-effect-live';effectLive.innerHTML='<strong></strong><span></span><small>Space = blank · Space + 1–9 = effect</small>';syncPanel.querySelector('.lvx-effect-pads').before(effectLive);
+  const effectLive=document.createElement('div');effectLive.className='lvx-effect-live';effectLive.innerHTML='<strong></strong><span></span><small>Space = blank · Space + 0–9 = effect</small>';syncPanel.querySelector('.lvx-effect-pads').before(effectLive);
   effectLive.after(createEffectTrack('effects'));
   for(const pad of syncPanel.querySelectorAll('.lvx-effect-pads [data-effect]'))pad.style.setProperty('--effect-color',effectColors[pad.dataset.effect]);
   const effectClear=document.createElement('button');effectClear.dataset.sync='effect-clear-track';effectClear.type='button';effectClear.textContent='Clear effects track…';syncButton('effect-discard').after(effectClear);
@@ -3320,15 +3347,15 @@
   function effectPreviewTick(now){
     effectPreview.frame=0;
     if(syncPanel.hidden||timingWorkspace.view!=='effects'||performanceTake.armed||document.hidden||!root.isConnected){stopEffectPreview();return;}
-    const time=bloomMotion.matches?(effectPreview.type==='spin'?0:1000):effectPreview.type==='spin'?Math.min(2999,(now-effectPreview.start)%3400):500+(now-effectPreview.start)%2000;
+    const time=bloomMotion.matches?(['spin','rotor'].includes(effectPreview.type)?0:1000):['spin','rotor'].includes(effectPreview.type)?Math.min(2999,(now-effectPreview.start)%3400):500+(now-effectPreview.start)%2000;
     expressLine(effectPreviewLine,effectPreview.words,time,effectPreview.cues,{...choreography,mode:'classic',automatic:false,dance:'off'});
     const beatMode=syncButton('effect-clock').value==='beat';
-    for(const node of effectPreviewLine.children){node.style.removeProperty('--lvx-beat-spin');node.style.removeProperty('translate');node.style.removeProperty('scale');node.style.removeProperty('filter');paintAccent(node,'','beat');for(const letter of node.querySelectorAll('.lvx-dance-letter'))letter.style.removeProperty('translate');}
+    for(const node of effectPreviewLine.children){node.style.removeProperty('--lvx-beat-spin');node.style.removeProperty('--lvx-beat-rotor');node.style.removeProperty('translate');node.style.removeProperty('scale');node.style.removeProperty('filter');paintAccent(node,'','beat');for(const letter of node.querySelectorAll('.lvx-dance-letter'))letter.style.removeProperty('translate');}
     if(beatMode&&effectPreview.type!=='clear'){
       const map=tempo.map||{version:1,anchorMs:0,segments:[{startMs:0,bpm:120,transition:'step',provenance:'manual'}]},beat=LvTapTiming.tempoAt(map,0)?.beat||0;
-      const cue={beat,durationBeats:effectPreview.type==='spin'?4:64,effect:{tilt:'breath',shake:'color'}[effectPreview.type]||effectPreview.type,strength:.6,axis:syncButton('groove-axis').value};
-      const visual=LvBeatTrack.cueAt(cue,map,time,bloomMotion.matches,effectPreview.type==='spin'?beat+time/3000*4:undefined);
-      if(visual)for(const node of effectPreviewLine.children){node.style.setProperty('--lvx-beat-spin',(visual.spin||0)+'deg');node.style.translate='0 '+(visual.y||0)+'px';node.style.scale=String(visual.scale);node.style.filter=`brightness(${visual.brightness}) hue-rotate(${visual.hue}deg)`;if(visual.groove)paintBeatGroove(node,visual.groove,false);paintAccent(node,visual.accent?LvChoreography.accentShadow(visual.accent.type,visual.accent.phase,visual.accent.strength):'','beat');}
+      const cue={beat,durationBeats:['spin','rotor'].includes(effectPreview.type)?4:64,effect:{tilt:'breath',shake:'color'}[effectPreview.type]||effectPreview.type,strength:.6,axis:syncButton('groove-axis').value};
+      const visual=LvBeatTrack.cueAt(cue,map,time,bloomMotion.matches,['spin','rotor'].includes(effectPreview.type)?beat+time/3000*4:undefined);
+      if(visual)for(const node of effectPreviewLine.children){node.style.setProperty('--lvx-beat-spin',(visual.spin||0)+'deg');node.style.setProperty('--lvx-beat-rotor',(visual.rotor||0)+'deg');node.style.translate='0 '+(visual.y||0)+'px';node.style.scale=String(visual.scale);node.style.filter=`brightness(${visual.brightness}) hue-rotate(${visual.hue}deg)`;if(visual.groove)paintBeatGroove(node,visual.groove,false);paintAccent(node,visual.accent?LvChoreography.accentShadow(visual.accent.type,visual.accent.phase,visual.accent.strength):'','beat');}
     }
     if(effectPreview.type!=='clear'&&!bloomMotion.matches)effectPreview.frame=requestAnimationFrame(effectPreviewTick);
   }
@@ -3380,8 +3407,8 @@
     syncButton('previous').disabled = timing.busy || !draft || timing.phraseIndex === 0;
     syncButton('next').disabled = timing.busy || !draft || timing.phraseIndex >= draft.score.phrases.length - 1;
     for (const name of ['audition', 'tune', 'reset']) syncButton(name).disabled = timing.busy || !draft;
-    syncButton('apply').disabled = timing.busy || !draft || !hasUnsavedWork() || timing.dirty || tapping.splitDirty || tapping.take?.status==='armed' || performanceTake.armed || countIn.active || countIn.preparing || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source);
-    const saveReason = countIn.active?'Counting in…':timing.busy ? 'Updating preview…' : !draft ? timing.openError||'Choose Prepare preview & open editor to start editing this video.' : LvScore.mediaKey({url:location.href})!==LvScore.mediaKey(state.score.source)?'Return to this preview’s video before saving.':timing.dirty?'Use your typed word times first: Exact word timings → Use these times.':tapping.splitDirty?'Use Set syllables for your typed spelling first.':tapping.take?.status==='armed'||performanceTake.armed?'Stop the recording pass before saving.':timing.saveError||(transcript.dirty?'Save will apply your pending Lyrics text corrections.':'')||captureSaveWarning()||'Ready to save this iteration. Unmatched capture remains backed up.';
+    syncButton('apply').disabled = timing.busy || !draft || !hasUnsavedWork() || timing.dirty || tapping.splitDirty || prepareWords.drafts.size || tapping.take?.status==='armed' || performanceTake.armed || countIn.active || countIn.preparing || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source);
+    const saveReason = countIn.active?'Counting in…':timing.busy ? 'Updating preview…' : !draft ? timing.openError||'Choose Prepare preview & open editor to start editing this video.' : LvScore.mediaKey({url:location.href})!==LvScore.mediaKey(state.score.source)?'Return to this preview’s video before saving.':timing.dirty?'Use your typed word times first: Exact word timings → Use these times.':tapping.splitDirty?'Use Set syllables for your typed spelling first.':prepareWords.drafts.size?'Apply or clear the syllable count in Prepare first.':tapping.take?.status==='armed'||performanceTake.armed?'Stop the recording pass before saving.':timing.saveError||(transcript.dirty?'Save will apply your pending Lyrics text corrections.':'')||captureSaveWarning()||'Ready to save this iteration. Unmatched capture remains backed up.';
     const currentSaveReason=draft&&!timing.busy&&!hasUnsavedWork()?'No changes to save.':saveReason;
     syncButton('apply').setAttribute('aria-description', currentSaveReason);
     syncPanel.querySelector('.lvx-sync-save-status').textContent=currentSaveReason;
@@ -3431,6 +3458,7 @@
     syncSidebarState();
   }
   function discardTimingLocal() {
+    prepareWords.drafts.clear();prepareWords.suggestions.clear();prepareWords.token=null;prepareWords.scanning=false;prepareWords.selected='';
     timing.wordCaptureWarning=null;
     captureTracks.slots.clear();
     cancelCountIn();
@@ -3518,7 +3546,7 @@
   }
   async function applyTimingReview() {
     // Audition is recommended, not required: the preview lives only in session storage, and Save is undoable.
-    if (!timing.draft || timing.busy || !hasUnsavedWork() || timing.dirty || tapping.splitDirty || tapping.take?.status==='armed' || performanceTake.armed || countIn.active || countIn.preparing) return;
+    if (!timing.draft || timing.busy || !hasUnsavedWork() || timing.dirty || tapping.splitDirty || prepareWords.drafts.size || tapping.take?.status==='armed' || performanceTake.armed || countIn.active || countIn.preparing) return;
     await finishStoppedTake();
     if(performanceTake.marks.length)await useEffects();
     if(!await parkUnfinishedTake())return;
@@ -3598,28 +3626,86 @@
     event.stopPropagation();
     if (event.key === 'Escape') { event.preventDefault(); closeTimingReview(); }
   });
-  var timingWorkspace={view:'record',tabs:null};
+  var timingWorkspace={view:'record',stage:'time',tabs:null,steps:null};
   function setTimingWorkspace(view){
-    if(!['record','review','effects','beat'].includes(view))return;
+    if(!['prepare','record','review','effects','beat'].includes(view))return false;
     if(timingWorkspace.effectsTabs&&stageEdit.dock==='effects'&&timing.busy&&view!==timingWorkspace.view)return;
     if(timingWorkspace.effectsTabs&&view!=='effects'&&!leaveEffectsStage())return;
     if((tapping.take?.status==='armed'||performanceTake.armed||countIn.active)&&timingWorkspace.view!==view)return;
     timingWorkspace.view=view;syncPanel.dataset.workspace=view;
+    if(view==='prepare')timingWorkspace.stage='prepare';else if(view!=='effects'||timingWorkspace.stage==='prepare')timingWorkspace.stage='time';
+    timingWorkspace.tabs.hidden=view==='prepare';
     for(const tab of timingWorkspace.tabs?.children||[]){const active=tab.dataset.workspace===view;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;}
     for(const panel of syncPanel.querySelectorAll('[data-workspace-page]'))panel.hidden=panel.dataset.workspacePage!==view;
     if(timingWorkspace.effectsTabs){if(view==='effects')setEffectsView(timingWorkspace.effectsView||'lyrics');else refreshEffectsNavigation();}
-    refreshEffectTracks();
+    refreshEffectTracks();refreshPrepareWords();refreshStageSteps();return true;
+  }
+  function refreshStageSteps(){
+    if(!timingWorkspace?.steps)return;
+    const locked=timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active||countIn.preparing;
+    for(const button of timingWorkspace.steps.children){button.setAttribute('aria-pressed',String(button.dataset.stageStep===timingWorkspace.stage));button.disabled=Boolean(locked&&button.dataset.stageStep!==timingWorkspace.stage);}
+    const effectsTab=timingWorkspace.tabs.querySelector('[data-workspace=effects]');if(effectsTab)effectsTab.textContent=timingWorkspace.stage==='motion'?'Motion & effects':'Effect timing';
+    const motionActions=syncPanel.querySelector('.lvx-motion-actions');if(motionActions){motionActions.hidden=timingWorkspace.stage!=='motion';for(const button of motionActions.querySelectorAll('button'))button.disabled=Boolean(locked||prepareWords.drafts.size);}
+  }
+  async function scanPrepareWords(){
+    const draft=timing.draft;if(!draft||prepareWords.scanning)return;
+    if(prepareWords.token!==draft.token){prepareWords.token=draft.token;prepareWords.suggestions.clear();prepareWords.selected='';}
+    const token=draft.token,words=[...new Set(draft.score.phrases.flatMap(p=>p.words.filter(w=>!w.excluded&&!w.syllables?.length).map(w=>w.text)).filter(text=>text?.trim()&&text.length<=256&&!prepareWords.suggestions.has(text)))];
+    if(!words.length)return;prepareWords.scanning=true;refreshPrepareWords();
+    try{for(let i=0;i<words.length;i+=128){const chunk=words.slice(i,i+128),response=await chrome.runtime.sendMessage({type:'LV_PRONUNCIATION_BATCH',words:chunk});if(prepareWords.token!==token||timing.draft?.token!==token)return;if(!response?.ok||response.suggestions?.length!==chunk.length)throw Error('Dictionary unavailable');chunk.forEach((word,index)=>prepareWords.suggestions.set(word,response.suggestions[index]));}}
+    catch(error){if(prepareWords.token===token){for(const word of words)if(!prepareWords.suggestions.has(word))prepareWords.suggestions.set(word,{status:'unavailable'});}}
+    finally{if(prepareWords.token===token){prepareWords.scanning=false;refreshPrepareWords();}}
+  }
+  function refreshPrepareWords(){
+    const pane=syncPanel.querySelector('[data-workspace-page=prepare]');if(!pane||timingWorkspace.view!=='prepare')return;
+    const draft=timing.draft,select=pane.querySelector('[data-prepare=word]'),count=pane.querySelector('[data-prepare=count]'),status=pane.querySelector('[data-prepare=status]');
+    if(!draft){status.textContent='Open a timing preview to prepare words.';return;}
+    if(prepareWords.token!==draft.token){prepareWords.token=draft.token;prepareWords.suggestions.clear();prepareWords.selected='';}
+    const candidates=new Map();for(const word of draft.score.phrases.flatMap(p=>p.words)){if(word.excluded||word.syllables?.length)continue;const suggestion=prepareWords.suggestions.get(word.text),key=LvChoreography.ruleWord(word.text);if(!key||!suggestion||suggestion.status==='suggested')continue;if(!candidates.has(key))candidates.set(key,word.text);}
+    const rows=[...candidates].sort((a,b)=>a[1].localeCompare(b[1]));if(!candidates.has(prepareWords.selected))prepareWords.selected=rows[0]?.[0]||'';
+    const optionsKey=JSON.stringify(rows);if(select.dataset.options!==optionsKey){select.replaceChildren(...rows.map(([key,text])=>{const option=document.createElement('option');option.value=key;option.textContent=text;return option;}));select.dataset.options=optionsKey;}select.value=prepareWords.selected;
+    if(document.activeElement!==count)count.value=prepareWords.drafts.get(prepareWords.selected)||'';
+    const unavailable=[...prepareWords.suggestions.values()].some(q=>q.status==='unavailable');
+    status.textContent=prepareWords.scanning?'Checking the dictionary…':unavailable?'Dictionary unavailable; showing words without saved syllables.':rows.length?`${rows.length} unknown or ambiguous ${rows.length===1?'word':'words'} in this song.`:'No unknown or ambiguous words without saved syllables.';
+    const locked=timing.busy||Boolean(tapping.take)||performanceTake.armed||countIn.active||countIn.preparing||timing.dirty||tapping.splitDirty||transcript.dirty;
+    select.disabled=locked||!rows.length;count.disabled=locked||!rows.length;pane.querySelector('[data-prepare=apply]').disabled=locked||!prepareWords.drafts.has(prepareWords.selected);pane.querySelector('[data-prepare=clear]').disabled=!prepareWords.drafts.size;
+    pane.querySelector('[data-prepare=lyrics]').disabled=locked;pane.querySelector('[data-prepare=rules]').disabled=locked;
+    if(!prepareWords.scanning)void scanPrepareWords();
+  }
+  async function applyPrepareCount(){
+    const key=prepareWords.selected,count=Number(prepareWords.drafts.get(key)),draft=timing.draft;
+    if(!draft||timing.busy||!Number.isInteger(count)||count<1||count>16){setSyncNotice('Enter a whole syllable count from 1 to 16.','error');return;}
+    const matches=draft.score.phrases.flatMap(p=>p.words).filter(w=>!w.excluded&&!w.syllables?.length&&LvChoreography.ruleWord(w.text)===key);
+    if(!matches.length){setSyncNotice('There are no matching unsplit words.');return;}
+    if(matches.length>512){setSyncNotice('Too many matching words for one preview edit.','error');return;}
+    timing.busy=true;refreshTimingPanel();const binding=draft.token,revision=draft.previewRevision,operations=[],splits=new Map();
+    try{
+      for(const word of matches){const spelling=word.text+'\0'+(word.spokenText||'');let parts=splits.get(spelling);if(!parts){const response=await chrome.runtime.sendMessage({type:'LV_PRONUNCIATION_COUNT',text:word.text,count,...(word.spokenText?{spokenText:word.spokenText}:{})});parts=response?.countSuggestion?.parts;if(!response?.ok||!parts||parts.length!==count||parts.some(p=>!p.trim()))throw Error(`Could not split “${word.text}” into ${count} syllables.`);splits.set(spelling,parts);}
+        const span=word.endMs-word.startMs;if(span<count)throw Error(`The interval for “${word.text}” is too short for ${count} syllables.`);const spoken=parts.join('');operations.push({type:'setWordSyllables',wordId:word.id,spokenText:spoken===word.text?null:spoken,startTapping:true,syllables:parts.map((text,i)=>({id:`${word.id}-prepare-${i+1}`,text,startMs:word.startMs+Math.round(span*i/count),endMs:word.startMs+Math.round(span*(i+1)/count)}))});}
+      if(timing.draft?.token!==binding||timing.draft?.previewRevision!==revision)throw Error('The preview changed while preparing syllables. Try again.');
+      const result=await timingRequest('LV_TIMING_TUNE',{operations,allowProtected:true});timing.draft=result.preview;timing.auditioned=false;prepareWords.drafts.delete(key);state.scoreSignature='';setSyncNotice(`Added ${count} estimated ${count===1?'syllable':'syllables'} to ${matches.length} matching ${matches.length===1?'word':'words'}. Save timings to keep them.`);
+    }catch(error){setSyncNotice(error.message,'error');}finally{timing.busy=false;refreshTimingPanel();}
   }
   function buildTimingWorkspace(){
     const tabs=document.createElement('div');tabs.className='lvx-workspace-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Timing workspace');timingWorkspace.tabs=tabs;
     const panes={};
-    for(const [id,label]of [['record','Record'],['review','Refine'],['effects','Effects'],['beat','Beat']]){
-      const button=document.createElement('button');button.type='button';button.textContent=label;button.dataset.workspace=id;button.id='lvx-workspace-tab-'+id;button.setAttribute('role','tab');button.setAttribute('aria-controls','lvx-workspace-'+id);button.onclick=()=>setTimingWorkspace(id);tabs.append(button);
+    for(const [id,label]of [['prepare','Prepare'],['record','Record'],['review','Refine'],['effects','Effects'],['beat','Beat']]){
+      const button=document.createElement('button');button.type='button';button.textContent=label;button.dataset.workspace=id;button.id='lvx-workspace-tab-'+id;button.setAttribute('role','tab');button.setAttribute('aria-controls','lvx-workspace-'+id);button.onclick=()=>setTimingWorkspace(id);tabs.append(button);if(id==='prepare')button.hidden=true;
       const pane=document.createElement('section');pane.dataset.workspacePage=id;pane.id='lvx-workspace-'+id;pane.setAttribute('role','tabpanel');pane.setAttribute('aria-labelledby',button.id);panes[id]=pane;
     }
+    const steps=document.createElement('div');steps.className='lvx-stage-steps';steps.setAttribute('role','group');steps.setAttribute('aria-label','Editing stages');timingWorkspace.steps=steps;
+    for(const [id,label] of [['prepare','1 · Prepare'],['time','2 · Timing'],['motion','3 · Motion']]){const button=document.createElement('button');button.type='button';button.dataset.stageStep=id;button.textContent=label;button.onclick=()=>{const prior=timingWorkspace.stage;const view=id==='prepare'?'prepare':id==='time'?'record':'effects';if(!setTimingWorkspace(view))return;timingWorkspace.stage=id;if(id==='motion'&&!setEffectsView('lyrics')){timingWorkspace.stage=prior;refreshStageSteps();return;}refreshStageSteps();};steps.append(button);}
+    panes.prepare.className='lvx-prepare-page';panes.prepare.innerHTML=`<p class="lvx-prepare-intro">Set up words before recording. Changes to syllable counts create estimated splits; you can time them in the next stage.</p><div class="lvx-prepare-actions"><button type="button" data-prepare="lyrics">Edit lyrics</button><button type="button" data-prepare="rules">Word effects & emoji</button></div><section class="lvx-prepare-counts"><h3>Words needing a syllable count</h3><p data-prepare="status" role="status">Checking the dictionary…</p><label>Word <select data-prepare="word" aria-label="Word needing syllables"></select></label><label>Syllables <input data-prepare="count" aria-label="Number of syllables" type="number" min="1" max="16" step="1" inputmode="numeric"></label><div class="lvx-prepare-actions"><button type="button" data-prepare="apply">Apply to matching words</button><button type="button" data-prepare="clear">Clear counts</button></div><small>Only matching words without existing syllables are changed. Estimated timing stays in the preview until you save.</small></section>`;
+    panes.prepare.querySelector('[data-prepare=lyrics]').onclick=()=>transcriptOpen.click();
+    panes.prepare.querySelector('[data-prepare=rules]').onclick=()=>displayWordsView.click();
+    panes.prepare.querySelector('[data-prepare=word]').onchange=event=>{prepareWords.selected=event.target.value;refreshPrepareWords();};
+    panes.prepare.querySelector('[data-prepare=count]').oninput=event=>{const value=event.target.value;if(value)prepareWords.drafts.set(prepareWords.selected,value);else prepareWords.drafts.delete(prepareWords.selected);refreshTimingPanel();};
+    panes.prepare.querySelector('[data-prepare=clear]').onclick=()=>{prepareWords.drafts.clear();refreshTimingPanel();};
+    panes.prepare.querySelector('[data-prepare=apply]').onclick=()=>void applyPrepareCount();
+    syncPanel.querySelector('header').after(steps);
     panes.review.append(createEffectTrack('review'));
-    tabs.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;const buttons=[...tabs.children].filter(b=>!b.disabled),at=buttons.indexOf(document.activeElement);if(at<0)return;event.preventDefault();const n=event.key==='Home'?0:event.key==='End'?buttons.length-1:(at+(event.key==='ArrowRight'?1:-1)+buttons.length)%buttons.length;buttons[n].click();buttons[n].focus();};
-    syncPanel.querySelector('header').after(tabs);syncPanel.querySelector('footer').before(...Object.values(panes));
+    tabs.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;const buttons=[...tabs.children].filter(b=>!b.disabled&&!b.hidden),at=buttons.indexOf(document.activeElement);if(at<0)return;event.preventDefault();const n=event.key==='Home'?0:event.key==='End'?buttons.length-1:(at+(event.key==='ArrowRight'?1:-1)+buttons.length)%buttons.length;buttons[n].click();buttons[n].focus();};
+    steps.after(tabs);syncPanel.querySelector('footer').before(...Object.values(panes));
     const capture=syncPanel.querySelector('.lvx-tap-panel'),effects=syncPanel.querySelector('.lvx-effect-panel'),beat=syncPanel.querySelector('.lvx-tempo-panel');
     for(const [section,id]of [[capture,'record'],[effects,'effects'],[beat,'beat']]){section.open=true;section.classList.add('lvx-workspace-section');panes[id].append(section);}
     // Primary capture actions stay above the cue at every viewport height.
@@ -3628,7 +3714,8 @@
     cue.before(capture.querySelector('.lvx-capture-keys'));
     const prompts=document.createElement('div');prompts.className='lvx-saved-prompts';prompts.setAttribute('aria-label','Saved timing prompts');prompts.innerHTML='<small></small><div class="lvx-prompt-track">'+Array.from({length:4},()=>'<div hidden><kbd></kbd><span></span><small></small></div>').join('')+'</div><output></output>';capture.querySelector('.lvx-capture-keys').after(prompts);
     cue.after(capture.querySelector('.lvx-record-choices'),capture.querySelector('.lvx-other-parts'));
-    const coverage=document.createElement('details');coverage.className='lvx-record-coverage';coverage.innerHTML='<summary>Timing completeness</summary>';coverage.append(syncPanel.querySelector('.lvx-completion'));panes.record.append(coverage);
+    steps.after(syncPanel.querySelector('.lvx-completion'));syncPanel.querySelector('.lvx-completion').after(tabs);
+    for(const pane of Object.values(panes))panelPager.observe(pane);
     const transport=document.createElement('div');transport.className='lvx-capture-transport';transport.append(syncButton('capture-restart'),syncButton('capture-phrase'),syncButton('capture-forward'),leadInControl('Recording lead-in seconds'));cue.after(transport);
     const gap=document.createElement('details');gap.className='lvx-effect-gap';gap.innerHTML='<summary>Phrase exit <span>Override this phrase</span></summary>';
     const gapHint=syncButton('gap-default').nextElementSibling;
@@ -3643,7 +3730,6 @@
     const housekeeping=syncButton('export').parentElement;const advanced=document.createElement('details');advanced.className='lvx-review-files';advanced.innerHTML='<summary>Files & reset <span>Export or discard</span></summary>';advanced.append(housekeeping);panes.review.append(advanced);
     // Shared audition controls belong to refinement; recording has its own Start/Stop.
     for(const selector of ['.lvx-sync-tabs','.lvx-sync-transport','.lvx-sync-loop.lvx-toggle-host']){const element=syncPanel.querySelector(selector);if(element)panes.review.prepend(element);}
-    syncPanel.querySelector('header').after(tabs);
     syncPanel.querySelector('footer').before(...Object.values(panes));
     syncPanel.querySelector('.lvx-sync-eyebrow').textContent='LYRICVIBE / TIMING';
     const finishMissing=document.createElement('button');finishMissing.type='button';finishMissing.dataset.finishMissing='';finishMissing.textContent='Finish missing parts · loop';finishMissing.hidden=true;finishMissing.onclick=()=>finishMissingParts().catch(error=>setSyncNotice(error.message,'error'));syncPanel.querySelector('.lvx-sync-notice').after(finishMissing);
@@ -3662,6 +3748,7 @@
     timingWorkspace.effectsView='lyrics';
     const pane=syncPanel.querySelector('[data-workspace-page="effects"]'),lyrics=document.createElement('section'),stagePane=document.createElement('section'),tabs=document.createElement('div');
     lyrics.dataset.effectsPage='lyrics';stagePane.dataset.effectsPage='stage';lyrics.append(...pane.children);pane.append(tabs,lyrics,stagePane);
+    const motionActions=document.createElement('div');motionActions.className='lvx-motion-actions lvx-prepare-actions';motionActions.hidden=true;motionActions.innerHTML='<button type="button" data-motion-action="settings">Motion settings</button><button type="button" data-motion-action="live">Stage live</button>';motionActions.querySelector('[data-motion-action=settings]').onclick=()=>displayMotionView.click();motionActions.querySelector('[data-motion-action=live]').onclick=()=>liveStageView.click();lyrics.prepend(motionActions);
     timingWorkspace.tabs.after(tabs);tabs.className='lvx-effects-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Effects workspace');timingWorkspace.effectsTabs=tabs;
     for(const [id,label]of [['lyrics','Lyrics'],['stage','Stage']]){const button=document.createElement('button');button.type='button';button.textContent=label;button.dataset.effectsView=id;button.id='lvx-effects-tab-'+id;button.setAttribute('role','tab');button.setAttribute('aria-controls','lvx-effects-'+id);button.onclick=()=>setEffectsView(id);tabs.append(button);const page=id==='lyrics'?lyrics:stagePane;page.id='lvx-effects-'+id;page.setAttribute('role','tabpanel');page.setAttribute('aria-labelledby',button.id);}
     tabs.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;const choices=[...tabs.children].filter(b=>!b.disabled),at=choices.indexOf(document.activeElement);if(at<0)return;event.preventDefault();event.stopPropagation();const index=event.key==='Home'?0:event.key==='End'?choices.length-1:(at+(event.key==='ArrowRight'?1:-1)+choices.length)%choices.length;choices[index].click();choices[index].focus();};
@@ -3692,7 +3779,7 @@
   function setEffectsView(view){
     if(!['lyrics','stage'].includes(view)||!timingWorkspace.effectsTabs)return false;
     if(timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active||effectGesture.input)return false;
-    if(view==='stage'&&(effectPending()||timing.dirty||tapping.splitDirty||transcript.dirty)){setSyncNotice('Use or discard the current pass, or finish your typed edits, before Stage.');return false;}
+    if(view==='stage'&&(effectPending()||timing.dirty||tapping.splitDirty||transcript.dirty||prepareWords.drafts.size)){setSyncNotice('Use or discard the current pass, or finish your typed edits, before Stage.');return false;}
     if(view==='lyrics'&&!leaveEffectsStage())return false;
     if(view==='stage'){
       if(!timing.draft)return false;
@@ -3828,7 +3915,7 @@
   function stageEditBusy(){return timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active;}
   async function openStageEdit(){
     if(!leaveEffectsStage())return;
-    if(stageEditBusy()||timing.dirty||transcript.dirty||tapping.splitDirty){setHud('Finish the current recording or typed edit before Stage Edit.',true,true);return;}
+    if(stageEditBusy()||timing.dirty||transcript.dirty||tapping.splitDirty||prepareWords.drafts.size){setHud('Finish the current recording or typed edit before Stage Edit.',true,true);return;}
     try{
       timing.busy=true;
       if(!timing.draft){const current=await timingRequest('LV_TIMING_CURRENT');timing.draft=(current.preview?current:await timingRequest('LV_TIMING_PREPARE',{fromSaved:true})).preview;}
@@ -5366,9 +5453,9 @@
         button.type='button';button.dataset.completionLane=lane.id;button.dataset.completionMode=unit;button.dataset.status=c.status;button.dataset.current=String(unit===mode);
         const stateText=document.createElement('span');stateText.textContent=c.total?`${c.percent}%`:status;
         const bar=document.createElement('progress');bar.max=100;bar.value=c.percent||0;bar.setAttribute('aria-label',`${label.textContent} ${unit} completeness`);
-        const count=document.createElement('small');count.textContent=!c.total?'—':unit==='phrase'?`${c.done}/${c.total} phrases`:unit==='word'?`${c.unitDone}/${c.unitTotal} words`:`${c.unitDone}/${c.unitTotal-c.missingSplits} syllables`;
+        const count=document.createElement('small');count.className='lvx-completion-count';count.textContent=!c.total?'—':unit==='phrase'?`${c.done}/${c.total} phrases`:unit==='word'?`${c.unitDone}/${c.unitTotal} words`:`${c.unitDone}/${c.unitTotal-c.missingSplits} syllables`;
         button.append(stateText,bar,count);
-        if(c.missingSplits){const missing=document.createElement('small');missing.className='lvx-completion-missing';missing.textContent=`${c.missingSplits} word${c.missingSplits===1?'':'s'} unsplit`;button.append(missing);}
+        if(c.missingSplits){const missing=document.createElement('small');missing.className='lvx-completion-missing';missing.textContent=`${c.missingSplits} unsplit`;button.append(missing);}
         const s=saved.find(l=>l.id===lane.id)?.modes[unit];button.title=`${label.textContent} ${unit} timing: ${status}${c.total?`, ${c.percent}%. ${c.done} of ${c.total} phrases complete.`:'.'}${unit==='syllable'&&c.total?' Each word has equal weight; unsplit words count as unfinished.':''}${s?.total?` Saved: ${s.percent}%.`:''} ${blocked|| (c.status==='complete'?'All listed phrases complete.':'Jump to the next unfinished phrase.')}`;
         button.setAttribute('aria-label',button.title);button.disabled=Boolean(blocked||c.status==='complete'||c.status==='empty');button.onclick=()=>jumpUnfinished(lane.id,unit);grid.append(button);
       }
@@ -5466,7 +5553,7 @@
       if(settings.beatPulse!==false&&tempo.map&&!effects?.length&&value.reason==='sustained'&&settings.heldEffect!=='pulse')value.scale=1;
       node.classList.add('lvx-expression');node.dataset.expression=value.reason;node.dataset.authoredExpression=String(Boolean(effects?.length));
       const angle=(parseFloat(node.style.rotate)||0)*Math.PI/180,x=value.x*Math.cos(angle)+value.y*Math.sin(angle),y=-value.x*Math.sin(angle)+value.y*Math.cos(angle);
-      node.style.transform=`translate(${x.toFixed(3)}px,${y.toFixed(3)}px) rotate(${value.turn.toFixed(3)}deg) scale(${value.scale.toFixed(4)}) perspective(8em) rotateY(calc(${(value.spin||0).toFixed(3)}deg + var(--lvx-beat-spin,0deg)))`;
+      node.style.transform=`translate(${x.toFixed(3)}px,${y.toFixed(3)}px) rotate(calc(${value.turn.toFixed(3)}deg + var(--lvx-beat-rotor,0deg))) scale(${value.scale.toFixed(4)}) perspective(8em) rotateY(calc(${(value.spin||0).toFixed(3)}deg + var(--lvx-beat-spin,0deg)))`;
 
       const dance=LvChoreography.danceAt(cue,clock,{kind:motion??(danceAllowed?settings.dance:'off'),reduced:bloomMotion.matches,authored:motion===undefined&&!danceAllowed});
       node.dataset.dance=dance.kind;node.style.transformOrigin=dance.kind==='tip'?'50% 100%':'50% 50%';
@@ -5532,7 +5619,7 @@
     const frame=LvChoreography.paintVinyl(ctx,canvas.__track,clock,width,height,{reduced:bloomMotion.matches});canvas.dataset.wordCount=String(frame.words.length);canvas.dataset.glyphCount=String(frame.glyphs.length);canvas.dataset.firstWord=frame.words[0]||'';canvas.dataset.sourceMs=String(mediaMs);canvas.dataset.scoreMs=String(clock);
     if(canvas.__transcript!==frame.text){canvas.__transcript=frame.text;canvas.setAttribute('aria-label','Sung lyric history: '+(frame.text||'waiting for the first word'));}
     // Clear a prior DOM layout's beat treatment; the record owns its own geometry.
-    for(const node of beatStyledNodes){node.classList.remove('lvx-beat-target');paintAccent(node,'','beat');for(const prop of ['scale','bright','hue','y','spin'])node.style.removeProperty('--lvx-beat-'+prop);}beatStyledNodes.clear();
+    for(const node of beatStyledNodes){node.classList.remove('lvx-beat-target');paintAccent(node,'','beat');for(const prop of ['scale','bright','hue','y','spin','rotor'])node.style.removeProperty('--lvx-beat-'+prop);}beatStyledNodes.clear();
   }
   function clearStagePerformance(){stageEdit.bass?.stop();refreshPerformanceAudio();const layer=viewport.querySelector(':scope > .lvx-stage-performance');if(layer){layer.hidden=true;layer.replaceChildren();}}
   function renderStagePerformance(score,sourceMs){
@@ -5557,22 +5644,22 @@
   const liveDock=document.createElement('section');liveDock.className='lvx-live-dock';liveDock.hidden=true;liveDock.setAttribute('aria-label','Live choreography controls');
   liveDock.innerHTML=`<div class="lvx-live-target"><strong>STAGE LIVE</strong><output data-live-target>No active word</output><span data-live-status role="status"></span></div><div class="lvx-live-controls">
     <button type="button" data-live-arm>Arm · Enter</button><button type="button" data-live-play>Play · Space</button>
-    <label>Mode<select data-live-mode aria-label="Live choreography mode"><option value="effects">Effects · 1–9</option><option value="placement">Place · click stage</option></select></label>
+    <label>Mode<select data-live-mode aria-label="Live choreography mode"><option value="effects">Effects · 0–9</option><option value="placement">Place · click stage</option></select></label>
     <details data-live-pop="look"><summary>Look & motion</summary><div class="lvx-live-pop"><label>Vocal track<select data-live-lane aria-label="Live vocal track"></select></label><label>Look<select data-live-look aria-label="Live display look"></select></label><label>Layout<select data-live-layout aria-label="Live layout"><option value="classic">Classic</option><option value="fall">Falling</option><option value="puzzle">Puzzle</option><option value="vinyl">Vinyl</option></select></label><label>Word dance<select data-live-dance aria-label="Live word dance"></select></label><label><input type="checkbox" data-live-auto> Automatic expression</label><label>Word look<select data-live-word-look aria-label="Selected word look"></select></label><label>Word emoji<input data-live-emoji aria-label="Selected word emoji" maxlength="32" placeholder="Emoji or blank"></label><button type="button" data-live-emoji-apply>Apply emoji to word</button><small>Word changes stay in this song’s preview until Save.</small></div></details>
     <details data-live-pop="held"><summary>Held notes</summary><div class="lvx-live-pop"><label><input type="checkbox" data-live-held-auto> Automatic expression</label><label>Held effect for this word<select data-live-word-held aria-label="Selected word held effect"><option value="">Follow global rule</option><option value="always">Always qualify</option><option value="never">Never qualify</option></select></label><small>Selected-word changes use Save / Undo. Global settings save immediately.</small></div></details>
     <details data-live-pop="effects"><summary>Effects</summary><div class="lvx-live-pop lvx-live-effect-grid"></div></details>
     <details data-live-pop="placement"><summary>Landing</summary><div class="lvx-live-pop"><label>Entry<select data-live-landing aria-label="Live landing profile"></select></label><label>Motion<select data-live-motion aria-label="Live motion profile"></select></label><p>Arm, choose Place, then click where the current word or syllable should land. Existing timing stays fixed.</p></div></details>
     <details data-live-pop="layers"><summary>Layers <span data-live-count>0</span></summary><div class="lvx-live-pop"><label><input type="checkbox" data-live-all> All song layers</label><div data-live-layers></div><div class="lvx-live-pages"><button type="button" data-live-prev aria-label="Previous layers">‹</button><output data-live-page></output><input type="range" data-live-rail aria-label="Layer page" min="0" max="0" value="0"><button type="button" data-live-next aria-label="Next layers">›</button></div><small>Selected layer: Backspace removes it. Base effects are labeled separately. Undo restores the last change.</small></div></details>
     <button type="button" data-live-undo>Undo</button><button type="button" data-live-save>Save</button><button type="button" data-live-close aria-label="Close live choreography">✕</button>
-    </div><div class="lvx-live-hint">Enter arm/stop · Space play/pause · 1–9 add · Backspace remove selected · Ctrl+Z undo</div>`;
+    </div><div class="lvx-live-hint">Enter arm/stop · Space play/pause · 0–9 add · Backspace remove selected · Ctrl+Z undo</div>`;
   viewport.append(liveDock);
   const liveControl=name=>liveDock.querySelector('[data-live-'+name+']');
-  const liveEffects=['pulse','tilt','shake','bounce','glow','groove','echo','glitch','spin'];
+  const liveEffects=['pulse','tilt','shake','bounce','glow','groove','echo','glitch','spin','rotor'];
   function liveOptions(node,choices,value){node.replaceChildren(...Object.entries(choices).map(([id,label])=>{const option=document.createElement('option');option.value=id;option.textContent=label;return option;}));node.value=value;}
   liveOptions(liveControl('look'),THEME_LABELS,state.theme);liveOptions(liveControl('word-look'),{'':'Display default',...THEME_LABELS},'');
   liveOptions(liveControl('dance'),Object.fromEntries(['off','mix','tip','flex','bounce','launch'].map(k=>[k,k])),choreography.dance);
   liveOptions(liveControl('landing'),LvChoreography.landingStyles,'settle');liveOptions(liveControl('motion'),{off:'Still',...LvChoreography.wordRuleMotions},'off');
-  liveEffects.forEach((type,i)=>{const button=document.createElement('button');button.type='button';button.textContent=(i+1)+' · '+type;button.dataset.liveEffect=type;button.onclick=()=>addLiveEffect(type);liveDock.querySelector('.lvx-live-effect-grid').append(button);});
+  liveEffects.forEach((type,i)=>{const button=document.createElement('button');button.type='button';button.textContent=(i===9?0:i+1)+' · '+type;button.dataset.liveEffect=type;button.onclick=()=>addLiveEffect(type);liveDock.querySelector('.lvx-live-effect-grid').append(button);});
   for(const details of liveDock.querySelectorAll('details'))details.ontoggle=()=>{if(details.open)for(const other of liveDock.querySelectorAll('details'))if(other!==details)other.open=false;};
   const liveScore=()=>liveStage.preview||timing.draft?.score||state.score;
   function liveTarget(){const score=liveScore();return score?(liveStage.pinned&&!liveStage.armed?LvScore.choreographyTarget(score,liveStage.pinned):LvScore.choreographyTargetAt(score,getMediaTimeMs(),liveStage.scope,liveStage.laneId)):null;}
@@ -5596,7 +5683,7 @@
   }
   async function openLiveStage(){
     if(liveStage.active){liveDock.hidden=false;return;}
-    if(timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active||timing.dirty||transcript.dirty||tapping.splitDirty||stageEdit.fieldsDirty||tapPending()){setHud('Finish the current take or typed edit before Stage live.',true,true);return;}
+    if(timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active||timing.dirty||transcript.dirty||tapping.splitDirty||stageEdit.fieldsDirty||prepareWords.drafts.size||tapPending()){setHud('Finish the current take or typed edit before Stage live.',true,true);return;}
     timing.busy=true;
     try{
       if(!timing.draft){const current=await timingRequest('LV_TIMING_CURRENT');timing.draft=(current.preview?current:await timingRequest('LV_TIMING_PREPARE',{fromSaved:true})).preview;}
@@ -5649,16 +5736,16 @@
     const key=JSON.stringify([rows,liveStage.page,liveStage.selected]);if(liveDock.__layersKey!==key){liveDock.__layersKey=key;const list=liveControl('layers');list.replaceChildren();for(const row of rows.slice(liveStage.page*6,liveStage.page*6+6)){const item=document.createElement('div'),select=document.createElement('button'),remove=document.createElement('button');item.className='lvx-live-layer';select.type=remove.type='button';select.textContent=row.label;select.dataset.layerId=row.id;select.setAttribute('aria-pressed',String(row.id===liveStage.selected));select.onclick=()=>{liveStage.selected=row.id;refreshLiveStage();};remove.textContent='×';remove.setAttribute('aria-label','Remove '+row.label);remove.onclick=()=>removeLiveLayer(row.id);item.append(select,remove);list.append(item);}if(!rows.length)list.textContent='No recorded layers on this target.';}
     liveControl('page').textContent=(liveStage.page+1)+' / '+pages;liveControl('rail').max=String(pages-1);liveControl('rail').value=String(liveStage.page);liveControl('prev').disabled=liveStage.page===0;liveControl('next').disabled=liveStage.page===pages-1;
   }
-  async function toggleLiveArmed(){if(timing.busy||liveStage.drag)return;railState.recordReady=false;if(liveStage.armed){getMedia()?.pause();await commitLiveStage();}else{if(isAdvertisement()||youtubeMediaState()?.clockUsable===false)return;liveStage.pinned=null;liveStage.armed=true;try{await getMedia()?.play();liveMessage('Performing · 1–9 add effects; placement clicks follow the current target.');}catch(error){liveStage.armed=false;liveMessage(error.message);}}refreshLiveStage();}
+  async function toggleLiveArmed(){if(timing.busy||liveStage.drag)return;railState.recordReady=false;if(liveStage.armed){getMedia()?.pause();await commitLiveStage();}else{if(isAdvertisement()||youtubeMediaState()?.clockUsable===false)return;liveStage.pinned=null;liveStage.armed=true;try{await getMedia()?.play();liveMessage('Performing · 0–9 add effects; placement clicks follow the current target.');}catch(error){liveStage.armed=false;liveMessage(error.message);}}refreshLiveStage();}
   function handleLiveStageKeys(event){
     if(event.key==='Escape'&&(liveStage.drag||railState.recordReady)){event.preventDefault();event.stopImmediatePropagation();if(event.type==='keydown'){cancelPathDrag();railState.recordReady=false;refreshLiveStage();}return;}
     if(liveStage.drag){event.preventDefault();event.stopImmediatePropagation();return;}
     const typing=event.target?.matches?.('input,textarea,select')||event.target?.isContentEditable;if(typing||event.altKey)return;
-    const undo=(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z',space=event.code==='Space'||event.key===' ',number=/^[1-9]$/.test(event.key),owned=undo||space||number||event.key==='Enter'||event.key==='Backspace';
+    const undo=(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z',space=event.code==='Space'||event.key===' ',number=/^[0-9]$/.test(event.key),owned=undo||space||number||event.key==='Enter'||event.key==='Backspace';
     if(!owned||!undo&&(event.ctrlKey||event.metaKey))return;
     if(event.target?.closest?.('button,summary')&&(space||event.key==='Enter')){event.stopImmediatePropagation();return;}
     event.preventDefault();event.stopImmediatePropagation();if(event.type!=='keydown'||event.repeat)return;
-    if(undo)void undoLiveStage();else if(space)liveControl('play').click();else if(event.key==='Enter')void toggleLiveArmed();else if(event.key==='Backspace')removeLiveLayer();else if(number)addLiveEffect(liveEffects[Number(event.key)-1]);
+    if(undo)void undoLiveStage();else if(space)liveControl('play').click();else if(event.key==='Enter')void toggleLiveArmed();else if(event.key==='Backspace')removeLiveLayer();else if(number)addLiveEffect(liveEffects[event.key==='0'?9:Number(event.key)-1]);
   }
   liveControl('arm').onclick=()=>void toggleLiveArmed();liveControl('play').onclick=()=>{const media=getMedia();if(media?.paused)void media.play().catch(e=>liveMessage(e.message));else media?.pause();refreshLiveStage();};
   liveControl('lane').onchange=e=>{liveStage.laneId=e.target.value;liveStage.pinned=null;railState.page=0;railState.follow=true;refreshLiveStage();};
@@ -5970,8 +6057,8 @@
       const visual=LvBeatTrack.cueAt(cue,tempo.map,sourceMs,reduced,beat);if(!visual)continue;
       const t=cue.target,selector=t.kind==='active'||t.kind==='lane'?'.lvx-score-phrase':t.kind==='phrase'?`[data-phrase="${CSS.escape(t.id)}"]`:t.kind==='word'?`[data-word="${CSS.escape(t.id)}"]`:t.kind==='syllable'?`[data-syllable="${CSS.escape(t.id)}"]`:null;
       const nodes=t.kind==='screen'?[stage]:[...stage.querySelectorAll(selector)].filter(n=>t.kind!=='lane'||score.phrases.find(p=>p.id===n.dataset.phrase)?.laneId===t.id);
-      const targets=cue.effect==='spin'?[...new Set(nodes.flatMap(node=>node.matches('[data-word],[data-syllable]')?[node]:[...node.querySelectorAll('[data-word]')]))]:nodes;
-      for(const node of targets){if(visual.groove)paintBeatGroove(node,visual.groove);const prior=values.get(node)||{scale:1,brightness:1,hue:0};values.set(node,{pulse:prior.pulse||['pulse','breath'].includes(cue.effect),scale:Math.max(prior.scale,visual.scale),brightness:Math.max(prior.brightness,visual.brightness),hue:prior.hue+visual.hue,y:(prior.y||0)+(visual.y||0),spin:(prior.spin||0)+(visual.spin||0),shadow:visual.accent?LvChoreography.accentShadow(visual.accent.type,visual.accent.phase,visual.accent.strength):prior.shadow});}
+      const targets=['spin','rotor'].includes(cue.effect)?[...new Set(nodes.flatMap(node=>node.matches('[data-word],[data-syllable]')?[node]:[...node.querySelectorAll('[data-word]')]))]:nodes;
+      for(const node of targets){if(visual.groove)paintBeatGroove(node,visual.groove);const prior=values.get(node)||{scale:1,brightness:1,hue:0};values.set(node,{pulse:prior.pulse||['pulse','breath'].includes(cue.effect),scale:Math.max(prior.scale,visual.scale),brightness:Math.max(prior.brightness,visual.brightness),hue:prior.hue+visual.hue,y:(prior.y||0)+(visual.y||0),spin:(prior.spin||0)+(visual.spin||0),rotor:(prior.rotor||0)+(visual.rotor||0),shadow:visual.accent?LvChoreography.accentShadow(visual.accent.type,visual.accent.phase,visual.accent.strength):prior.shadow});}
     }
     // One source-clock default; explicit pulse accents on a word or its relatives win.
     if(choreography.beatPulse!==false&&Number.isFinite(beat)&&!reduced){
@@ -5986,8 +6073,8 @@
         const prior=values.get(node)||{brightness:1,hue:0};values.set(node,{...prior,scale:Math.max(prior.scale||1,scale)});
       }}
     }
-    for(const node of beatStyledNodes)if(!values.has(node)){node.classList.remove('lvx-beat-target');paintAccent(node,'','beat');for(const key of ['scale','bright','hue','y','spin'])node.style.removeProperty('--lvx-beat-'+key);beatStyledNodes.delete(node);}
-    for(const [node,value]of values){paintAccent(node,value.shadow,'beat');node.classList.add('lvx-beat-target');const props={scale:node===stage?'1':value.scale.toFixed(4),bright:value.brightness.toFixed(4),hue:value.hue.toFixed(2)+'deg',y:(value.y||0).toFixed(3)+'px',spin:(value.spin||0).toFixed(3)+'deg'};for(const [key,v]of Object.entries(props))if(node.style.getPropertyValue('--lvx-beat-'+key)!==v)node.style.setProperty('--lvx-beat-'+key,v);beatStyledNodes.add(node);}
+    for(const node of beatStyledNodes)if(!values.has(node)){node.classList.remove('lvx-beat-target');paintAccent(node,'','beat');for(const key of ['scale','bright','hue','y','spin','rotor'])node.style.removeProperty('--lvx-beat-'+key);beatStyledNodes.delete(node);}
+    for(const [node,value]of values){paintAccent(node,value.shadow,'beat');node.classList.add('lvx-beat-target');const props={scale:node===stage?'1':value.scale.toFixed(4),bright:value.brightness.toFixed(4),hue:value.hue.toFixed(2)+'deg',y:(value.y||0).toFixed(3)+'px',spin:(value.spin||0).toFixed(3)+'deg',rotor:(value.rotor||0).toFixed(3)+'deg'};for(const [key,v]of Object.entries(props))if(node.style.getPropertyValue('--lvx-beat-'+key)!==v)node.style.setProperty('--lvx-beat-'+key,v);beatStyledNodes.add(node);}
   }
   function applyReveal(node, item, clockMs) {
     if(item.displayMode==='whole'){node.style.clipPath='';return;}
@@ -6325,6 +6412,7 @@
   function handleKeys(event) {
     const target = event.target;
     const tagName = target && target.tagName ? target.tagName.toLowerCase() : '';
+    if(transcriptDialog.open&&event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();transcriptDialog.close();return;}
     if (tagName === 'input' || tagName === 'textarea' || tagName === 'select' || (target && target.isContentEditable)) return;
 
     if(root.isConnected&&root.classList.contains('lvx-active')&&event.key==='\\'&&!event.ctrlKey&&!event.metaKey&&!event.altKey){event.preventDefault();event.stopImmediatePropagation();if(!event.repeat){if(stageEdit.active){closeStageEdit();if(stageEdit.active)return;}setLyricsOnly(!lyricsOnly);}return;}
@@ -6393,6 +6481,9 @@
     const space = event.code === 'Space' || event.key === ' ';
     if(stageEdit.dock==='effects'){const typing=event.target?.matches?.('input,textarea,select')||event.target?.isContentEditable;if(typing||event.ctrlKey||event.metaKey||event.altKey)return;if(event.target?.closest?.('button')&&(space||event.key==='Enter')){event.stopImmediatePropagation();return;}if(space||event.key==='Enter'||/^[0-9]$/.test(event.key)){event.preventDefault();event.stopImmediatePropagation();if((space||event.key==='Enter')&&event.type==='keydown'&&!event.repeat)stageControl('play').click();}return;}
     const inputTarget=event.target?.matches?.('input,textarea,select')||event.target?.isContentEditable;
+    if(event.type==='keydown'&&!event.repeat&&event.key.toLowerCase()==='l'&&!inputTarget&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.target?.closest?.('button')&&timing.draft&&['record','review'].includes(timingWorkspace.view)){
+      event.preventDefault();event.stopImmediatePropagation();const name=timingWorkspace.view==='record'?'record-repeat':'loop',toggle=syncButton(name);toggle.checked=!toggle.checked;toggle.dispatchEvent(new Event('change',{bubbles:true}));setSyncNotice(toggle.checked?'Phrase loop on · press L to turn it off.':'Phrase loop off.');return;
+    }
     if(space&&event.type==='keyup'&&effectGesture.input==='keyboard'){event.preventDefault();event.stopImmediatePropagation();finishEffectGesture();refreshEffectPanel();return;}
     if(space&&!inputTarget&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&timing.draft&&timingWorkspace.view==='effects'){
       event.preventDefault();event.stopImmediatePropagation();
@@ -6414,6 +6505,7 @@
       const undo=event.key.toLowerCase()==='z'&&(event.ctrlKey||event.metaKey)&&tapping.take.actionHistory?.length;
       if(remove||undo){event.preventDefault();event.stopImmediatePropagation();if(event.type==='keydown'&&!event.repeat){if(remove)removeLivePhrase();else undoTakeInput();}return;}
     }
+    if(event.target?.closest?.('.lvx-page-nav'))return;
     if(['ArrowUp','ArrowDown'].includes(event.key)&&!inputTarget&&!event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&timing.draft&&timingWorkspace.view==='record'){
       event.preventDefault();event.stopImmediatePropagation();if(event.type==='keydown'&&!event.repeat)void switchCaptureTrack(event.key==='ArrowUp'?-1:1);return;
     }
@@ -6460,8 +6552,7 @@
     // Enter activates an explicitly focused review control, even during a take.
     // Keep it away from YouTube shortcuts without canceling button activation.
     if(event.key==='Enter'&&target?.closest?.('button')&&syncPanel.contains(target)){event.stopImmediatePropagation();return;}
-    if(event.key==='0'&&timingWorkspace.view==='effects'){event.preventDefault();event.stopImmediatePropagation();return;}
-    const effect = {'1':'pulse','2':'tilt','3':'shake','4':'bounce','5':'glow','6':'groove','7':'echo','8':'glitch','9':'spin'}[event.key];
+    const effect = {'1':'pulse','2':'tilt','3':'shake','4':'bounce','5':'glow','6':'groove','7':'echo','8':'glitch','9':'spin','0':'rotor'}[event.key];
     if (performanceTake.armed && effect) {
       event.preventDefault(); event.stopImmediatePropagation(); if (event.type === 'keydown'&&!event.repeat){if(effectGesture.input)sampleEffectGesture(effect);else setSyncNotice('Hold Space to arm effect numbers. Without Space, existing effects stay unchanged.');} return;
     }
@@ -7159,7 +7250,7 @@
     for(const listener of runtimeListeners){try{chrome.runtime.onMessage.removeListener?.(listener);}catch(_){}}
     runtimeListeners.length=0;
     clearTimeout(state.hudTimer);clearTimeout(shortcutsAutoHideTimer);
-    clearTimeout(transcriptTimer);clearTimeout(offsetWheelTimer);
+    clearTimeout(transcriptTimer);clearTimeout(offsetWheelTimer);panelPager.dispose();transcriptPager.dispose();
     return true;
   }
 

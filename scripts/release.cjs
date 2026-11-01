@@ -133,6 +133,10 @@ async function main(command, args) {
   await run(process.execPath, ['scripts/syllable-highlight-proof.cjs'], source);
   await run(process.execPath, ['scripts/estimated-syllable-proof.cjs'], source);
   await run(process.execPath, ['scripts/caption-lane-proof.cjs'], source);
+  await run(process.execPath, ['scripts/timing-layout-proof.cjs'], source);
+  await run(process.execPath, ['scripts/timing-layout-proof.cjs', '--narrow'], source);
+  await run(process.execPath, ['scripts/rotor-spin-proof.cjs'], source);
+  await run(process.execPath, ['scripts/prepare-stages-proof.cjs'], source);
   await run(process.execPath, ['scripts/emoji-map-versions-proof.cjs', '--no-screenshot', '--no-receipt'], source);
   await run(process.execPath, ['scripts/sync-offset-proof.cjs'], source);
   await run(process.execPath, ['scripts/performance-capture-proof.cjs'], source);

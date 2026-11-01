@@ -7,7 +7,7 @@
   const token=text=>String(text).toLowerCase().replace(/[^a-z']/g,'');
   const lightWords=new Set(['a','an','the','and','or','of','to','in','it','is','as','at','on','for']);
   const wordRuleMotions=Object.freeze({off:'Still',rock:'Rock in an arc',float:'Levitate',tip:'Backward fall',flex:'Flex',bounce:'Bounce',launch:'Launch'});
-  const wordRuleEffects=Object.freeze({rays:'Sun rays',sunglasses:'Lifting sunglasses',fire:'Fire texture',bills:'Flying dollar bills',champagne:'Champagne pop',disco:'Disco ball & lights',glow:'Glow',echo:'Echo',glitch:'Glitch',spin:'Coin spin',groove:'Groove',shake:'Shake',pulse:'Pulse'});
+  const wordRuleEffects=Object.freeze({rays:'Sun rays',sunglasses:'Lifting sunglasses',fire:'Fire texture',bills:'Flying dollar bills',champagne:'Champagne pop',disco:'Disco ball & lights',glow:'Glow',echo:'Echo',glitch:'Glitch',spin:'Coin spin',rotor:'Rotor · flat 360°',groove:'Groove',shake:'Shake',pulse:'Pulse'});
   const starter=(words,motion,...effects)=>words.split('|').map(word=>({word,motion,effects}));
   const defaultWordRules=Object.freeze([
     ...starter('baby','rock'),...starter('air|flow|levitate','float'),...starter('bright|shine|sunshine','off','rays'),...starter('cool','off','sunglasses'),
@@ -183,6 +183,7 @@
       out.reason='authored';
       for(const effect of effects){const strength=Math.max(0,Math.min(1,effect.strength??.3));
         if(!reduced&&effect.type==='spin'&&strength>0)out.spin=coinSpin(elapsed/Math.max(1,duration));
+        if(!reduced&&effect.type==='rotor'&&strength>0)out.turn+=coinSpin(elapsed/Math.max(1,duration));
         if(!reduced&&effect.type==='groove'){out.wave=.16*strength*envelope;out.wavePhase=t*Math.PI*2/1.2;out.waveAxis=effect.axis||'vertical';}
         if(['echo','glitch'].includes(effect.type))out.shadow=accentShadow(effect.type,t,strength*envelope,reduced);
         if(effect.type==='glow')out.brightness=1+strength*(reduced?.2:.5*envelope);
