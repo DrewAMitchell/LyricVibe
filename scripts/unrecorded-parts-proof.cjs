@@ -55,6 +55,9 @@ const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env
   await waitFor(()=>__qa.getPartRun()?.index===1&&__qa.tapping.take?.status==='armed'&&!__qa.timing.busy);
   assert.deepEqual(await evaluate(()=>__qa.tapping.take.units.map(u=>u.phraseId)),['phrase-2']);
   await mark(5.1,6.9);
+  await waitFor(()=>__qa.getPartRun()?.index===1&&__qa.tapping.take?.status==='complete'&&!__qa.timing.busy);
+  assert.equal(await evaluate(()=>document.querySelector('video').paused),false,'the final take remains available for retake');
+  await page.locator('[data-sync=tap-stop]').click();
   await waitFor(()=>!__qa.getPartRun()&&!__qa.tapping.take&&!__qa.timing.busy);
   assert.equal(await evaluate(()=>document.querySelector('video').paused),true);
   assert.deepEqual(await evaluate(()=>__qa.timing.draft.score.phrases.filter(p=>['phrase-1','phrase-3','phrase-5'].includes(p.id)).map(p=>JSON.stringify(p))),await evaluate(()=>__completed));
@@ -82,6 +85,8 @@ const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env
   await mark(1.8,2.9);
   await waitFor(()=>__qa.getPartRun()?.index===1&&__qa.tapping.take?.status==='armed'&&!__qa.timing.busy);
   await mark(3.1,3.9);
+  await waitFor(()=>__qa.getPartRun()?.index===1&&__qa.tapping.take?.status==='complete'&&!__qa.timing.busy);
+  await page.locator('[data-sync=tap-stop]').click();
   await waitFor(()=>!__qa.getPartRun()&&!__qa.tapping.take&&!__qa.timing.busy);
   assert.equal(await evaluate(()=>JSON.stringify(__qa.timing.draft.score.phrases[0].words[0])),await evaluate(()=>__word));
   await evaluate(()=>{
@@ -170,7 +175,7 @@ const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env
   await evaluate(()=>{const q=__qa,score=q.timing.draft.score;score.lyrics.timingBasis='caption-segments';score.lyrics.captionSource={kind:'automatic',language:'en'};q.refreshTimingPanel();});
   assert.equal(await evaluate(()=>__qa.plainTimingNotice.textContent),'YouTube captions (automatic, en) · Imported segment times; review words.');
   assert.equal(await evaluate(()=>__qa.plainTimingNotice.hidden),false,'caption provenance remains visible after word timing is recorded');
-  const checks=['Completed Main and backing phrases skipped; unfinished backing remains reachable through a completed Main anchor','Next unfinished Main phrase selected and run ends paused','Completed phrase bytes and saved score unchanged','No remaining targets does not arm or play; switch off allows rerecording','Partial word pass keeps completed word bytes unchanged','New preference persists independently of legacy tour preference','Backspace removes unfinished phrase without appending or changing completed phrases','Syllable practice skips complete Main before spelling preparation, keeps its review step and ends even with Repeat enabled','Finish missing parts enables looping and unrecorded-only','unfinished phrase repeats','Next lead-in button and Shift+Right remain forward-only in missing-only mode without changing capture state','second Back exposes a completed phrase for retake without changing score until new inputs','hyphenated word retake preserves the existing subpart unit schema and future mark ids','caption origin remains visible with imported segment times after recording'];
+  const checks=['Completed Main and backing phrases skipped; unfinished backing remains reachable through a completed Main anchor','Next unfinished Main phrase selected; final take stays live until explicit Stop','Completed phrase bytes and saved score unchanged','No remaining targets does not arm or play; switch off allows rerecording','Partial word pass keeps completed word bytes unchanged','New preference persists independently of legacy tour preference','Backspace removes unfinished phrase without appending or changing completed phrases','Syllable practice skips complete Main before spelling preparation, keeps its review step and ends even with Repeat enabled','Finish missing parts enables looping and unrecorded-only','unfinished phrase repeats','Next lead-in button and Shift+Right remain forward-only in missing-only mode without changing capture state','second Back exposes a completed phrase for retake without changing score until new inputs','hyphenated word retake preserves the existing subpart unit schema and future mark ids','caption origin remains visible with imported segment times after recording'];
   fs.writeFileSync(path.join(root,'docs/unrecorded-parts-proof.json'),JSON.stringify({observedAt:new Date().toISOString(),basis:'Actual Chrome content UI and score host with synthetic media/storage; no human song edits.',checks},null,2)+'\n');
   console.log(JSON.stringify({checks}));
 })().catch(e=>{console.error(e);process.exitCode=1}).finally(async()=>{await browser?.close();await server?.close();probe('END');});

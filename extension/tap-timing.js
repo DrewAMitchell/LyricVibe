@@ -1250,9 +1250,9 @@
     const unit = take.units[take.index];
     const holds = [...take.holds.filter(h => h.wordId !== unit.wordId), { wordId: unit.wordId, phraseId: unit.phraseId, pressMs: take.pendingStartMs, releaseMs: scoreMs }];
     const index = take.index + 1;
-    // Retiming one phrase stops after its last word and returns the cursor to where the pass was.
+    // Keep the completed retake open so the performer can replay it before Stop.
     if (take.retime && (index >= take.units.length || take.units[index].phraseId !== take.retime.phraseId)) {
-      return { ...take, holds, index: take.retime.resumeIndex, pendingStartMs: null, retime: null, status: 'stopped',
+      return { ...take, holds, index, pendingStartMs: null, retime: { ...take.retime, completed: true }, status: 'complete',
         lastMs: Math.max(...holds.map(h => h.releaseMs)) };
     }
     return { ...take, holds, index, pendingStartMs: null, lastMs: scoreMs, status: index >= take.units.length ? 'complete' : take.status };

@@ -1237,7 +1237,7 @@ test('word pass trims a legato release at the next entrance and flags it', () =>
   assert.deepEqual(p.words[0].issues,['release-overlaps-next']); assert.equal(p.ready,true);
 });
 
-test('retiming one phrase replaces only its holds and returns the cursor', () => {
+test('retiming one phrase stays available until Stop and preserves the rest of the take', () => {
   const units=[
     {wordId:'a',phraseId:'p1',text:'a',minMs:0,maxMs:1000,expectedCount:1},
     {wordId:'b',phraseId:'p1',text:'b',minMs:0,maxMs:1000,expectedCount:1},
@@ -1250,6 +1250,8 @@ test('retiming one phrase replaces only its holds and returns the cursor', () =>
   assert.equal(take.index,0); assert.equal(take.lastMs,null);
   take=tap.pressWord(take,120); take=tap.releaseWord(take,320);
   take=tap.pressWord(take,380); take=tap.releaseWord(take,700);
+  assert.equal(take.status,'complete'); assert.equal(take.retime.phraseId,'p1');
+  take=tap.stopWordHolds(take);
   assert.equal(take.status,'stopped'); assert.equal(take.index,3); assert.equal(take.retime,null);
   assert.deepEqual(take.holds.map(h=>[h.wordId,h.pressMs,h.releaseMs]).sort(),[['a',120,320],['b',380,700],['c',1100,1500]]);
   // Stopping partway restores the untouched word's earlier hold.

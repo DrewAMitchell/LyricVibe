@@ -148,6 +148,7 @@ async function main(command, args) {
   await run(process.execPath, ['scripts/performance-capture-proof.cjs'], source);
   await run(process.execPath, ['scripts/recording-correction-proof.cjs'], source);
   await run(process.execPath, ['scripts/unrecorded-parts-proof.cjs'], source);
+  await run(process.execPath, ['scripts/final-take-retry-proof.cjs'], source);
   await run(process.execPath, ['scripts/preview-spacing-proof.cjs'], source);
   await run(process.execPath, ['scripts/display-navigation-proof.cjs'], source);
   await run(process.execPath, ['scripts/quick-mixer-proof.cjs'], source);
