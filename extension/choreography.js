@@ -448,6 +448,21 @@
       const scale=R*glyph.font/100;ctx.save();ctx.translate(cx+R*glyph.x,cy+R*glyph.y);ctx.rotate(glyph.angle+Math.PI/2);ctx.globalAlpha=glyph.top?1:.52+.48*glyph.radius;if(glyph.doubled&&glyph.current){const alpha=ctx.globalAlpha;ctx.globalAlpha*=.45;ctx.drawImage(sprite,-sprite.width*scale/2+6.5*scale,-72.5*scale,sprite.width*scale,150*scale);ctx.globalAlpha=alpha;}ctx.drawImage(sprite,-sprite.width*scale/2,-75*scale,sprite.width*scale,150*scale);ctx.restore();}
     ctx.restore();return frame;
   }
+  // Display-only repetition plans never rewrite the authoritative lyric or timings.
+  function dejaGroups(words){
+    const groups=[];for(let i=0;i<words.length;i++){const word=words[i],key=ruleWord(word.text),last=groups.at(-1),prev=last&&words[last.at(-1)];if(key&&last&&key===ruleWord(prev.text)&&prev.endMs>prev.startMs&&word.endMs>word.startMs&&word.startMs>=prev.endMs)last.push(i);else groups.push([i]);}return groups;
+  }
+  function dejaIds(score){
+    const used=new Set((score.lanes||[]).map(l=>l.id));for(const phrase of score.phrases||[]){used.add(phrase.id);for(const word of phrase.words||[]){used.add(word.id);for(const syllable of word.syllables||[])used.add(syllable.id);}}
+    const result=new Map();for(const phrase of score.phrases||[])for(const word of phrase.words||[]){const pieces=scoreApi.hyphenWordParts(word.text),keys=pieces.map(ruleWord);if(pieces.length<2||pieces.length>32||!keys[0]||!keys.every(key=>key===keys[0])||word.endMs-word.startMs<pieces.length)continue;const ids=pieces.map((_,i)=>{let id=`${word.id}-deja-${i+1}`;while(used.has(id))id+='-';used.add(id);return id;});result.set(word.id,ids);}
+    return result;
+  }
+  function dejaPhrase(phrase,ids){
+    const words=phrase.words.flatMap(word=>{const virtual=ids.get(word.id);if(!virtual)return [word];const pieces=scoreApi.hyphenWordParts(word.text),span=word.endMs-word.startMs,parts=[];let cursor=0,valid=Boolean(word.syllables?.length)&&(!word.spokenText||word.spokenText===word.text);
+      if(valid){for(const piece of pieces){let text='',list=[];while(cursor<word.syllables.length&&text.length<piece.length){const syl=word.syllables[cursor++];text+=syl.text;list.push({...syl});}if(text!==piece){valid=false;break;}const last=list.at(-1);last.text=last.text.replace(/[-\u2010\u2011]$/u,'');if(!last.text){valid=false;break;}parts.push(list);}if(cursor!==word.syllables.length)valid=false;}
+      return pieces.map((piece,index)=>{const syllables=valid?parts[index]:[],text=piece.replace(/[-\u2010\u2011]$/u,''),startMs=valid?syllables[0].startMs:word.startMs+Math.round(span*index/pieces.length),endMs=valid?syllables.at(-1).endMs:word.startMs+Math.round(span*(index+1)/pieces.length);return {...word,id:virtual[index],_sourceId:word.id,_dejaEstimated:!valid||syllables.some(part=>part.provenance==='estimated'),text,spokenText:undefined,startMs,endMs,syllables};});
+    });for(const group of dejaGroups(words))if(group.length>1)for(const index of group){const word=words[index];if(!/[-\u2010\u2011]$/u.test(word.text))continue;const text=word.text.replace(/[-\u2010\u2011]$/u,''),syllables=word.syllables?.map(part=>({...part}));if(syllables?.length&&syllables.at(-1).text.length>1)syllables.at(-1).text=syllables.at(-1).text.replace(/[-\u2010\u2011]$/u,'');words[index]={...word,text,...(word.spokenText===word.text?{spokenText:undefined}:{}),...(syllables?{syllables}:{})};}return {...phrase,words};
+  }
   // Reserve a stable slot for each voice that can be visible simultaneously.
   // Lead-ins are included so the first singer does not move when another is previewed.
   // Non-overlapping voices may share a slot. Authored stage regions remain separate.
@@ -475,26 +490,28 @@
   function pileTrack(words,width,height,measure,{font=48,maxWords=32}={}){
     width=Math.max(1,width);height=Math.max(1,height);font=Math.max(4,Math.min(font,height*.38));maxWords=Math.max(1,Math.min(64,maxWords));
     const pages=[],ordered=[...words].sort((a,b)=>a.startMs-b.startMs||String(a.id).localeCompare(String(b.id)));
+    const reuseWidths=new Map();for(const word of ordered)if(word._dejaReuse)reuseWidths.set(word._dejaReuse,Math.max(reuseWidths.get(word._dejaReuse)||0,measure(word.text,font,word)));
     const hash=text=>{let n=2166136261;for(const ch of String(text)){n^=ch.codePointAt(0);n=Math.imul(n,16777619);}return n>>>0;};
     let page=null;
     for(const word of ordered){
-      const size=Math.max(4,Math.min(font,font*(width*.92/Math.max(1,measure(word.text,font,word))))),w=Math.min(width,Math.max(1,measure(word.text,size,word)+size*.12)),h=Math.min(height,Math.max(1,size*1.3)),seed=hash(word.id),gap=Math.min(5,size*.1);
+      const measured=word._dejaReuse?reuseWidths.get(word._dejaReuse):measure(word.text,font,word),size=Math.max(4,Math.min(font,font*(width*.92/Math.max(1,measured)))),w=Math.min(width,Math.max(1,measured*size/font+size*.12)),h=Math.min(height,Math.max(1,size*1.3)),seed=hash(word.id),gap=Math.min(5,size*.1);
       const newPage=()=>{page={startMs:word.startMs,items:[]};pages.push(page);};
       if(!page||page.items.length>=maxWords)newPage();
+      const previous=page.items.at(-1);if(word._dejaReuse&&previous?.reuseKey===word._dejaReuse){page.items.push({...previous,id:word.id,phraseId:word.phraseId,laneId:word.laneId,startMs:word.startMs,edge:seed%4,seed});continue;}
       const place=()=>{let best=null;const span=Math.max(0,width-w),offset=(seed%1009)/1009,candidates=Array.from({length:12},(_,i)=>span*((offset+i*.61803398875)%1));candidates.push(0,span);for(const other of page.items)candidates.push(Math.max(0,Math.min(span,other.x+other.width+gap)),Math.max(0,Math.min(span,other.x-w-gap)));for(const x of candidates){let y=height-h;for(const other of page.items)if(x<other.x+other.width+gap&&x+w+gap>other.x)y=Math.min(y,other.y-h-gap);if(y>=0&&(!best||y>best.y))best={x,y};}return best;};
       let point=place();if(!point){newPage();point=place();}if(!point)point={x:0,y:Math.max(0,height-h)};
-      page.items.push({id:word.id,phraseId:word.phraseId,laneId:word.laneId,startMs:word.startMs,x:point.x,y:point.y,width:w,height:h,font:size,edge:seed%4,seed});
+      page.items.push({id:word.id,phraseId:word.phraseId,laneId:word.laneId,startMs:word.startMs,x:point.x,y:point.y,width:w,height:h,font:size,edge:seed%4,seed,reuseKey:word._dejaReuse});
     }
     return {width,height,pages};
   }
   function pileAt(item,clock,width,height,{reduced=false}={}){
     if(clock<item.startMs)return null;
     if(reduced)return {x:item.x,y:item.y};
-    const elapsed=clock-item.startMs,duration=720,u=clamp(elapsed/duration),f=(item.seed%997)/997;if(elapsed>=duration+1100)return {x:item.x,y:item.y};
+    const elapsed=clock-item.startMs,duration=720,u=clamp(elapsed/duration),f=(item.seed%997)/997;
     const from=[{x:f*Math.max(0,width-item.width),y:-item.height},{x:width,y:f*height*.65},{x:f*Math.max(0,width-item.width),y:height},{x:-item.width,y:f*height*.65}][item.edge];
     const arc=Math.min(60,height*.11),x=from.x+(item.x-from.x)*u,y=from.y+(item.y-from.y)*u-arc*u*(1-u);
-    const bounce=elapsed>duration?Math.min(7,item.height*.08)*Math.exp(-(elapsed-duration)/180)*Math.abs(Math.sin((elapsed-duration)/90)):0;
-    return {x,y:y-bounce};
+    const bounce=elapsed>duration?Math.min(7,item.height*.08)*Math.exp(-(elapsed-duration)/180)*Math.abs(Math.sin((elapsed-duration)/90)):0,drift=clamp((elapsed-duration-300)/800),phase=(elapsed+(item.seed%5000))/1500;
+    const dx=x+drift*.65*Math.sin(phase),dy=y-bounce-drift*.3*(1+Math.cos(phase*.8));return u===1?{x:Math.max(0,Math.min(Math.max(0,width-item.width),dx)),y:Math.max(0,Math.min(Math.max(0,height-item.height),dy))}:{x:dx,y:dy};
   }
   function backingSettings(value={}){
     return {space:value?.space==='shared'?'shared':'separate',area:Number.isFinite(value?.area)?Math.max(.15,Math.min(.4,value.area)):.25};
@@ -540,5 +557,5 @@
     const a=points[i-1],b=points[i],u=clamp((t-a.t)/(b.t-a.t));
     return {x:a.x+(b.x-a.x)*u,y:a.y+(b.y-a.y)*u};
   }
-  const api={pathPosition,emojiMapDelta,applyEmojiMapDelta,resolveWordSet,validateEmojiMap,parseEmojiMap,formatEmojiMap,wordSetFor,coinSpin,stagePerformanceAt,layoutOrigins,landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,validateWordRuleSets,wordRuleAt,vinylTrack,vinylAt,paintVinyl,leadTrackPlan,pileTrack,pileAt,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
+  const api={pathPosition,emojiMapDelta,applyEmojiMapDelta,resolveWordSet,validateEmojiMap,parseEmojiMap,formatEmojiMap,wordSetFor,coinSpin,stagePerformanceAt,layoutOrigins,landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,validateWordRuleSets,wordRuleAt,vinylTrack,vinylAt,paintVinyl,dejaGroups,dejaIds,dejaPhrase,leadTrackPlan,pileTrack,pileAt,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

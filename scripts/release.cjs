@@ -141,6 +141,8 @@ async function main(command, args) {
   await run(process.execPath, ['scripts/vocal-track-stability-proof.cjs', '--narrow'], source);
   await run(process.execPath, ['scripts/word-pile-proof.cjs'], source);
   await run(process.execPath, ['scripts/word-pile-proof.cjs', '--narrow'], source);
+  await run(process.execPath, ['scripts/deja-vu-proof.cjs'], source);
+  await run(process.execPath, ['scripts/deja-vu-proof.cjs', '--narrow'], source);
   await run(process.execPath, ['scripts/emoji-map-versions-proof.cjs', '--no-screenshot', '--no-receipt'], source);
   await run(process.execPath, ['scripts/sync-offset-proof.cjs'], source);
   await run(process.execPath, ['scripts/performance-capture-proof.cjs'], source);
