@@ -356,10 +356,16 @@ def _worker_main() -> int:
 
 
 def _registered_origin() -> str | None:
-    local_app_data = os.environ.get("LOCALAPPDATA")
-    if not local_app_data:
-        return None
-    manifest = Path(local_app_data) / "LyricVibe" / "NativeMessaging" / f"{HOST_NAME}.json"
+    override = os.environ.get("LYRICVIBE_NATIVE_MANIFEST")
+    if override:
+        manifest = Path(override)
+        if not manifest.is_absolute():
+            return None
+    else:
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if not local_app_data:
+            return None
+        manifest = Path(local_app_data) / "LyricVibe" / "NativeMessaging" / f"{HOST_NAME}.json"
     try:
         payload = json.loads(manifest.read_text(encoding="utf-8-sig"))
         if not isinstance(payload, dict):

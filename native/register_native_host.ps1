@@ -7,16 +7,21 @@ param(
     [ValidateSet('Chrome', 'Chromium')]
     [string] $Browser = 'Chrome',
 
+    [string] $LauncherPath,
+    [string] $ManifestPath,
+
     [switch] $Uninstall
 )
 
 $ErrorActionPreference = 'Stop'
 $hostName = 'com.lyricvibe.native_audio'
-$launcher = Join-Path $PSScriptRoot 'launch_native_host.cmd'
+$launcher = if ($LauncherPath) { $LauncherPath } else { Join-Path $PSScriptRoot 'launch_native_host.cmd' }
 $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
 if (-not $localAppData) { throw 'LOCALAPPDATA is unavailable.' }
 $manifestDirectory = Join-Path $localAppData 'LyricVibe\NativeMessaging'
-$manifestPath = Join-Path $manifestDirectory "$hostName.json"
+$manifestPath = if ($ManifestPath) { $ManifestPath } else { Join-Path $manifestDirectory "$hostName.json" }
+if (-not [IO.Path]::IsPathRooted($launcher) -or -not [IO.Path]::IsPathRooted($manifestPath)) { throw 'Launcher and manifest paths must be absolute.' }
+$manifestDirectory = Split-Path -Parent $manifestPath
 $registryProduct = if ($Browser -eq 'Chrome') { 'Google\Chrome' } else { 'Chromium' }
 $registryPath = "Registry::HKEY_CURRENT_USER\Software\$registryProduct\NativeMessagingHosts\$hostName"
 

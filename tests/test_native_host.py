@@ -203,6 +203,19 @@ class NativeHostProtocolTests(unittest.TestCase):
                 manifest_path.write_text(json.dumps({"name": native_host.HOST_NAME, "type": "stdio", "allowed_origins": ["chrome-extension://*/"]}), encoding="utf-8")
                 self.assertIsNone(native_host._registered_origin())
 
+    def test_shared_manifest_path_preserves_exact_origin_binding(self):
+        with tempfile.TemporaryDirectory() as temp:
+            manifest = Path(temp) / "host.json"
+            origin = "chrome-extension://gkpkgblmkkmkdlbhjljjbkcmkclofhal/"
+            manifest.write_text(json.dumps({"name": native_host.HOST_NAME, "type": "stdio", "allowed_origins": [origin]}), encoding="utf-8")
+            with patch.dict(os.environ, {"LYRICVIBE_NATIVE_MANIFEST": str(manifest)}):
+                self.assertEqual(native_host._registered_origin(), origin)
+                self.assertFalse(native_host._caller_is_allowed(["host", "chrome-extension://abcdefghijklmnopabcdefghijklmnop/"], origin))
+                manifest.write_text(json.dumps({"name": native_host.HOST_NAME, "type": "stdio", "allowed_origins": ["chrome-extension://*/"]}), encoding="utf-8")
+                self.assertIsNone(native_host._registered_origin())
+            with patch.dict(os.environ, {"LYRICVIBE_NATIVE_MANIFEST": "relative-host.json"}):
+                self.assertIsNone(native_host._registered_origin())
+
     def test_worker_output_is_drained_with_a_hard_cap(self):
         class FakeProcess:
             def __init__(self):
