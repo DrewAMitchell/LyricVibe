@@ -72,7 +72,7 @@
     const { phrase, word } = validateProposal(score, proposal);
     if (word.locked) fail("LOCKED", "Word timing is locked");
     if ((word.syllables || []).some(syllable => syllable.locked)) fail("LOCKED", "Word contains a protected syllable");
-    if (!phrase.endEstimated && (proposal.startMs < phrase.startMs || proposal.endMs > phrase.endMs)) {
+    if ((!phrase.endEstimated || proposal.preservePhraseBounds) && (proposal.startMs < phrase.startMs || proposal.endMs > phrase.endMs)) {
       fail("INVALID_TIME", "Proposal timing must fit within its explicit phrase boundary");
     }
     return { phrase, word };

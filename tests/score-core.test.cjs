@@ -364,6 +364,17 @@ test('complete alignment replaces estimated phrase bounds so old captions do not
   assert.equal(source.phrases[0].startMs, 1000);
 });
 
+test('review-only alignment can preserve existing estimated phrase boundaries', () => {
+  const source = makeScore('[00:01.00]one two');
+  const phrase = source.phrases[0];
+  const proposals = phrase.words.map((word, index) => ({ wordId: word.id, startMs: 1200 + index * 400, endMs: 1500 + index * 400, accepted: false, evidenceId: `preserve-${index}`, preservePhraseBounds: true }));
+  const receipt = score.validateAlignmentReceipt(source, { version: 'lyricvibe.alignment.v1', mediaKey: score.mediaKey(source.source), lyricsHash: source.lyrics.contentHash, expectedRevision: source.revision, adapter: 'test', model: 'test', automaticAdmissionEnabled: false, proposals });
+  assert.ok(receipt.proposals.every(proposal => proposal.preservePhraseBounds));
+  const aligned = score.applyAlignment(source, receipt.proposals.map(proposal => ({ ...proposal, accepted: true })), source.revision);
+  assert.deepEqual([aligned.phrases[0].startMs, aligned.phrases[0].endMs], [phrase.startMs, phrase.endMs]);
+  errorCode(() => score.applyAlignment(source, [{ ...receipt.proposals[0], accepted: true, startMs: phrase.endMs, endMs: phrase.endMs + 10 }], source.revision), 'INVALID_TIME');
+});
+
 test('alignment may expand an estimated phrase, while explicit ends stay hard and locked timings stay put', () => {
   let estimated = makeScore('[00:01.00]one two\n[00:04.00]');
   const estimatedPhrase = estimated.phrases[0];

@@ -86,6 +86,7 @@ export interface ScoreOperation {
 }
 
 export interface AlignmentProposal {
+  preservePhraseBounds?: boolean;
   wordId: string;
   startMs: number;
   endMs: number;

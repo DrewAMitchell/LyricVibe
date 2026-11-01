@@ -332,7 +332,7 @@
   function proposalProtection(proposal) {
     const phrase = state.score?.phrases.find(p => p.words.some(w => w.id === proposal.wordId));
     const word = phrase?.words.find(w => w.id === proposal.wordId);
-    return helpers.reviewProtection(word) || (phrase && !phrase.endEstimated && (proposal.startMs < phrase.startMs || proposal.endMs > phrase.endMs) ? 'Adjust phrase bounds before accepting' : '');
+    return helpers.reviewProtection(word) || (phrase && (!phrase.endEstimated || proposal.preservePhraseBounds) && (proposal.startMs < phrase.startMs || proposal.endMs > phrase.endMs) ? 'Adjust phrase bounds before accepting' : '');
   }
   function renderSelectedProposal() {
     const proposal = state.review.find(p => p.wordId === state.wordId);
@@ -471,7 +471,7 @@
     $('review-list').replaceChildren(...state.review.map(proposal => {
       const phrase = state.score.phrases.find(phrase => phrase.words.some(word => word.id === proposal.wordId));
       const word = phrase?.words.find(word => word.id === proposal.wordId);
-      const outside = phrase && !phrase.endEstimated && (proposal.startMs < phrase.startMs || proposal.endMs > phrase.endMs);
+      const outside = phrase && (!phrase.endEstimated || proposal.preservePhraseBounds) && (proposal.startMs < phrase.startMs || proposal.endMs > phrase.endMs);
       const protection = helpers.reviewProtection(word) || (outside ? 'Adjust phrase bounds before accepting' : '');
       const mixedVocals = phrase && state.score.phrases.some(other => other.id !== phrase.id && other.laneId !== phrase.laneId && other.startMs < phrase.endMs && other.endMs > phrase.startMs);
       const basis = proposal.evidenceId.startsWith('song-interpolated:') ? 'Interpolated between model anchors' : 'Needs review';
