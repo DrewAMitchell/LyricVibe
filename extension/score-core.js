@@ -872,6 +872,7 @@
     if (!request || !['manual','auto'].includes(request.mode) && request.mode !== undefined) fail('INVALID_OPERATION','Choose manual or automatic timing');
     if (request.wordId !== undefined && (typeof request.wordId !== 'string' || !['manual','auto','inherit'].includes(request.choice))) fail('INVALID_OPERATION','Choose a word timing override');
     if (request.useAvailable !== undefined && typeof request.useAvailable !== 'boolean') fail('INVALID_OPERATION','Invalid automatic timing choice');
+    if (request.preserveOverrides !== undefined && (!Array.isArray(request.preserveOverrides) || request.preserveOverrides.length > 5000 || request.preserveOverrides.some(id=>typeof id!=='string'||!id))) fail('INVALID_OPERATION','Invalid preserved word choices');
     if (request.reviewPhraseId !== undefined && typeof request.reviewPhraseId !== 'string') fail('INVALID_OPERATION','Choose a phrase to review');
     if (request.replaceCandidates !== undefined && typeof request.replaceCandidates !== 'boolean') fail('INVALID_OPERATION','Invalid candidate replacement');
     if (request.evidenceIds !== undefined && (!Array.isArray(request.evidenceIds) || request.evidenceIds.length > 5000 || request.evidenceIds.some(id => typeof id !== 'string' || !id))) fail('INVALID_OPERATION','Invalid candidate selection');
@@ -894,7 +895,7 @@
     if (request.mode !== undefined) settings.mode=request.mode;
     if (request.wordId !== undefined) { locateWord(next,request.wordId); if(request.choice==='inherit')delete settings.overrides[request.wordId];else settings.overrides[request.wordId]=request.choice; }
     next.alignmentTiming=settings;
-    if (request.useAvailable) { settings.mode='auto'; const byId=new Map(settings.candidates.map(c=>[c.wordId,c])); for(const phrase of next.phrases) for(const word of phrase.words) if(alignmentCandidateStatus(next,phrase,word,byId.get(word.id))==='available') delete settings.overrides[word.id]; }
+    if (request.useAvailable) { settings.mode='auto'; const byId=new Map(settings.candidates.map(c=>[c.wordId,c])),preserved=new Set(request.preserveOverrides||[]); for(const phrase of next.phrases) for(const word of phrase.words) if(!preserved.has(word.id)&&alignmentCandidateStatus(next,phrase,word,byId.get(word.id))==='available') delete settings.overrides[word.id]; }
     if (request.reviewPhraseId !== undefined) { const phrase=next.phrases.find(p=>p.id===request.reviewPhraseId); if(!phrase)fail('UNKNOWN_ID','Choose a current phrase.'); settings.reviewedPhrases ||= {}; settings.reviewedPhrases[phrase.id]=alignmentPhraseSignature(next,phrase); }
     next.revision++; return validateScore(next);
   }

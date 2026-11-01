@@ -410,6 +410,8 @@ test('automatic coverage distinguishes candidates, playback selection, human rev
   assert.deepEqual(summary.phrases[0].flags,['saved timing','interpolated','no usable auto']);
   const auto=score.applyOperation(selected,{type:'setAlignmentPreference',preference:{useAvailable:true}},selected.revision);
   assert.equal(score.alignmentCoverage(auto).selected,2);assert.deepEqual(auto.phrases,before,'selection does not overwrite manual timing');
+  const preserve=score.applyOperation(selected,{type:'setAlignmentPreference',preference:{useAvailable:true,preserveOverrides:[one.id]}},selected.revision);
+  assert.equal(preserve.alignmentTiming.overrides[one.id],'manual');assert.equal(score.alignmentCoverage(preserve).selected,1,'newer explicit choices survive the bulk selection');
   const reviewed=score.applyOperation(auto,{type:'setAlignmentPreference',preference:{reviewPhraseId:auto.phrases[0].id}},auto.revision);
   assert.equal(score.alignmentCoverage(reviewed).needsReview,0);
   const corrected=score.applyOperation(reviewed,{type:'setWordTiming',wordId:three.id,startMs:three.startMs,endMs:three.endMs},reviewed.revision);
