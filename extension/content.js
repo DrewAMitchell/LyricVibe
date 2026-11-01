@@ -607,7 +607,7 @@
     for(const [value,label,description]of samples){const button=document.createElement('button');button.type='button';button.dataset.heldEffect=value;button.setAttribute('aria-label',label+' held effect');button.setAttribute('aria-pressed',String(value===effect.value));button.innerHTML='<span class="lvx-held-sample"><span class="lvx-word">Stay</span></span><strong></strong><small></small>';button.querySelector('strong').textContent=label;button.querySelector('small').textContent=description;button.onclick=()=>select(value);button.onpointerenter=()=>start(button);button.onpointerleave=()=>{if(document.activeElement!==button)stop();};button.onfocus=()=>start(button);button.onblur=stop;choices.append(button);paint(button,650);}
     effect.parentElement.replaceWith(choices);return group;
   }
-  function setChoreography(value){choreography={...heldSettings(value),beatPulse:value.beatPulse!==false,landing:Object.hasOwn(LvChoreography.landingStyles,value.landing)?value.landing:'settle',dance:['off','mix','tip','flex','bounce','launch'].includes(value.dance)?value.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic===true,autoFire:value.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,value.fireColor)?value.fireColor:'ember',fireSmoke:value.fireSmoke!==false,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:Object.hasOwn(LvChoreography.layoutOrigins,value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
+  function setChoreography(value){choreography={...heldSettings(value),beatPulse:value.beatPulse!==false,landing:Object.hasOwn(LvChoreography.landingStyles,value.landing)?value.landing:'settle',dance:['off','mix','tip','flex','bounce','launch'].includes(value.dance)?value.dance:'off',mode:['classic','fall','puzzle','vinyl','pile'].includes(value.mode)?value.mode:'classic',upsideDown:value.upsideDown===true,automatic:value.automatic===true,autoFire:value.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,value.fireColor)?value.fireColor:'ember',fireSmoke:value.fireSmoke!==false,fillStage:value.fillStage!==false,arrangement:value.arrangement==='ordered'?'ordered':'chaotic',origin:Object.hasOwn(LvChoreography.layoutOrigins,value.origin)?value.origin:'top-left'};state.scoreSignature='';chrome.storage.local.set({lvxChoreography:choreography}).catch(error=>setHud('Motion changed in this tab; preference could not save: '+error.message,true,true));if(state.score)renderScore(getMediaTimeMs());}
   function previewTick(now){
     if(themePicker.hidden||!previewPlaying||document.hidden){previewFrame=0;previewLast=0;return;}
     if(previewLast)previewTime+=Math.min(now-previewLast,100);previewLast=now;renderStylePreview(true);previewFrame=requestAnimationFrame(previewTick);
@@ -645,7 +645,8 @@
       const previewHeight=Math.max(60,tile.querySelector('.lvx-tile-stage').clientHeight-16);
       const settings={...choreography,theme:tile.dataset.theme,emojiTags:!!editingWordSet().emojiTags},cues=LvChoreography.compose({source:{durationMs:words.length*450+1800},phrases:[{id:'preview',laneId:'lead',words}]},editingWordSet().rules,{...editingWordSet(),...heldSettings(choreography)});
       // Layout and painting must agree on emoji space and expression weights.
-      choreographLine(line,words,clock,tile.querySelector('.lvx-tile-stage').clientWidth-16,previewHeight,Math.min(64,previewHeight*.7),cues,Math.min(48,previewHeight*.54),settings);
+      const previewWidth=tile.querySelector('.lvx-tile-stage').clientWidth-16;
+      if(choreography.mode==='pile'){const measure=(text,font)=>{choreographyMeasure.font=`800 ${font}px Segoe UI`;return choreographyMeasure.measureText(text.toUpperCase()).width;},plan=LvChoreography.pileTrack(words,previewWidth,previewHeight,measure,{font:Math.min(24,previewHeight*.26)}),page=plan.pages.findLast(p=>p.startMs<=clock),items=new Map((page?.items||[]).map(item=>[item.id,item]));paintPileLine(line,words.map(word=>({...word,_pile:items.get(word.id)})),clock,previewWidth,previewHeight);}else choreographLine(line,words,clock,previewWidth,previewHeight,Math.min(64,previewHeight*.7),cues,Math.min(48,previewHeight*.54),settings);
       expressLine(line,words,clock,cues,settings);
     }
   }
@@ -681,8 +682,9 @@
     textSizes.addEventListener('change',event=>{const key=event.target.dataset.placement,value=Number(event.target.value);if(key&&event.target.value.trim()&&Number.isFinite(value)){applyPlacement({...placement,[key]:value},true);syncPlacementFields();}});performanceControls.append(textSizes);textSizes.querySelector('[data-placement="maxFontPx"]').disabled=choreography.mode==='puzzle'&&choreography.fillStage;textSizes.querySelector('[data-placement="maxFontPx"]').title='Turn off Fit puzzle to lyric area to use this maximum.';for(const input of textSizes.querySelectorAll('input'))if(choreography.mode==='vinyl')input.disabled=true;
     const sizeHint=document.createElement('small');sizeHint.textContent='Turntable moves and scales with this song’s lyric area.';performanceControls.append(sizeHint);sizeHint.hidden=choreography.mode!=='vinyl';
     const motionControls=document.createElement('div');motionControls.className='lvx-motion-controls';
-    motionControls.innerHTML='<label>Layout <select aria-label="Lyric choreography"><option value="classic">Classic</option><option value="fall">Falling words</option><option value="puzzle">Word puzzle</option><option value="vinyl">Vinyl history</option></select></label><label><input type="checkbox"> Allow upside-down words</label><label>Expression <select aria-label="Automatic lyric expression"><option value="auto">Automatic</option><option value="off">Static + authored</option></select></label><button type="button" data-preview-play>Play preview</button><span>Expression works in every layout. Your authored effects take priority.</span>';
+    motionControls.innerHTML='<label>Layout <select aria-label="Lyric choreography"><option value="classic">Classic</option><option value="fall">Falling words</option><option value="puzzle">Word puzzle</option><option value="vinyl">Vinyl history</option><option value="pile">Word pile</option></select></label><label><input type="checkbox"> Allow upside-down words</label><label>Expression <select aria-label="Automatic lyric expression"><option value="auto">Automatic</option><option value="off">Static + authored</option></select></label><button type="button" data-preview-play>Play preview</button><span>Expression works in every layout. Your authored effects take priority.</span>';
     const motionSelect=motionControls.querySelector('select'),upside=motionControls.querySelector('input');motionSelect.value=choreography.mode;upside.checked=choreography.upsideDown;upside.disabled=choreography.mode!=='puzzle';
+    if(choreography.mode==='pile')motionControls.querySelector('span').textContent='Words arrive from the edges and settle. A new pile starts when the area fills.';
     motionSelect.onchange=()=>{setChoreography({...choreography,mode:motionSelect.value});buildThemePicker();};upside.onchange=()=>{setChoreography({...choreography,upsideDown:upside.checked});renderStylePreview();};motionControls.querySelector('button').onclick=()=>setPreviewPlaying(!previewPlaying);themePicker.append(motionControls);
     const expressionSelect=motionControls.querySelector('[aria-label="Automatic lyric expression"]');expressionSelect.value=choreography.automatic?'auto':'off';expressionSelect.disabled=choreography.mode==='vinyl';if(choreography.mode==='vinyl')motionControls.querySelector('span').textContent='Vinyl history uses its own spiral motion and cream/red palette.';expressionSelect.onchange=()=>{setChoreography({...choreography,automatic:expressionSelect.value==='auto'});buildThemePicker();};
 
@@ -3333,6 +3335,7 @@
   function previewEffect(type){
     if(performanceTake.armed)return;
     stopEffectPreview();effectPreview.type=type;effectPreview.start=performance.now();effectPreviewLine.replaceChildren();
+    const previewScore=timing.draft?.score,previewPlan=previewScore?LvChoreography.leadTrackPlan(previewScore,LvBeatTrack.displayEnds(previewScore,tempo.map,linger)):null,previewLane=timingPhrase()?.laneId;applyLeadTrackStyle(effectPreviewLine,previewLane,previewPlan);effectPreviewLine.style.fontFamily=previewPlan?.multi&&Object.hasOwn(previewPlan.laneColors,previewLane)?'var(--lvx-font-main)':'';
     const beats=syncButton('effect-clock').value==='beat',scope=syncButton(beats?'beat-target':'effect-scope').value;
     const sourceWords=(scope==='word'||scope==='syllable'?[tapWord()]:timingPhrase()?.words)?.filter(Boolean).filter(w=>!w.excluded).slice(0,4)||[];
     const effect={type,strength:.6,...(type==='groove'?{axis:syncButton('groove-axis').value}:{})};
@@ -4039,7 +4042,7 @@
       backingLabels=Object.fromEntries(Object.entries(result?.lvxBackingLabels||{}).filter(([key,value])=>['hidden','header','prefix'].includes(value)));
       syncButton('record-other-parts').checked=result?.lvxRecordUnrecordedParts===true;
       linger=LvBeatTrack.lingerSettings(result?.lvxLinger);
-      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={...heldSettings(c),beatPulse:c.beatPulse!==false,landing:Object.hasOwn(LvChoreography.landingStyles,c.landing)?c.landing:'settle',dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle','vinyl'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic===true,autoFire:c.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,c.fireColor)?c.fireColor:'ember',fireSmoke:c.fireSmoke!==false,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:Object.hasOwn(LvChoreography.layoutOrigins,c.origin)?c.origin:'top-left'};}
+      if(result?.lvxChoreography){const c=result.lvxChoreography;choreography={...heldSettings(c),beatPulse:c.beatPulse!==false,landing:Object.hasOwn(LvChoreography.landingStyles,c.landing)?c.landing:'settle',dance:['off','mix','tip','flex','bounce','launch'].includes(c.dance)?c.dance:'off',mode:['classic','fall','puzzle','vinyl','pile'].includes(c.mode)?c.mode:'classic',upsideDown:c.upsideDown===true,automatic:c.automatic===true,autoFire:c.autoFire===true,fireColor:Object.hasOwn(LvChoreography.firePalettes,c.fireColor)?c.fireColor:'ember',fireSmoke:c.fireSmoke!==false,fillStage:c.fillStage!==false,arrangement:c.arrangement==='ordered'?'ordered':'chaotic',origin:Object.hasOwn(LvChoreography.layoutOrigins,c.origin)?c.origin:'top-left'};}
       bloomEnabled=result?.lvxBloomEnabled!==false;
       void loadPlacement(true);
       if (result && result.lvxTheme && THEMES.includes(result.lvxTheme)) {
@@ -5479,6 +5482,10 @@
     return ['estimate','phrase','words','syllables'].indexOf(authoring.level)>=need?'done':'todo';
   }
   let beatDisplayCache={score:null,map:null,ends:{}};
+  let leadTrackCache={score:null,ends:null,plan:null},pileCache=null;
+  const leadTrackColors=['#bfe8ff','#ffdeb1','#e6d1ff','#c9f0c7','#ffd1dc','#d5e7a6'];
+  const leadTrackFonts=['',"'Segoe UI Variable','Segoe UI',sans-serif","Georgia,serif","'Trebuchet MS',sans-serif"];
+  function applyLeadTrackStyle(node,laneId,plan){const index=plan?.multi&&Object.hasOwn(plan.laneColors,laneId)?plan.laneColors[laneId]:undefined,color=index===undefined?'':leadTrackColors[index%leadTrackColors.length],font=index===undefined?'':leadTrackFonts[index%leadTrackFonts.length];for(const [prop,value] of [['--lvx-color-main',color],['--lvx-color-accent',color],['--lvx-font-main',font]])if(node.style.getPropertyValue(prop)!==value){if(value)node.style.setProperty(prop,value);else node.style.removeProperty(prop);}return color;}
   const beatStyledNodes=new Set();
   let expressionPlan={score:null,cues:{}};
   // These are rebuildable presentation caches, never the score or a take.
@@ -5486,7 +5493,7 @@
   // hidden; unsaved work remains owned by its existing recovery path.
   function clearDerivedSongRender(){
     displaySyllables={key:null,basis:null,score:null,suggestions:new Map(),pending:false};
-    beatDisplayCache={score:null,map:null,ends:{}};
+    beatDisplayCache={score:null,map:null,ends:{}};leadTrackCache={score:null,ends:null,plan:null};pileCache=null;
     expressionPlan={score:null,cues:{}};
     savedPromptCache={score:null,lane:null,events:[]};
     beatStyledNodes.clear();beatGrooveLetters.clear();
@@ -5645,7 +5652,7 @@
   liveDock.innerHTML=`<div class="lvx-live-target"><strong>STAGE LIVE</strong><output data-live-target>No active word</output><span data-live-status role="status"></span></div><div class="lvx-live-controls">
     <button type="button" data-live-arm>Arm · Enter</button><button type="button" data-live-play>Play · Space</button>
     <label>Mode<select data-live-mode aria-label="Live choreography mode"><option value="effects">Effects · 0–9</option><option value="placement">Place · click stage</option></select></label>
-    <details data-live-pop="look"><summary>Look & motion</summary><div class="lvx-live-pop"><label>Vocal track<select data-live-lane aria-label="Live vocal track"></select></label><label>Look<select data-live-look aria-label="Live display look"></select></label><label>Layout<select data-live-layout aria-label="Live layout"><option value="classic">Classic</option><option value="fall">Falling</option><option value="puzzle">Puzzle</option><option value="vinyl">Vinyl</option></select></label><label>Word dance<select data-live-dance aria-label="Live word dance"></select></label><label><input type="checkbox" data-live-auto> Automatic expression</label><label>Word look<select data-live-word-look aria-label="Selected word look"></select></label><label>Word emoji<input data-live-emoji aria-label="Selected word emoji" maxlength="32" placeholder="Emoji or blank"></label><button type="button" data-live-emoji-apply>Apply emoji to word</button><small>Word changes stay in this song’s preview until Save.</small></div></details>
+    <details data-live-pop="look"><summary>Look & motion</summary><div class="lvx-live-pop"><label>Vocal track<select data-live-lane aria-label="Live vocal track"></select></label><label>Look<select data-live-look aria-label="Live display look"></select></label><label>Layout<select data-live-layout aria-label="Live layout"><option value="classic">Classic</option><option value="fall">Falling</option><option value="puzzle">Puzzle</option><option value="vinyl">Vinyl</option><option value="pile">Word pile</option></select></label><label>Word dance<select data-live-dance aria-label="Live word dance"></select></label><label><input type="checkbox" data-live-auto> Automatic expression</label><label>Word look<select data-live-word-look aria-label="Selected word look"></select></label><label>Word emoji<input data-live-emoji aria-label="Selected word emoji" maxlength="32" placeholder="Emoji or blank"></label><button type="button" data-live-emoji-apply>Apply emoji to word</button><small>Word changes stay in this song’s preview until Save.</small></div></details>
     <details data-live-pop="held"><summary>Held notes</summary><div class="lvx-live-pop"><label><input type="checkbox" data-live-held-auto> Automatic expression</label><label>Held effect for this word<select data-live-word-held aria-label="Selected word held effect"><option value="">Follow global rule</option><option value="always">Always qualify</option><option value="never">Never qualify</option></select></label><small>Selected-word changes use Save / Undo. Global settings save immediately.</small></div></details>
     <details data-live-pop="effects"><summary>Effects</summary><div class="lvx-live-pop lvx-live-effect-grid"></div></details>
     <details data-live-pop="placement"><summary>Landing</summary><div class="lvx-live-pop"><label>Entry<select data-live-landing aria-label="Live landing profile"></select></label><label>Motion<select data-live-motion aria-label="Live motion profile"></select></label><p>Arm, choose Place, then click where the current word or syllable should land. Existing timing stays fixed.</p></div></details>
@@ -5918,6 +5925,25 @@
     if(liveStage.drag||words.some(w=>w._staging||w.syllables?.some(s=>s._staging)))line.style.overflow='visible';
   }
 
+  function pilePresentation(score,tracks,areas,clock){
+    const width=Math.max(1,areas.main.width-16),rowHeight=Math.max(1,areas.main.height/tracks.count-16-(tracks.multi?Math.min(20,Math.max(12,(areas.main.height/tracks.count-16)*.16)):0)),key=[width,rowHeight,tracks.count,placement.maxFontPx,state.theme,score.lyrics?.timingBasis,emojiTagsEnabled(choreography)].join(':');
+    if(!pileCache||pileCache.score!==score||pileCache.tracks!==tracks||pileCache.library!==wordRuleSets||pileCache.key!==key){
+      const groups=Array.from({length:tracks.count},()=>[]),cues=expressionCues(score);
+      for(const phrase of score.phrases){const slot=Object.hasOwn(tracks.slots,phrase.id)?tracks.slots[phrase.id]:undefined;if(slot===undefined)continue;for(const word of phrase.words.filter(w=>!w.excluded))groups[slot].push({...word,phraseId:phrase.id,laneId:phrase.laneId});}
+      const font=Math.max(4,Math.min(placement.maxFontPx,64,rowHeight*.27,width*.105));
+      const measure=(text,size,word)=>{const shown=score.lyrics?.timingBasis==='caption-segments'?text:text.toUpperCase();let widest=0;for(const face of ['Impact','Segoe UI','Georgia']){choreographyMeasure.font=`800 ${size}px "${face}"`;widest=Math.max(widest,choreographyMeasure.measureText(shown).width);}return widest+(emojiTagsEnabled(choreography)&&cues[word.id]?.emoji?size*.75*(cues[word.id]?.emojiCount||1):0);};
+      pileCache={score,tracks,key,library:wordRuleSets,plans:groups.map(words=>LvChoreography.pileTrack(words,width,rowHeight,measure,{font}))};
+    }
+    const groups=new Map(),items=new Map();for(const plan of pileCache.plans){const page=plan.pages.findLast(p=>p.startMs<=clock);if(!page)continue;for(const item of page.items){if(item.startMs>clock)continue;items.set(item.id,item);if(!groups.has(item.phraseId))groups.set(item.phraseId,new Set());groups.get(item.phraseId).add(item.id);}}
+    const phrases=[];for(const phrase of score.phrases){const ids=groups.get(phrase.id);if(!ids)continue;const words=phrase.words.filter(w=>ids.has(w.id)).map(w=>({...JSON.parse(JSON.stringify(w)),_pile:items.get(w.id)}));phrases.push({...phrase,words,activeWords:words.filter(w=>clock>=w.startMs&&clock<=w.endMs).map(w=>w.id),activeSyllables:words.flatMap(w=>(w.syllables||[]).filter(s=>clock>=s.startMs&&clock<=s.endMs).map(s=>s.id)),opacity:1,_pile:true});}
+    const lastBySlot=new Map();for(const phrase of phrases){const slot=tracks.slots[phrase.id],time=Math.max(...phrase.words.map(w=>w.startMs)),last=lastBySlot.get(slot);if(!last||time>last.time)lastBySlot.set(slot,{id:phrase.id,time});}for(const phrase of phrases)phrase._pileLabel=lastBySlot.get(tracks.slots[phrase.id])?.id===phrase.id;
+    return phrases;
+  }
+  function paintPileLine(line,words,clock,width,height){
+    for(const [index,word]of words.entries()){const node=line.children[index],item=word._pile;if(!node)continue;if(!item){node.style.display='none';continue;}const point=LvChoreography.pileAt(item,clock,width,height,{reduced:bloomMotion.matches});if(!point){node.style.display='none';continue;}node.style.display='';node.classList.remove('lvx-wrapped-word');Object.assign(node.style,{position:'absolute',left:point.x.toFixed(3)+'px',top:point.y.toFixed(3)+'px',width:item.width.toFixed(3)+'px',height:item.height.toFixed(3)+'px',fontSize:item.font.toFixed(3)+'px',lineHeight:'1.3',rotate:'0deg',translate:'0 0',opacity:''});}
+    Object.assign(line.style,{position:'relative',width:width+'px',height:height+'px',maxWidth:'100%'});
+  }
+
   function renderScore(mediaMs) {
     if(trackWatch?.loading()&&trackWatch?.status().generation>0)return;
     refreshRecordingTransport();refreshLiveStage();
@@ -5931,11 +5957,14 @@
     const regionLayout=regionFrame.length>0;
     if(stage.dataset.regionLayout!==String(regionLayout)){stage.dataset.regionLayout=String(regionLayout);for(const key of ['left','top','width','height'])stage.style[key]=(regionLayout?({left:0,top:0,width:100,height:100})[key]:placement[key])+'%';state.scoreSignature='';}
     const isBacking=phrase=>score.lanes.find(l=>l.id===phrase.laneId)?.role==='backing';
+    const usePile=choreography.mode==='pile'&&!regionLayout&&!stageEdit.active;
     const useVinyl=choreography.mode==='vinyl'&&!regionLayout&&!stageEdit.active&&!score.choreographyLayers?.some(l=>LvScore.choreographyTarget(score,l.target)?.phrase.words.some(w=>mediaMs-score.offsetMs>=w.startMs&&mediaMs-score.offsetMs<w.endMs))&&!score.phrases.some(p=>!isBacking(p)&&mediaMs-score.offsetMs>=p.startMs&&mediaMs-score.offsetMs<p.endMs&&p.words.some(w=>w.appearance));
     if(stage.classList.contains('lvx-vinyl-stage')!==useVinyl)stage.classList.toggle('lvx-vinyl-stage',useVinyl);
     if(stage.classList.contains('lvx-choreography-stage')===useVinyl)stage.classList.toggle('lvx-choreography-stage',!useVinyl);
     const stagePadding=useVinyl?'0px':'16px';if(stage.style.paddingTop!==stagePadding)stage.style.paddingTop=stagePadding;
     if(beatDisplayCache.score!==score||beatDisplayCache.map!==tempo.map||beatDisplayCache.linger!==linger){const ends=LvBeatTrack.presentationEnds(score,tempo.map,linger);beatDisplayCache={score,map:tempo.map,linger,ends:ends.phrases,units:ends.units};}
+    if(leadTrackCache.score!==score||leadTrackCache.ends!==beatDisplayCache.ends)leadTrackCache={score,ends:beatDisplayCache.ends,plan:LvChoreography.leadTrackPlan(score,beatDisplayCache.ends)};
+    const leadTracks=leadTrackCache.plan;
     const active = LvScore.activeAt(score, mediaMs,{displayEnds:beatDisplayCache.ends});
     // Lead-in: an empty lane shows its next phrase dimmed up to 2s early, so a rewind is never a blank screen.
     const atMs = mediaMs - score.offsetMs;
@@ -5944,6 +5973,7 @@
       const next = score.phrases.find(p => p.laneId === lane.id && p.startMs > atMs && p.startMs - atMs <= 2000 && p.words.some(w => !w.excluded));
       if (next) active.phrases.push({ ...JSON.parse(JSON.stringify(next)), words: JSON.parse(JSON.stringify(next.words.filter(w => !w.excluded))), activeWords: [], activeSyllables: [], opacity: 1, leadIn: true });
     }
+    if(usePile){const areas=LvChoreography.vocalAreas(stage.clientWidth,stage.clientHeight,score.phrases.some(p=>isBacking(p)&&p.words.some(w=>!w.excluded)),backingDisplay);active.phrases=[...active.phrases.filter(isBacking),...pilePresentation(score,leadTracks,areas,atMs)];}
     if (timing.view === 'proposed' && performanceTake.binding === tapBinding()) {
       const operations = new Map(performanceTake.marks.map(m => [m.targetId,m.operation]));
       for (const phrase of active.phrases) for (const word of phrase.words) {
@@ -5953,7 +5983,7 @@
     }
     LvScore.projectChoreographyLayers(score,active.phrases);
     if(useVinyl)active.phrases=[];
-    const signature = `${score.revision}:${timing.draft?.previewRevision ?? 'saved'}:${timing.view}:${state.theme}:${useVinyl}:${displayScore!==selectedScore}:${regionFrame.map(r=>r.id).join(',')}:` + active.phrases.map(p => p.id).join('|');
+    const signature = `${score.revision}:${timing.draft?.previewRevision ?? 'saved'}:${timing.view}:${state.theme}:${useVinyl}:${usePile}:${leadTracks.count}:${displayScore!==selectedScore}:${regionFrame.map(r=>r.id).join(',')}:` + active.phrases.map(p => p.id+(p._pile?':'+p.words.map(w=>w.id).join(','):'')).join('|');
     if (signature !== state.scoreSignature || !stage.classList.contains('lvx-score-stage')) {
       stage.textContent = '';
       stage.classList.add('lvx-score-stage');
@@ -5961,7 +5991,8 @@
         const line = document.createElement('div');
         const lane = score.lanes.find(l => l.id === phrase.laneId);
         line.className = `lvx-score-phrase lvx-score-${lane?.role || 'lead'}`;
-        line.dataset.phrase = phrase.id;
+        line.dataset.phrase = phrase.id;line.dataset.lane=phrase.laneId;
+        if(lane?.role==='lead'&&leadTracks.multi&&(!phrase._pile||phrase._pileLabel)){const identity=document.createElement('div');identity.className='lvx-vocal-identity';identity.dataset.vocalFor=phrase.id;identity.textContent=lane.label||'Main';stage.append(identity);}
         if(score.lyrics?.timingBasis==='caption-segments')line.dataset.captionCase='source';
         for (const word of phrase.words) {
           const span = document.createElement('span');
@@ -6034,13 +6065,15 @@
         }
       }
       const authoredRegion=regionFrame.find(r=>r.target.id===phrase.id),settings=backing||authoredRegion||stageEdit.active||choreography.mode==='vinyl'?{...choreography,mode:'classic',automatic:false,dance:'off'}:choreography;
-      const peers=active.phrases.filter(p=>isBacking(p)===backing),area=backing?areas.backing:areas.main,slot=peers.indexOf(phrase),count=Math.max(1,peers.length);
+      const peers=active.phrases.filter(p=>isBacking(p)===backing),area=backing?areas.backing:areas.main,slot=backing?peers.indexOf(phrase):(Object.hasOwn(leadTracks.slots,phrase.id)?leadTracks.slots[phrase.id]:0),count=backing?Math.max(1,peers.length):leadTracks.count;
       let rect={x:area.x+8,y:area.y+area.height*slot/count+8,width:Math.max(1,area.width-16),height:Math.max(1,area.height/count-16)};
       if(regionLayout){rect=authoredRegion?{x:authoredRegion.rect.x*stageWidth,y:authoredRegion.rect.y*stageHeight,width:authoredRegion.rect.width*stageWidth,height:authoredRegion.rect.height*stageHeight}:{x:placement.left/100*stageWidth+rect.x*placement.width/100,y:placement.top/100*stageHeight+rect.y*placement.height/100,width:rect.width*placement.width/100,height:rect.height*placement.height/100};}
+      const identity=[...stage.children].find(el=>el.dataset.vocalFor===phrase.id);
+      if(!backing&&leadTracks.multi){const color=applyLeadTrackStyle(line,phrase.laneId,leadTracks),height=Math.min(20,Math.max(12,rect.height*.16));if(identity){identity.style.setProperty('--lvx-track-color',color);Object.assign(identity.style,{left:rect.x+'px',top:rect.y+'px',width:rect.width+'px',height:height+'px',opacity:String(phrase.opacity)});}rect.y+=height;rect.height=Math.max(1,rect.height-height);}
       const label=[...stage.children].find(el=>el.dataset.backingFor===phrase.id);
       if(label){const header=backingLabelMode()==='header',size=header?Math.min(18,rect.height*.25):Math.min(120,rect.width*.25);Object.assign(label.style,{left:rect.x+'px',top:rect.y+'px',width:(header?rect.width:size)+'px',height:(header?size:rect.height)+'px',opacity:String(phrase.opacity*.65),fontSize:Math.min(12,rect.height*.2)+'px'});if(header){rect.y+=size;rect.height=Math.max(1,rect.height-size);}else{rect.x+=size;rect.width=Math.max(1,rect.width-size);}}
-      const {width,height}=rect,maxFont=backing?Math.min(48,placement.maxFontPx*.6):settings.mode==='puzzle'?(settings.fillStage?Math.max(width,height):placement.maxFontPx):Math.min(placement.maxFontPx,laneFont(phrase,score)),minFont=backing?Math.min(maxFont,placement.minFontPx*.6):placement.minFontPx;
-      choreographLine(line,phrase.words,atMs,width,height,maxFont,cues,minFont,settings);
+      const {width,height}=rect,maxFont=backing?Math.min(48,placement.maxFontPx*.6):settings.mode==='puzzle'?(settings.fillStage?Math.max(width,height):placement.maxFontPx):Math.min(placement.maxFontPx,laneFont(phrase,score)),minFont=backing?Math.min(maxFont,placement.minFontPx*.6):Math.min(placement.minFontPx,Math.max(1,Math.floor(height/1.5)));
+      if(phrase._pile)paintPileLine(line,phrase.words,atMs,width,height);else choreographLine(line,phrase.words,atMs,width,height,maxFont,cues,minFont,settings);
       Object.assign(line.style,{position:'absolute',left:rect.x+'px',top:rect.y+'px',margin:'0',overflow:'hidden'});line.dataset.region=authoredRegion?.id||'default';line.dataset.area=authoredRegion?.areaId||'';
       if(!backing||phrase.words.some(w=>w.effects?.some(e=>e._layer)||w._staging||w.syllables?.some(s=>s.effects?.some(e=>e._layer)||s._staging)))expressLine(line,phrase.words,atMs,cues,backing?{...settings,automatic:false}:settings);else phrase.words.forEach((word,i)=>{paintWordTexture(line.children[i],word,atMs);paintWordEmoji(line.children[i],cues[word.id],atMs,emojiTagsEnabled(settings));});
       paintLivePlacements(line,phrase.words,atMs);

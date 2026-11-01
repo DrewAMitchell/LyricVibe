@@ -448,6 +448,54 @@
       const scale=R*glyph.font/100;ctx.save();ctx.translate(cx+R*glyph.x,cy+R*glyph.y);ctx.rotate(glyph.angle+Math.PI/2);ctx.globalAlpha=glyph.top?1:.52+.48*glyph.radius;if(glyph.doubled&&glyph.current){const alpha=ctx.globalAlpha;ctx.globalAlpha*=.45;ctx.drawImage(sprite,-sprite.width*scale/2+6.5*scale,-72.5*scale,sprite.width*scale,150*scale);ctx.globalAlpha=alpha;}ctx.drawImage(sprite,-sprite.width*scale/2,-75*scale,sprite.width*scale,150*scale);ctx.restore();}
     ctx.restore();return frame;
   }
+  // Reserve a stable slot for each voice that can be visible simultaneously.
+  // Lead-ins are included so the first singer does not move when another is previewed.
+  // Non-overlapping voices may share a slot. Authored stage regions remain separate.
+  function leadTrackPlan(score,displayEnds={},leadInMs=2000){
+    const lanes=(score.lanes||[]).filter(l=>l.role==='lead'),nodes=[],byPhrase=new Map();
+    for(const lane of lanes){
+      const phrases=(score.phrases||[]).filter(p=>p.laneId===lane.id&&p.words?.some(w=>!w.excluded)).sort((a,b)=>a.startMs-b.startMs||a.id.localeCompare(b.id));
+      const voices=[];
+      for(const phrase of phrases){
+        let voice=voices.find(v=>v.until<phrase.startMs);
+        if(!voice){voice={laneId:lane.id,index:voices.length,until:-1,intervals:[],neighbors:new Set()};voices.push(voice);nodes.push(voice);}
+        const end=Math.max(phrase.endMs,Number.isFinite(displayEnds[phrase.id])?displayEnds[phrase.id]:phrase.endMs);
+        voice.until=end;voice.intervals.push({start:Math.max(0,phrase.startMs-leadInMs),end});byPhrase.set(phrase.id,voice);
+      }
+    }
+    const overlaps=(a,b)=>{const aa=a.intervals.slice().sort((x,y)=>x.start-y.start),bb=b.intervals.slice().sort((x,y)=>x.start-y.start);let i=0,j=0;while(i<aa.length&&j<bb.length){if(aa[i].start<=bb[j].end&&bb[j].start<=aa[i].end)return true;if(aa[i].end<bb[j].end)i++;else j++;}return false;};
+    for(let i=0;i<nodes.length;i++)for(let j=i+1;j<nodes.length;j++)if(overlaps(nodes[i],nodes[j])){nodes[i].neighbors.add(nodes[j]);nodes[j].neighbors.add(nodes[i]);}
+    nodes.sort((a,b)=>a.intervals[0].start-b.intervals[0].start||lanes.findIndex(l=>l.id===a.laneId)-lanes.findIndex(l=>l.id===b.laneId)||a.index-b.index);
+    for(const node of nodes){const used=new Set([...node.neighbors].map(n=>n.slot).filter(Number.isInteger));let slot=0;while(used.has(slot))slot++;node.slot=slot;}
+    const count=Math.max(1,...nodes.map(n=>n.slot+1));
+    return {count,slots:Object.fromEntries([...byPhrase].map(([id,node])=>[id,node.slot])),laneColors:Object.fromEntries(lanes.map((lane,index)=>[lane.id,index])),multi:count>1};
+  }
+  // A bounded, deterministic pile: each word lands on the floor or an earlier
+  // settled word. Pages prevent unbounded collision work and unreadable scaling.
+  function pileTrack(words,width,height,measure,{font=48,maxWords=32}={}){
+    width=Math.max(1,width);height=Math.max(1,height);font=Math.max(4,Math.min(font,height*.38));maxWords=Math.max(1,Math.min(64,maxWords));
+    const pages=[],ordered=[...words].sort((a,b)=>a.startMs-b.startMs||String(a.id).localeCompare(String(b.id)));
+    const hash=text=>{let n=2166136261;for(const ch of String(text)){n^=ch.codePointAt(0);n=Math.imul(n,16777619);}return n>>>0;};
+    let page=null;
+    for(const word of ordered){
+      const size=Math.max(4,Math.min(font,font*(width*.92/Math.max(1,measure(word.text,font,word))))),w=Math.min(width,Math.max(1,measure(word.text,size,word)+size*.12)),h=Math.min(height,Math.max(1,size*1.3)),seed=hash(word.id),gap=Math.min(5,size*.1);
+      const newPage=()=>{page={startMs:word.startMs,items:[]};pages.push(page);};
+      if(!page||page.items.length>=maxWords)newPage();
+      const place=()=>{let best=null;const span=Math.max(0,width-w),offset=(seed%1009)/1009,candidates=Array.from({length:12},(_,i)=>span*((offset+i*.61803398875)%1));candidates.push(0,span);for(const other of page.items)candidates.push(Math.max(0,Math.min(span,other.x+other.width+gap)),Math.max(0,Math.min(span,other.x-w-gap)));for(const x of candidates){let y=height-h;for(const other of page.items)if(x<other.x+other.width+gap&&x+w+gap>other.x)y=Math.min(y,other.y-h-gap);if(y>=0&&(!best||y>best.y))best={x,y};}return best;};
+      let point=place();if(!point){newPage();point=place();}if(!point)point={x:0,y:Math.max(0,height-h)};
+      page.items.push({id:word.id,phraseId:word.phraseId,laneId:word.laneId,startMs:word.startMs,x:point.x,y:point.y,width:w,height:h,font:size,edge:seed%4,seed});
+    }
+    return {width,height,pages};
+  }
+  function pileAt(item,clock,width,height,{reduced=false}={}){
+    if(clock<item.startMs)return null;
+    if(reduced)return {x:item.x,y:item.y};
+    const elapsed=clock-item.startMs,duration=720,u=clamp(elapsed/duration),f=(item.seed%997)/997;if(elapsed>=duration+1100)return {x:item.x,y:item.y};
+    const from=[{x:f*Math.max(0,width-item.width),y:-item.height},{x:width,y:f*height*.65},{x:f*Math.max(0,width-item.width),y:height},{x:-item.width,y:f*height*.65}][item.edge];
+    const arc=Math.min(60,height*.11),x=from.x+(item.x-from.x)*u,y=from.y+(item.y-from.y)*u-arc*u*(1-u);
+    const bounce=elapsed>duration?Math.min(7,item.height*.08)*Math.exp(-(elapsed-duration)/180)*Math.abs(Math.sin((elapsed-duration)/90)):0;
+    return {x,y:y-bounce};
+  }
   function backingSettings(value={}){
     return {space:value?.space==='shared'?'shared':'separate',area:Number.isFinite(value?.area)?Math.max(.15,Math.min(.4,value.area)):.25};
   }
@@ -492,5 +540,5 @@
     const a=points[i-1],b=points[i],u=clamp((t-a.t)/(b.t-a.t));
     return {x:a.x+(b.x-a.x)*u,y:a.y+(b.y-a.y)*u};
   }
-  const api={pathPosition,emojiMapDelta,applyEmojiMapDelta,resolveWordSet,validateEmojiMap,parseEmojiMap,formatEmojiMap,wordSetFor,coinSpin,stagePerformanceAt,layoutOrigins,landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,validateWordRuleSets,wordRuleAt,vinylTrack,vinylAt,paintVinyl,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
+  const api={pathPosition,emojiMapDelta,applyEmojiMapDelta,resolveWordSet,validateEmojiMap,parseEmojiMap,formatEmojiMap,wordSetFor,coinSpin,stagePerformanceAt,layoutOrigins,landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,validateWordRuleSets,wordRuleAt,vinylTrack,vinylAt,paintVinyl,leadTrackPlan,pileTrack,pileAt,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

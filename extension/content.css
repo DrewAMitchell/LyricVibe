@@ -3400,3 +3400,7 @@
 #lvx-root .lvx-completion-grid button .lvx-completion-missing{font-size:9px}
 
 #lvx-root .lvx-sync-panel[data-workspace="prepare"] :is(.lvx-sync-nav,.lvx-sync-phrase,.lvx-sync-range,[data-finish-missing]){display:none}
+
+/* Vocal identities sit outside animated words; word-specific looks can override the track. */
+#lvx-root .lvx-vocal-identity{position:absolute;display:flex;align-items:center;justify-content:center;gap:5px;color:var(--lvx-track-color);font:600 11px/1.1 'Segoe UI',system-ui,sans-serif;letter-spacing:.02em;text-transform:none;text-shadow:0 1px 4px #000;pointer-events:none;overflow:hidden;white-space:nowrap}
+#lvx-root .lvx-vocal-identity::before{content:"";width:14px;height:3px;border-radius:2px;background:currentColor;flex:none}

@@ -277,3 +277,24 @@ test('vinyl preserves source caption case for lead and backing',()=>{
  const c=require('../extension/choreography.js');const score={lyrics:{timingBasis:'caption-segments'},lanes:[{id:'lead',role:'lead'},{id:'back',role:'backing'}],phrases:[{id:'a',laneId:'lead',words:[word('w','Hello',1000,2000)]},{id:'b',laneId:'back',words:[word('b','Echo',1000,2000)]}]};
  const tokens=c.vinylTrack(score,()=>.5).tokens;assert.ok(tokens.some(t=>t.text==='Hello'));assert.ok(tokens.some(t=>t.text==='(Echo)'));
 });
+
+
+test('lead vocal slots remain stable through lead-in, overlap and exit without disturbing backing',()=>{
+  const {leadTrackPlan}=require('../extension/choreography.js');
+  const phrase=(id,laneId,startMs,endMs)=>({id,laneId,startMs,endMs,words:[{id:id+'w',text:id}]});
+  const score={lanes:[{id:'a',role:'lead'},{id:'b',role:'lead'},{id:'c',role:'lead'},{id:'back',role:'backing'}],phrases:[phrase('a1','a',1000,9000),phrase('b1','b',5000,7000),phrase('a2','a',11000,13000),phrase('c1','c',16000,18000),phrase('back1','back',4000,9000)]};
+  const original=structuredClone(score),plan=leadTrackPlan(score);
+  assert.equal(plan.count,2);assert.equal(plan.slots.a1,plan.slots.a2);assert.notEqual(plan.slots.a1,plan.slots.b1);assert.equal(plan.slots.c1,plan.slots.a1);assert.equal(plan.slots.back1,undefined);assert.deepEqual(score,original);
+  assert.deepEqual(leadTrackPlan(score),plan,'seeks recreate the same plan');
+  const adjacent={lanes:score.lanes,phrases:[phrase('a','a',1000,2000),phrase('b','b',3500,4500)]};assert.equal(leadTrackPlan(adjacent).count,2,'lead-in is included in conflict planning');
+  const separate={lanes:score.lanes,phrases:[phrase('a','a',1000,2000),phrase('b','b',5000,6000)]};assert.equal(leadTrackPlan(separate).count,1,'nonoverlapping tracks reuse the same full-size region');assert.equal(leadTrackPlan(separate,{a:4000}).count,2,'a lingering line reserves its slot');
+  const unison={lanes:score.lanes,phrases:[phrase('one','a',1000,6000),phrase('two','a',3000,4000)]};const u=leadTrackPlan(unison);assert.equal(u.count,2);assert.notEqual(u.slots.one,u.slots.two);
+});
+
+
+test('pile settles into bounded non-overlapping pages and is deterministic across seeks',()=>{
+ const {pileTrack,pileAt}=require('../extension/choreography.js'),words=Array.from({length:45},(_,i)=>({id:'word-'+i,phraseId:'p'+Math.floor(i/5),laneId:'lead',text:'lyric'+i,startMs:i*250})),plan=pileTrack(words,500,300,(text,font)=>text.length*font*.55,{font:38,maxWords:12});
+ assert.ok(plan.pages.length>1);for(const page of plan.pages){assert.ok(page.items.length<=12);for(const [i,a] of page.items.entries()){assert.ok(a.x>=0&&a.y>=0&&a.x+a.width<=500+.001&&a.y+a.height<=300+.001);for(const b of page.items.slice(i+1))assert.ok(a.x+a.width<=b.x||b.x+b.width<=a.x||a.y+a.height<=b.y||b.y+b.height<=a.y);}}
+ const all=plan.pages.flatMap(p=>p.items);assert.deepEqual(new Set(all.map(i=>i.edge)),new Set([0,1,2,3]));for(const edge of [0,1,2,3]){const first=all.find(i=>i.edge===edge),at=pileAt(first,first.startMs,500,300);assert.ok(edge===0?at.y<0:edge===1?at.x>=500:edge===2?at.y>=300:at.x<0,'each seeded direction starts outside its edge');}
+ const item=plan.pages[0].items[0];assert.equal(pileAt(item,item.startMs-1,500,300),null);const p=pileAt(item,item.startMs+350,500,300);assert.deepEqual(p,pileAt(item,item.startMs+350,500,300));assert.deepEqual(pileAt(item,item.startMs+3000,500,300),{x:item.x,y:item.y});assert.deepEqual(pileAt(item,item.startMs,500,300,{reduced:true}),{x:item.x,y:item.y});assert.deepEqual(plan,pileTrack(words,500,300,(text,font)=>text.length*font*.55,{font:38,maxWords:12}));
+});
