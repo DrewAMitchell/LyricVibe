@@ -358,7 +358,7 @@
       }
       let next;
       if (message.type === 'LV_NATIVE_ALIGNMENT_IMPORT') {
-        if (!editorSourceBound(sender, tabId, key)) throw fail('EDITOR_REQUIRED', 'Import alignment from the editor opened for this source.');
+        if (!timingControlBound(sender, tabId, key)) throw fail('EDITOR_REQUIRED', 'Import alignment from LyricVibe on the current source.');
         const receipt = LvScore.validateAlignmentReceipt(record.score, message.receipt);
         const pending = new Map((record.review || []).map(proposal => [proposal.wordId, proposal]));
         for (const proposal of receipt.proposals) pending.set(proposal.wordId, proposal);

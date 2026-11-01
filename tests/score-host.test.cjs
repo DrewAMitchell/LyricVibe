@@ -504,6 +504,18 @@ test('native receipt import queues source-bound review without changing timing; 
   assert.equal(firstWord(undone.score).startMs, firstWord(score).startMs);
 });
 
+test('a source-bound LyricVibe overlay can import review evidence without opening an editor', async () => {
+  const h = makeHarness(), score = await h.ensure(), receipt = nativeReceipt(score);
+  const sender = { id: 'test-extension', frameId: 0, url: `https://www.youtube.com/watch?v=${ID_A}`, tab: { id: 1, url: `https://www.youtube.com/watch?v=${ID_A}` } };
+  const result = await h.dispatch({ type: 'LV_NATIVE_ALIGNMENT_IMPORT', tabId: 1, mediaKey: receipt.mediaKey, expectedRevision: score.revision, receipt }, sender);
+  assert.equal(result.ok, true);
+  assert.equal(result.review.length, 1);
+  assert.deepEqual(structuredClone(result.score), structuredClone(score));
+  const wrong = { ...sender, frameId: 1 };
+  const rejected = await h.dispatch({ type: 'LV_NATIVE_ALIGNMENT_IMPORT', tabId: 1, mediaKey: receipt.mediaKey, expectedRevision: score.revision, receipt }, wrong);
+  assert.equal(rejected.error.code, 'EDITOR_REQUIRED');
+});
+
 test('accepting a timing keeps unrelated pending proposals on the same phrase', async () => {
   const h = makeHarness(), original = await h.ensure(), receipt = nativeReceipt(original);
   const second = original.phrases[0].words[1];
