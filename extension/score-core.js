@@ -1089,5 +1089,5 @@
     }
     return phrases;
   }
-  return { VERSION, DISPLAY_CATALOG, choreographyTarget, choreographyTargetAt, projectChoreographyLayers, validEmoji, stageRegionAt, resolveStageRegionRect, ScoreError, mediaKey, parseLrc, parseVocalText, doubledText, displayToken, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, setAlignmentTiming, projectAlignmentTiming, alignmentCoverage, retainAlignmentProposals, phraseTimingCoverage, timingCoverage, timingCompleteness };
+  return { VERSION, DISPLAY_CATALOG, choreographyTarget, choreographyTargetAt, projectChoreographyLayers, validEmoji, stageRegionAt, resolveStageRegionRect, ScoreError, mediaKey, parseLrc, parseVocalText, doubledText, displayToken, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, setAlignmentTiming, projectAlignmentTiming, alignmentCandidateStatus, alignmentCoverage, retainAlignmentProposals, phraseTimingCoverage, timingCoverage, timingCompleteness };
 });

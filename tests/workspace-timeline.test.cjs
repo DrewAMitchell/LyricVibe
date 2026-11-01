@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const core = require('../extension/score-core.js');
-const { phraseRange, intersectingLanes, movedInterval, positionPercent, rulerTicks } = require('../.verification/workspace-timeline.cjs');
+const { songRange, intersectingLanes, movedInterval, positionPercent, rulerTicks } = require('../.verification/workspace-timeline.cjs');
 
 function score() {
   return core.createScore({ platform: 'youtube', videoId: 'FIXTURE0001', durationMs: 3600000 },
@@ -9,34 +9,14 @@ function score() {
     { provider: 'test', contentHash: 'a'.repeat(64) });
 }
 
-test('an hour-long score still has a bounded selected-phrase viewport with offset applied once', () => {
-  const value = score();
-  const phrase = value.phrases[0];
-  const initial = phraseRange(value, phrase);
-  value.offsetMs = 250;
-  const shifted = phraseRange(value, phrase);
-  assert.equal(shifted.startMs, initial.startMs + 250);
-  assert.equal(shifted.endMs, initial.endMs + 250);
-  assert.ok(shifted.endMs - shifted.startMs < 5000);
-  const items = intersectingLanes(value, shifted).flatMap(lane => lane.items);
-  assert.ok(items.some(item => item.word.id === phrase.words[0].id));
-  assert.ok(items.every(item => item.word.startMs < 20000));
-  assert.equal(positionPercent(shifted.startMs, shifted), 0);
-  assert.equal(positionPercent(shifted.endMs, shifted), 100);
-});
-
-test('zoom and start/end phrases stay inside the media duration', () => {
-  const value = score();
-  for (const phrase of [value.phrases[0], value.phrases.at(-1)]) {
-    for (const center of [-100000, 4000000]) {
-      const range = phraseRange(value, phrase, 4, center);
-      assert.ok(range.startMs >= 0);
-      assert.ok(range.endMs <= value.source.durationMs);
-      assert.ok(range.endMs > range.startMs);
-      assert.ok(range.endMs - range.startMs < 5000);
-      assert.ok(rulerTicks(range, 360).every(ms => ms >= range.startMs && ms <= range.endMs));
-    }
-  }
+test('song timeline spans the full source and includes distant phrases with source offset', () => {
+  const value=score();value.offsetMs=250;const range=songRange(value);
+  assert.deepEqual(range,{startMs:0,endMs:3600000});
+  const items=intersectingLanes(value,range).flatMap(lane=>lane.items);
+  assert.ok(items.some(item=>item.word.id===value.phrases[0].words[0].id));
+  assert.ok(items.some(item=>item.word.id===value.phrases.at(-1).words[0].id));
+  assert.equal(positionPercent(3600000,range),100);
+  assert.ok(rulerTicks(range,50000).every(ms=>ms>=range.startMs&&ms<=range.endMs));
 });
 
 test('overlapping backing words and actual syllables have independent collision-free rows', () => {
@@ -45,7 +25,7 @@ test('overlapping backing words and actual syllables have independent collision-
   lead.words[0].syllables = [{ id: 's1', text: 'hel', startMs: lead.words[0].startMs, endMs: lead.words[0].endMs }];
   value.lanes.push({ id: 'background-test', label: 'Backing', role: 'backing' });
   value.phrases.push({ ...structuredClone(lead), id: 'backing-test', laneId: 'background-test', words: [{ ...structuredClone(lead.words[0]), id: 'bw', syllables: [] }] });
-  const lanes = intersectingLanes(value, phraseRange(value, lead));
+  const lanes = intersectingLanes(value, { startMs: 9000, endMs: 14000 });
   const parent = lanes.flatMap(lane => lane.items).find(item => item.item.id === lead.words[0].id);
   const child = lanes.flatMap(lane => lane.items).find(item => item.item.id === 's1');
   assert.equal(child.row, parent.row + 1);

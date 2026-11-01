@@ -5,15 +5,10 @@ export type TimedItem = Immutable<ScoreWord | ScoreSyllable>;
 export interface TimelineItem { phrase: Immutable<ScorePhrase>; word: Immutable<ScoreWord>; item: TimedItem; row: number; syllable: boolean }
 export interface TimelineLane { id: string; label: string; role: string; rows: number; items: TimelineItem[] }
 
-export function phraseRange(score: Immutable<LyricVibeScore>, phrase: Immutable<ScorePhrase>, zoom = 1, centerMs?: number): ViewRange {
-  const low = Math.min(phrase.startMs, ...phrase.words.map(w => w.startMs)) + score.offsetMs;
-  const high = Math.max(phrase.endMs, ...phrase.words.map(w => w.endMs)) + score.offsetMs;
-  const fullSpan = Math.max(1500, high - low + 700);
-  const span = Math.max(600, fullSpan / Math.max(1, zoom));
-  const duration = score.source.durationMs || high + 350;
-  const center = centerMs ?? (low + high) / 2;
-  const startMs = Math.max(0, Math.min(Math.max(0, duration - span), center - span / 2));
-  return { startMs, endMs: Math.max(startMs + 1, Math.min(duration || startMs + span, startMs + span)) };
+/** The timeline always uses the full source clock, including initial and trailing silence. */
+export function songRange(score: Immutable<LyricVibeScore>): ViewRange {
+  const end = Math.max(1000, score.source.durationMs || 0, ...score.phrases.map(p => p.endMs + score.offsetMs));
+  return { startMs: 0, endMs: end };
 }
 
 export function intersectingLanes(score: Immutable<LyricVibeScore>, range: ViewRange): TimelineLane[] {

@@ -19,3 +19,22 @@ details > summary:focus-visible { outline:2px solid var(--accent); outline-offse
 /* Keep the occurrence choice beside the saved timing fields. */
 .timing-inspector .word-timing-choice{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0;color:#c6d8ca;font-size:12px}
 .timing-inspector .word-timing-choice select{min-width:0;max-width:55%;color:#edf5e9;background:#18251e;border:1px solid #637b67;border-radius:5px;padding:6px}
+
+/* A source-clock song overview and a horizontally scrollable, zoomable roll. */
+.song-overview{flex:none;padding:8px 12px 7px;background:#15211c;border-top:1px solid #42544a;border-bottom:1px solid #42544a}
+.song-overview-track{height:23px;position:relative;background:#101a17;border:1px solid #3b5147;border-radius:3px;overflow:hidden}
+.song-overview-phrase{position:absolute;top:4px;bottom:4px;min-width:2px;min-height:0;padding:0;border:0;border-radius:1px;background:#65706b;opacity:.8}
+.song-overview-phrase.auto{background:#6da9d1}.song-overview-phrase.partial{background:#d1ad70}.song-overview-phrase.manual{background:#9acb8c}.song-overview-phrase.missing{background:#747d78}.song-overview-phrase.selected{outline:2px solid #e3f6ca;z-index:2;opacity:1}
+.song-overview-window{position:absolute;top:0;bottom:0;border:1px solid #d8f5e1;background:#d2f5dc1c;pointer-events:none;min-width:3px}
+.timing-legend{display:flex;align-items:center;flex-wrap:wrap;gap:5px 12px;margin-top:5px;color:#c0cec2;font-size:10px;line-height:1.2}
+.timing-legend>span:before{content:'';display:inline-block;width:7px;height:7px;margin-right:4px;border-radius:1px;background:#7a8780}.timing-legend>.auto:before{background:#6da9d1}.timing-legend>.available:before{background:#d1ad70}.timing-legend>.manual:before{background:#9acb8c}.timing-legend small{color:#91a39b;margin-left:auto;font-size:10px}
+.timing-legend>.proposal:before{background:transparent;border:1px dashed #e1b874}.timing-legend>.stale:before{background:#e19d8e}
+.timing-legend>.aligned:before{background:#67c5be}
+.timeline-content{position:relative;min-width:100%;min-height:100%}.timeline-viewport{min-width:0}.lane-caption>span:first-child{position:sticky;left:12px}.lane-caption>span:last-child{display:none}
+.phrase-guide{height:25px;position:relative;background:#1d2a22;border-bottom:1px solid #405248;overflow:hidden}.phrase-guide button{position:absolute;top:0;height:25px;min-width:2px;min-height:0;padding:2px 5px;border:0;border-left:2px solid #789184;border-radius:0;background:#ffffff08;color:#c3d8c8;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px}.phrase-guide button.selected{background:#a6ca9b30;border-left-color:#ccefb8}
+.lyric-block.timing-auto{background:#264c62;border-color:#72b7dd;color:#e3f5ff}.lyric-block.timing-available{background:#51422a;border-color:#d3ad6b;color:#fff0d0}.lyric-block.timing-proposal{background:#443a28;border:1px dashed #e1b874;color:#fff0d0}.lyric-block.timing-manual,.lyric-block.timing-protected{background:#344b30;border-color:#a3d397;color:#ecf9df}.lyric-block.timing-missing{background:#37413c;border-color:#89958c;color:#e0e8e2}.lyric-block.timing-stale{background:#513c37;border-color:#e19d8e;color:#ffe8e1}.lyric-block.selected{outline:2px solid #e2f6c5;outline-offset:1px;z-index:2}
+.lyric-block.timing-aligned{background:#24534d;border-color:#67c5be;color:#e0fff7}
+.wave-unavailable{left:12px;right:auto;justify-content:flex-start}.wave-wrap.is-empty,.wave-wrap.is-empty canvas{height:28px}.phrase-canvas .playback-preview{height:72px;padding:8px 16px}
+.wave-wrap.is-empty .wave-unavailable{position:sticky;left:0;top:0;width:max-content;height:28px;margin-top:-28px;padding:0 12px}
+.zoom-controls .follow-toggle[aria-pressed=true]{color:#dff4d3;border-color:#8db987;background:#304830}
+@media(max-width:650px){.song-overview{padding:6px 8px}.timing-legend{gap:4px 8px;font-size:9px}.timing-legend small{margin-left:0;font-size:9px}.phrase-canvas .playback-preview{height:58px}}

@@ -178,6 +178,7 @@ export interface ScoreCore {
   retainAlignmentProposals(before: LyricVibeScore, after: LyricVibeScore, proposals: AlignmentProposal[]): AlignmentProposal[];
   setAlignmentTiming(score: LyricVibeScore, proposals: AlignmentProposal[], request: Record<string, unknown>, expectedRevision: number): LyricVibeScore;
   projectAlignmentTiming(score: LyricVibeScore): LyricVibeScore;
+  alignmentCandidateStatus(score: Immutable<LyricVibeScore>, phrase: Immutable<ScorePhrase>, word: Immutable<ScoreWord>, candidate: Immutable<NonNullable<LyricVibeScore['alignmentTiming']>['candidates'][number]> | undefined): 'missing' | 'incompatible' | 'protected-syllable' | 'available';
   validateAlignmentReceipt(score: LyricVibeScore, receipt: unknown): AlignmentReceipt;
 }
 
