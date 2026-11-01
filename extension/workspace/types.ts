@@ -77,6 +77,7 @@ export interface LyricVibeScore {
   phrases: ScorePhrase[];
   stageAreas?: ScoreStageArea[];
   stageRegions?: ScoreStageRegion[];
+  alignmentTiming?: { version: 1; mode: 'manual' | 'auto'; overrides: Record<string, 'manual' | 'auto'>; candidates: Array<{wordId:string; phraseId:string; laneId:string; mediaKey:string; lyricsHash:string; text:string; spokenText:string|null; phraseStartMs:number; phraseEndMs:number; offsetMs:number; startMs:number; endMs:number; evidenceId:string}> };
   [key: string]: unknown;
 }
 
@@ -174,6 +175,9 @@ export interface ScoreCore {
   validateScore(score: unknown): asserts score is LyricVibeScore;
   applyOperation(score: LyricVibeScore, operation: ScoreOperation, expectedRevision: number): LyricVibeScore;
   applyAlignment(score: LyricVibeScore, proposals: Array<AlignmentProposal | (AlignmentProposal & { accepted: true })>, expectedRevision: number): LyricVibeScore;
+  retainAlignmentProposals(before: LyricVibeScore, after: LyricVibeScore, proposals: AlignmentProposal[]): AlignmentProposal[];
+  setAlignmentTiming(score: LyricVibeScore, proposals: AlignmentProposal[], request: Record<string, unknown>, expectedRevision: number): LyricVibeScore;
+  projectAlignmentTiming(score: LyricVibeScore): LyricVibeScore;
   validateAlignmentReceipt(score: LyricVibeScore, receipt: unknown): AlignmentReceipt;
 }
 

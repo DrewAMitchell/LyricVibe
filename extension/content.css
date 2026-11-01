@@ -3416,4 +3416,6 @@
 #lvx-root .lvx-quick-axis select{box-sizing:border-box;width:100%;min-width:0;height:29px;padding:2px 4px;background:#10232b;color:#edf7fa;border:1px solid #547581;border-radius:4px;font:11px system-ui}
 #lvx-root .lvx-quick-axis button:disabled{opacity:.35}
 #lvx-root .lvx-quick-axis :focus-visible{outline:2px solid #f7cc70;outline-offset:1px}
+#lvx-root .lvx-playback-timing{display:inline-flex;align-items:center;gap:4px;color:#c7d8df;font:11px system-ui}
+#lvx-root .lvx-playback-timing select{max-width:110px;background:#10232b;color:#edf7fa;border:1px solid #547581;border-radius:4px;padding:4px;font:11px system-ui}
 @media(max-width:760px){#lvx-root .lvx-quick-grid{grid-template-columns:1fr}}

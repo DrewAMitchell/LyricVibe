@@ -399,15 +399,30 @@
         return { ok: true, score: record.score, review: record.review, tabId, mediaKey: key };
       } else if (message.type === 'LV_SCORE_REVIEW_APPLY') {
         if (!editorSourceBound(sender, tabId, key)) throw fail('EDITOR_REQUIRED', 'Review proposals can only be applied from the editor opened for this source tab.');
-        const selected = new Set(message.wordIds || []);
-        const proposals = (record.review || []).filter(p => selected.has(p.wordId)).map(p => ({ ...p, accepted: true }));
+        const requested = new Set(message.wordIds || []), selected = new Set();
+        const words = new Map(record.score.phrases.flatMap(phrase => phrase.words.map(word => [word.id, word])));
+        const proposals = (record.review || []).filter(p => { const word=words.get(p.wordId); if(!requested.has(p.wordId) || !word || word.locked || (word.syllables||[]).some(s=>s.locked)) return false; selected.add(p.wordId); return true; }).map(p => ({ ...p, accepted: true }));
+        if (!proposals.length) return {ok:true,score:record.score,review:record.review||[],tabId,mediaKey:key};
         next = LvScore.applyAlignment(record.score, proposals, record.score.revision);
-        record.review = (record.review || []).filter(p => !selected.has(p.wordId));
+        record.review = LvScore.retainAlignmentProposals(record.score, next, (record.review || []).filter(p => !selected.has(p.wordId)));
+      } else if (message.type === 'LV_ALIGNMENT_PREFERENCE_SET') {
+        if (!timingControlBound(sender, tabId, key)) throw fail('EDITOR_REQUIRED', 'Open the current song to choose timing preferences.');
+        if (message.lyricsHash !== record.score.lyrics.contentHash) throw fail('LYRIC_REVISION_MISMATCH', 'The lyrics changed; reopen the timing controls.');
+        const guard = await chrome.tabs.sendMessage(tabId, {type:'LV_TIMING_EDIT_CHECK',mediaKey:key});
+        if (!guard?.ok || guard.mediaKey !== key || guard.canEdit !== true) throw fail('CAPTURE_PENDING','Finish the current timing edit before changing playback preference.');
+        const pending = await readTimingPreview(key);
+        if (pending) throw fail('PREVIEW_PENDING','Apply or close the saved timing preview before changing playback preference.');
+        next = LvScore.setAlignmentTiming(record.score, record.review || [], message.preference, record.score.revision);
+        record.review = LvScore.retainAlignmentProposals(record.score, next, record.review || []);
       } else throw fail('MESSAGE_UNKNOWN', 'Unknown score operation.');
       // A changed score revision invalidates pending timing evidence, including
       // its offset mapping. New analysis windows can extend review only while
       // no score edit, acceptance, import or undo intervenes.
-      if (message.type !== 'LV_ALIGNMENT_PROPOSALS') { record.review = []; record.diagnostics = null; }
+      if (message.type !== 'LV_ALIGNMENT_PROPOSALS' && message.type !== 'LV_SCORE_REVIEW_APPLY' && message.type !== 'LV_ALIGNMENT_PREFERENCE_SET') {
+        record.review = LvScore.retainAlignmentProposals(record.score, next, record.review || []);
+        if (!record.review.length) record.diagnostics = null;
+      }
+      if (message.type === 'LV_SCORE_REVIEW_APPLY' && !record.review.length) record.diagnostics = null;
       if (message.type !== 'LV_SCORE_UNDO') record.history = [...(record.history || []), record.score].slice(-30);
       record.score = next;
       await liveIdentity(tabId, key);
@@ -416,7 +431,7 @@
       return { ok: true, score: next, review: record.review || [], tabId, mediaKey: key };
     });
   }
-  const types = new Set(['LV_ANALYSIS_CACHE_CLEAR_REQUEST', 'LV_EDITOR_OPEN', 'LV_LIGHT_EDITOR_OPEN', 'LV_SCORE_GET', 'LV_SCORE_OPERATION', 'LV_SCORE_IMPORT', 'LV_NATIVE_ALIGNMENT_IMPORT', 'LV_SCORE_UNDO', 'LV_SCORE_SEEK', 'LV_SCORE_TRANSPORT', 'LV_SCORE_REVIEW_APPLY', 'LV_ANALYSIS_START', 'LV_ANALYSIS_STOP', 'LV_ANALYSIS_STATUS', 'LV_NATIVE_ANALYSIS_START', 'LV_NATIVE_ANALYSIS_STOP', 'LV_NATIVE_ANALYSIS_STATUS', 'LV_ALIGNMENT_PROPOSALS']);
+  const types = new Set(['LV_ANALYSIS_CACHE_CLEAR_REQUEST', 'LV_EDITOR_OPEN', 'LV_LIGHT_EDITOR_OPEN', 'LV_SCORE_GET', 'LV_SCORE_OPERATION', 'LV_SCORE_IMPORT', 'LV_NATIVE_ALIGNMENT_IMPORT', 'LV_SCORE_UNDO', 'LV_SCORE_SEEK', 'LV_SCORE_TRANSPORT', 'LV_SCORE_REVIEW_APPLY', 'LV_ALIGNMENT_PREFERENCE_SET', 'LV_ANALYSIS_START', 'LV_ANALYSIS_STOP', 'LV_ANALYSIS_STATUS', 'LV_NATIVE_ANALYSIS_START', 'LV_NATIVE_ANALYSIS_STOP', 'LV_NATIVE_ANALYSIS_STATUS', 'LV_ALIGNMENT_PROPOSALS']);
   types.add('LV_CAPTION_NOTES_CLEAN');types.add('LV_TEMPO_GET');types.add('LV_TEMPO_SET');types.add('LV_SCORE_AUTHOR');
   for (const type of ['LV_TIMING_SOURCES', 'LV_TIMING_COPY', 'LV_TIMING_PREPARE', 'LV_TIMING_CURRENT', 'LV_TIMING_TUNE', 'LV_TIMING_UNDO', 'LV_TIMING_APPLY', 'LV_TIMING_CANCEL']) types.add(type);
   chrome.runtime.onMessage.addListener((message, sender, respond) => {

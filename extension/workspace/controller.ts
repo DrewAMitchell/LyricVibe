@@ -307,6 +307,7 @@ export function createEditorController(options: EditorControllerOptions): Editor
     try {
       let predicted: LyricVibeScore | null = null;
       if (type === "LV_SCORE_OPERATION") predicted = core.applyOperation(before, payload.operation as ScoreOperation, expectedRevision);
+      if (type === "LV_ALIGNMENT_PREFERENCE_SET") predicted = core.setAlignmentTiming(before, state.review, payload.preference as UnknownRecord, expectedRevision);
       if (type === "LV_SCORE_REVIEW_APPLY") {
         if (!reviewQueue) throw makeError("EMPTY_SELECTION", "No timings selected.");
         if (state.reviewRevision !== expectedRevision) throw makeError("REVISION_CONFLICT", "Review proposals belong to a different score revision.");
@@ -369,10 +370,12 @@ export function createEditorController(options: EditorControllerOptions): Editor
         state.persistence = "unsaved";
       } else {
         if (!predicted) throw makeError("INVALID_OPERATION", "Operation could not be applied.");
+        const remaining = core.retainAlignmentProposals(before, predicted, type === "LV_SCORE_REVIEW_APPLY" ? state.review.filter(item => !(payload.wordIds as string[]).includes(item.wordId)) : state.review);
+        const diagnostics = state.alignmentDiagnostics;
         state.history.push(clone(before));
         if (state.history.length > MAX_HISTORY) state.history.shift();
         setScore(predicted);
-        clearReview();
+        if (remaining.length) setReview(remaining, diagnostics); else clearReview();
         state.persistence = "unsaved";
       }
       state.draft = false;
@@ -783,6 +786,7 @@ export function createEditorController(options: EditorControllerOptions): Editor
       if (disposed) throw makeError("DISPOSED", "Editor controller has been disposed.");
       assertCurrentEnvelope(request);
       if (request.type === "LV_SCORE_OPERATION") return await applyMutation(request.type, { operation: request.operation }, request.expectedRevision);
+      if (request.type === "LV_ALIGNMENT_PREFERENCE_SET") return await applyMutation(request.type, { preference: request.preference, lyricsHash: state.score?.lyrics.contentHash }, request.expectedRevision);
       if (request.type === "LV_SCORE_UNDO") return await applyMutation(request.type, {}, request.expectedRevision);
       if ((request.type === "LV_NATIVE_ANALYSIS_START" || request.type === "LV_NATIVE_ANALYSIS_STOP" || request.type === "LV_NATIVE_ANALYSIS_STATUS" || request.type === "LV_ANALYSIS_START" || request.type === "LV_ANALYSIS_STOP" || request.type === "LV_ANALYSIS_STATUS") && live) {
         const bindingEpoch = sourceEpoch;

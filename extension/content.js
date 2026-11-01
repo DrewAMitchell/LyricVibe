@@ -122,6 +122,7 @@
   const performanceTake = { armed: false, binding: null, laneId: null, rate: 1, marks: [] };
   const effectGesture = { input:null, type:'clear', samples:new Map(), base:[], groupId:null };
   const liveStage={active:false,armed:false,scope:'word',mode:'effects',laneId:null,ops:[],history:[],preview:null,token:null,revision:null,selected:null,pinned:null,page:0,all:false,status:''};
+  let alignmentProjectionSource=null, alignmentProjection=null;
   const effectTracks=[];
   const effectColors={pulse:'#63cbd5',tilt:'#b59aeb',shake:'#ed8d8d',bounce:'#8ed39c',glow:'#e9c66f',groove:'#7eacf0',echo:'#75d4bb',glitch:'#ef87cf',spin:'#f3b77d',rotor:'#80d9cc',breath:'#c7a2dc',color:'#e5a3cb',blank:'#7f919a'};
 
@@ -361,7 +362,11 @@
   syncSaveStatus.className = 'lvx-sync-save-note'; syncSaveStatus.setAttribute('aria-live', 'polite');
   syncSaveStatus.textContent = 'Song-wide · saved per video';
   offsetGroup.append(syncRetryButton, syncSaveStatus);
-  const editGroup = document.createElement('span'); editGroup.className = 'lvx-hud-group lvx-editor-actions'; editGroup.append(quickSyncButton, editButton);
+  const playbackTimingLabel=document.createElement('label');playbackTimingLabel.className='lvx-playback-timing';playbackTimingLabel.append('Timing ');
+  const playbackTiming=document.createElement('select');playbackTiming.setAttribute('aria-label','Song timing preference');playbackTiming.innerHTML='<option value="manual">Saved</option><option value="auto">Prefer auto</option>';playbackTiming.disabled=true;playbackTimingLabel.append(playbackTiming);
+  let alignmentReviewCount=0;
+  playbackTiming.onchange=async()=>{if(!state.score)return;const score=state.score;playbackTiming.disabled=true;try{const result=await chrome.runtime.sendMessage({type:'LV_ALIGNMENT_PREFERENCE_SET',mediaKey:LvScore.mediaKey(score.source),expectedRevision:score.revision,lyricsHash:score.lyrics.contentHash,preference:{mode:playbackTiming.value,includeProposals:true}});if(!result?.ok)throw Error(result?.error?.message||'Timing preference could not be saved.');setHud('Playback timing preference saved. Automatic timings remain unverified.',false,true);}catch(error){playbackTiming.value=score.alignmentTiming?.mode||'manual';setHud(error.message,true,true);}finally{playbackTiming.disabled=!alignmentReviewCount&&!state.score?.alignmentTiming?.candidates?.length;}};
+  const editGroup = document.createElement('span'); editGroup.className = 'lvx-hud-group lvx-editor-actions'; editGroup.append(quickSyncButton, editButton, playbackTimingLabel);
   const resetVideoButton=document.createElement('button');resetVideoButton.className='lvx-theme-btn';resetVideoButton.textContent='Reset video';resetVideoButton.setAttribute('aria-label','Reset video: reload lyrics and display, keep edits');resetVideoButton.onclick=()=>resetCurrentVideo();
   const endGroup = document.createElement('span'); endGroup.className = 'lvx-hud-group'; endGroup.append(helpButton, resetVideoButton, stopButton);
   const sidebar = document.createElement('aside'); sidebar.className = 'lvx-sidebar lvx-sidebar-pinned'; sidebar.setAttribute('aria-label','LyricVibe controls');
@@ -4153,6 +4158,7 @@
           setSyncNotice(rawTake(retainedTake)?'Timings saved. Reopen Sync to review the retained recording against the current lyrics. Changed phrases stay separate.':'The saved score changed. Reopen Sync to refresh. Any retained take belongs to the previous revision and cannot be applied.');
         }
         state.score = message.score;
+        alignmentReviewCount=Array.isArray(message.review)?message.review.length:0;playbackTiming.value=message.score.alignmentTiming?.mode||'manual';playbackTiming.disabled=!alignmentReviewCount&&!message.score.alignmentTiming?.candidates?.length;
         trackWatch?.accept(message.mediaKey);
         void loadTempo();
         state.scoreSignature = '';
@@ -5966,7 +5972,8 @@
     refreshRecordingTransport();refreshLiveStage();
     if ((countIn.previewTake||tapping.take && ['armed','complete'].includes(tapping.take.status) && !(tapping.take.mode==='syllable'&&tapping.take.status==='complete')) && timing.draft && !syncPanel.hidden && !stageEdit.active) {clearStagePerformance();renderCaptureScore();return;}
     const selectedScore=(liveStage.active&&liveStage.preview) || syllableTakeScore() || (timing.draft && timing.view === 'proposed' ? timing.draft.score : state.score);
-    const displayScore=estimatedDisplayScore(selectedScore);
+    if(selectedScore!==alignmentProjectionSource){alignmentProjectionSource=selectedScore;alignmentProjection=selectedScore?.alignmentTiming?LvScore.projectAlignmentTiming(selectedScore):selectedScore;}
+    const displayScore=estimatedDisplayScore(selectedScore===state.score ? alignmentProjection : selectedScore);
     const score = syncDisplayScore(displayScore);
     renderStagePerformance(score,mediaMs);
     const regionFrame=(score.stageRegions||[]).filter(r=>mediaMs>=r.startMs&&mediaMs<r.endMs).map(r=>({...r,rect:LvScore.resolveStageRegionRect(score,r)}));

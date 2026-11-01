@@ -365,6 +365,16 @@
         }
       }
     }
+    if (score.alignmentTiming !== undefined) {
+      const settings = score.alignmentTiming;
+      if (!settings || settings.version !== 1 || !['manual','auto'].includes(settings.mode) || !settings.overrides || Array.isArray(settings.overrides) || typeof settings.overrides !== 'object' || !Array.isArray(settings.candidates) || settings.candidates.length > 5000) bad('invalid alignment timing settings');
+      if (Object.entries(settings.overrides).some(([id, choice]) => !id || !['manual','auto'].includes(choice))) bad('invalid alignment timing override');
+      const candidateIds = new Set();
+      for (const c of settings.candidates) {
+        if (!c || typeof c.wordId !== 'string' || !c.wordId || candidateIds.has(c.wordId) || typeof c.phraseId !== 'string' || typeof c.laneId !== 'string' || typeof c.mediaKey !== 'string' || !c.mediaKey || typeof c.lyricsHash !== 'string' || !HASH_RE.test(c.lyricsHash) || typeof c.text !== 'string' || !(c.spokenText === null || typeof c.spokenText === 'string') || ![c.startMs,c.endMs,c.offsetMs].every(Number.isSafeInteger) || ![c.phraseStartMs,c.phraseEndMs].every(Number.isFinite) || c.startMs < 0 || c.endMs <= c.startMs || c.phraseStartMs < 0 || c.phraseEndMs < c.phraseStartMs || typeof c.evidenceId !== 'string' || !c.evidenceId) bad('invalid alignment timing candidate');
+        candidateIds.add(c.wordId);
+      }
+    }
     if(score.choreographyLayers!==undefined){
       if(!Array.isArray(score.choreographyLayers)||score.choreographyLayers.length>2048)bad('choreography layers must be a bounded list');
       const layerIds=new Set();
@@ -557,6 +567,7 @@
       if (op.endMs < op.startMs || op.startMs < phrase.startMs || op.endMs > phrase.endMs) fail("INVALID_TIME", "word timing must fit within its phrase");
       rescaleSyllables(word, word.startMs, word.endMs, op.startMs, op.endMs);
       word.startMs = op.startMs; word.endMs = op.endMs; word.provenance = "manual"; word.locked = true;
+      if (next.alignmentTiming) next.alignmentTiming.overrides[word.id] = 'manual';
     } else if (op.type === "setWordText") {
       const { word } = locateWord(next, op.wordId);
       if (typeof op.text !== "string" || !op.text.trim()) fail("INVALID_OPERATION", "text must be nonempty");
@@ -796,6 +807,16 @@
       const word=parent.words.find(w=>(w.syllables||[]).some(s=>s.id===target.id));
       cue.target=word&&next.phrases.some(p=>p.words.some(w=>w.id===word.id))?{kind:'word',id:word.id}:{kind:'phrase',id:parent.id};
     }
+    if (next.alignmentTiming) {
+      const oldWords = new Map(score.phrases.flatMap(phrase => phrase.words.map(word => [word.id, word])));
+      const syllableTimings = word => JSON.stringify((word.syllables || []).map(s => [s.id,s.startMs,s.endMs,s.provenance,s.locked]));
+      for (const phrase of next.phrases) for (const word of phrase.words) {
+        const prior = oldWords.get(word.id); if (!prior) continue;
+        const manualWordChange = word.provenance === 'manual' && (word.startMs !== prior.startMs || word.endMs !== prior.endMs || word.locked && !prior.locked);
+        const manualSyllableChange = (word.syllables || []).some(s => s.locked || s.provenance === 'manual') && syllableTimings(word) !== syllableTimings(prior);
+        if (manualWordChange || manualSyllableChange) next.alignmentTiming.overrides[word.id] = 'manual';
+      }
+    }
     next.revision++;
     return validateScore(next);
   }
@@ -840,6 +861,56 @@
     }
     next.revision++;
     return validateScore(next);
+  }
+
+  // Saved manual timings remain canonical; automatic timings are a separate,
+  // source-bound playback layer with explicit song and occurrence choices.
+  function setAlignmentTiming(score, proposals, request, expectedRevision) {
+    checkExpected(score, expectedRevision); validateScore(score);
+    if (!request || !['manual','auto'].includes(request.mode) && request.mode !== undefined) fail('INVALID_OPERATION','Choose manual or automatic timing');
+    if (request.wordId !== undefined && (typeof request.wordId !== 'string' || !['manual','auto','inherit'].includes(request.choice))) fail('INVALID_OPERATION','Choose a word timing override');
+    const next = clone(score), settings = next.alignmentTiming || {version:1,mode:'manual',overrides:{},candidates:[]};
+    if (request.includeProposals) {
+      if (!Array.isArray(proposals) || proposals.length > 5000) fail('INVALID_PROPOSALS','Invalid timing suggestions');
+      const byId = new Map(settings.candidates.map(c => [c.wordId,c]));
+      for (const p of proposals) {
+        if (!p || p.accepted !== false || !Number.isSafeInteger(p.startMs) || !Number.isSafeInteger(p.endMs) || p.endMs <= p.startMs || typeof p.evidenceId !== 'string' || !p.evidenceId) fail('INVALID_PROPOSAL','Invalid timing suggestion');
+        const {phrase,word} = locateWord(next,p.wordId);
+        if (p.startMs < phrase.startMs || p.endMs > phrase.endMs) continue;
+        byId.set(word.id,{wordId:word.id,phraseId:phrase.id,laneId:phrase.laneId,mediaKey:mediaKey(next.source),lyricsHash:next.lyrics.contentHash,text:word.text,spokenText:word.spokenText ?? null,phraseStartMs:phrase.startMs,phraseEndMs:phrase.endMs,offsetMs:next.offsetMs,startMs:p.startMs,endMs:p.endMs,evidenceId:p.evidenceId});
+      }
+      settings.candidates = [...byId.values()];
+    }
+    if (request.mode !== undefined) settings.mode=request.mode;
+    if (request.wordId !== undefined) { locateWord(next,request.wordId); if(request.choice==='inherit')delete settings.overrides[request.wordId];else settings.overrides[request.wordId]=request.choice; }
+    next.alignmentTiming=settings; next.revision++; return validateScore(next);
+  }
+
+  function projectAlignmentTiming(score) {
+    validateScore(score); const settings=score.alignmentTiming;
+    if(!settings || !settings.candidates.length) return score;
+    const working=clone(score), proposals=[], locks=new Map(), byId=new Map(settings.candidates.map(c=>[c.wordId,c]));
+    for(const phrase of working.phrases)for(const word of phrase.words){
+      const c=byId.get(word.id),choice=settings.overrides[word.id]||settings.mode;
+      if(choice!=='auto'||!c||c.mediaKey!==mediaKey(score.source)||c.lyricsHash!==score.lyrics.contentHash||c.phraseId!==phrase.id||c.laneId!==phrase.laneId||c.text!==word.text||c.spokenText!==(word.spokenText??null)||c.phraseStartMs!==phrase.startMs||c.phraseEndMs!==phrase.endMs||c.offsetMs!==score.offsetMs||c.startMs<phrase.startMs||c.endMs>phrase.endMs)continue;
+      if((word.syllables||[]).some(s=>s.locked || s.provenance!=='estimated' && (s.startMs<c.startMs||s.endMs>c.endMs)))continue;
+      locks.set(word.id,word.locked);word.locked=false;proposals.push({wordId:word.id,startMs:c.startMs,endMs:c.endMs,evidenceId:c.evidenceId,accepted:true,preservePhraseBounds:true});
+    }
+    if(!proposals.length)return score;
+    const projected=applyAlignment(working,proposals,working.revision);projected.revision=score.revision;
+    for(const phrase of projected.phrases)for(const word of phrase.words)if(locks.has(word.id))word.locked=locks.get(word.id);
+    return validateScore(projected);
+  }
+
+  // Retain pending evidence only while its phrase and target are unchanged.
+  function retainAlignmentProposals(before, after, proposals) {
+    validateScore(before); validateScore(after);
+    if (mediaKey(before.source) !== mediaKey(after.source) || before.lyrics.contentHash !== after.lyrics.contentHash || before.offsetMs !== after.offsetMs) return [];
+    const signature = phrase => JSON.stringify([phrase.laneId, phrase.startMs, phrase.endMs, phrase.endEstimated, phrase.words.map(word => [word.id, word.text, word.spokenText ?? null, word.excluded ?? false])]);
+    const nextPhrases = new Map(after.phrases.map(phrase => [phrase.id, phrase])), safe = new Map();
+    for (const old of before.phrases) { const current = nextPhrases.get(old.id); if (current && signature(old) === signature(current)) safe.set(old.id, current); }
+    const priorWords = new Map(before.phrases.flatMap(phrase => phrase.words.map(word => [word.id, { phrase, word }])));
+    return proposals.filter(proposal => { const prior = priorWords.get(proposal.wordId), current = prior && safe.get(prior.phrase.id)?.words.find(word => word.id === proposal.wordId); return prior && current; }).map(clone);
   }
 
   function activeAt(score, mediaMs, {displayEnds={}}={}) {
@@ -976,5 +1047,5 @@
     }
     return phrases;
   }
-  return { VERSION, DISPLAY_CATALOG, choreographyTarget, choreographyTargetAt, projectChoreographyLayers, validEmoji, stageRegionAt, resolveStageRegionRect, ScoreError, mediaKey, parseLrc, parseVocalText, doubledText, displayToken, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, phraseTimingCoverage, timingCoverage, timingCompleteness };
+  return { VERSION, DISPLAY_CATALOG, choreographyTarget, choreographyTargetAt, projectChoreographyLayers, validEmoji, stageRegionAt, resolveStageRegionRect, ScoreError, mediaKey, parseLrc, parseVocalText, doubledText, displayToken, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, setAlignmentTiming, projectAlignmentTiming, retainAlignmentProposals, phraseTimingCoverage, timingCoverage, timingCompleteness };
 });

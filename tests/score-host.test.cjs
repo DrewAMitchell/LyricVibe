@@ -504,6 +504,37 @@ test('native receipt import queues source-bound review without changing timing; 
   assert.equal(firstWord(undone.score).startMs, firstWord(score).startMs);
 });
 
+test('accepting a timing keeps unrelated pending proposals on the same phrase', async () => {
+  const h = makeHarness(), original = await h.ensure(), receipt = nativeReceipt(original);
+  const second = original.phrases[0].words[1];
+  receipt.proposals.push({ wordId: second.id, startMs: second.startMs + 20, endMs: second.endMs, accepted: false, evidenceId: 'remaining' });
+  const queued = await h.dispatch({ type: 'LV_NATIVE_ALIGNMENT_IMPORT', mediaKey: receipt.mediaKey, expectedRevision: original.revision, receipt });
+  assert.equal(queued.review.length, 2);
+  const applied = await h.dispatch({ type: 'LV_SCORE_REVIEW_APPLY', mediaKey: receipt.mediaKey, expectedRevision: original.revision, wordIds: [receipt.proposals[0].wordId] });
+  assert.equal(applied.ok, true);
+  assert.deepEqual(Array.from(applied.review, p => p.wordId), [second.id]);
+  assert.equal(recordFor(h).review[0].accepted, false);
+  const later = await h.dispatch({ type: 'LV_SCORE_REVIEW_APPLY', mediaKey: receipt.mediaKey, expectedRevision: applied.score.revision, wordIds: [second.id] });
+  assert.equal(later.ok, true);
+  assert.equal(later.score.phrases[0].words[1].startMs, second.startMs + 20);
+});
+
+test('timing preference stores both versions and leaves the manual score and review available', async () => {
+  const h = makeHarness(), original = await h.ensure(), receipt = nativeReceipt(original);
+  await h.dispatch({ type: 'LV_NATIVE_ALIGNMENT_IMPORT', mediaKey: receipt.mediaKey, expectedRevision: original.revision, receipt });
+  const sender = { id: 'test-extension', url: h.context.chrome.runtime.getURL(`editor.html?sourceTab=1&mediaKey=${encodeURIComponent(receipt.mediaKey)}`) };
+  const updated = await h.dispatch({ type: 'LV_ALIGNMENT_PREFERENCE_SET', tabId: 1, mediaKey: receipt.mediaKey, expectedRevision: original.revision, lyricsHash: original.lyrics.contentHash, preference: { mode: 'auto', includeProposals: true } }, sender);
+  assert.equal(updated.ok, true);
+  assert.equal(updated.score.phrases[0].words[0].startMs, original.phrases[0].words[0].startMs);
+  assert.equal(updated.score.alignmentTiming.mode, 'auto');
+  assert.equal(updated.review.length, 1);
+  assert.equal(h.context.LvScore.projectAlignmentTiming(updated.score).phrases[0].words[0].startMs, receipt.proposals[0].startMs);
+  const manuallyEdited = await h.dispatch({ type: 'LV_SCORE_OPERATION', tabId: 1, mediaKey: receipt.mediaKey, expectedRevision: updated.score.revision, operation: { type: 'setWordTiming', wordId: firstWord(updated.score).id, startMs: 1100, endMs: 1300 } });
+  assert.equal(manuallyEdited.ok, true);
+  assert.equal(manuallyEdited.review.length, 1, 'manual correction does not discard the acoustic alternative');
+  assert.equal(manuallyEdited.score.alignmentTiming.overrides[firstWord(updated.score).id], 'manual');
+});
+
 test('native receipt rejects a mismatched editor, video, lyric hash, revision, or automatic admission', async () => {
   const h = makeHarness(), score = await h.ensure(), receipt = nativeReceipt(score);
   const message = { type: 'LV_NATIVE_ALIGNMENT_IMPORT', tabId: 1, mediaKey: receipt.mediaKey, expectedRevision: score.revision, receipt };
@@ -769,7 +800,7 @@ test('host review application preserves a syllable-locked word despite a late pr
   const after = applied.score.phrases[0].words[0];
   assert.deepEqual([after.startMs, after.endMs], [before.startMs, before.endMs]);
   assert.deepEqual(JSON.parse(JSON.stringify(after.syllables)), JSON.parse(JSON.stringify(before.syllables)));
-  assert.equal(applied.review.length, 0);
+  assert.equal(applied.review.length, 1, 'protected-word evidence remains available for comparison');
 });
 
 test('proposal ingress requires the exact offscreen page and the active matching session', async () => {

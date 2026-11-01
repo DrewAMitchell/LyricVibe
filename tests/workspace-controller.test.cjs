@@ -66,6 +66,22 @@ async function loadedController({ score = makeScore(), ...options } = {}) {
   return controller;
 }
 
+test('workspace timing preference keeps the manual score and the automatic alternative', async () => {
+  const controller = await loadedController(), before = controller.getState(), original = structuredClone(before.score.phrases);
+  const word = before.score.phrases[0].words[0];
+  const auto = await controller.dispatch(envelope(before.score, { type: 'LV_ALIGNMENT_PREFERENCE_SET', preference: { mode: 'auto', includeProposals: true } }));
+  assert.equal(auto.ok, true, auto.error?.message);
+  const active = controller.getState();
+  assert.deepEqual(active.score.phrases, original);
+  assert.equal(active.review.length, 1);
+  assert.equal(core.projectAlignmentTiming(active.score).phrases[0].words[0].startMs, before.review[0].startMs);
+  const manual = await controller.dispatch(envelope(active.score, { type: 'LV_ALIGNMENT_PREFERENCE_SET', preference: { wordId: word.id, choice: 'manual' } }));
+  assert.equal(manual.ok, true, manual.error?.message);
+  assert.equal(core.projectAlignmentTiming(controller.getState().score).phrases[0].words[0].startMs, word.startMs);
+  assert.equal(controller.getState().review.length, 1);
+  controller.dispose();
+});
+
 function captureRuntime({ id = 'lyricvibe-extension', respond = async () => ({ ok: false, error: { code: 'UNHANDLED' } }) } = {}) {
   const listeners = new Set();
   const sent = [];

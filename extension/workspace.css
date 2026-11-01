@@ -16,3 +16,6 @@ details[open] > summary::before { content:'−'; }
 details > summary:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 .workspace-notice{display:flex;align-items:start;gap:12px}.workspace-notice>span{white-space:pre-wrap;overflow-wrap:anywhere;min-width:0;flex:1;user-select:text}.workspace-notice>button{flex-shrink:0}
 .workspace-notice.error{max-height:30vh}
+/* Keep the occurrence choice beside the saved timing fields. */
+.timing-inspector .word-timing-choice{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0;color:#c6d8ca;font-size:12px}
+.timing-inspector .word-timing-choice select{min-width:0;max-width:55%;color:#edf5e9;background:#18251e;border:1px solid #637b67;border-radius:5px;padding:6px}

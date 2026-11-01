@@ -375,6 +375,48 @@ test('review-only alignment can preserve existing estimated phrase boundaries', 
   errorCode(() => score.applyAlignment(source, [{ ...receipt.proposals[0], accepted: true, startMs: phrase.endMs, endMs: phrase.endMs + 10 }], source.revision), 'INVALID_TIME');
 });
 
+test('automatic playback keeps saved timings and supports per-word manual overrides', () => {
+  let source = makeScore('[00:01.00]one two\n[00:04.00]');
+  const phrase = source.phrases[0], first = phrase.words[0], second = phrase.words[1];
+  source = score.applyOperation(source, { type: 'setWordTiming', wordId: first.id, startMs: 1100, endMs: 1500 }, source.revision);
+  const original = structuredClone(source);
+  const proposals = [
+    { wordId: first.id, startMs: 1200, endMs: 1600, accepted: false, evidenceId: 'first' },
+    { wordId: second.id, startMs: 2000, endMs: 2500, accepted: false, evidenceId: 'second' },
+  ];
+  const preferred = score.setAlignmentTiming(source, proposals, { mode: 'auto', includeProposals: true }, source.revision);
+  assert.deepEqual(preferred.phrases, original.phrases, 'the saved library remains unchanged');
+  const projected = score.projectAlignmentTiming(preferred);
+  assert.deepEqual([projected.phrases[0].words[0].startMs, projected.phrases[0].words[0].endMs], [1200, 1600]);
+  assert.equal(projected.phrases[0].words[0].locked, true);
+  assert.deepEqual([preferred.phrases[0].words[0].startMs, preferred.phrases[0].words[0].endMs], [1100, 1500]);
+  const except = score.setAlignmentTiming(preferred, [], { wordId: first.id, choice: 'manual' }, preferred.revision);
+  assert.equal(score.projectAlignmentTiming(except).phrases[0].words[0].startMs, 1100);
+  assert.equal(score.projectAlignmentTiming(except).phrases[0].words[1].startMs, 2000);
+  const restored = score.setAlignmentTiming(except, [], { mode: 'manual' }, except.revision);
+  assert.deepEqual(score.projectAlignmentTiming(restored).phrases, original.phrases);
+  const edited = score.applyOperation(preferred, { type: 'setWordTiming', wordId: second.id, startMs: 2100, endMs: 2400 }, preferred.revision);
+  assert.equal(edited.alignmentTiming.overrides[second.id], 'manual');
+  assert.equal(score.projectAlignmentTiming(edited).phrases[0].words[1].startMs, 2100);
+});
+
+test('automatic timing falls back when its phrase or offset changes, and preserves protected syllables', () => {
+  const original = makeScore('[00:01.00]hello there\n[00:04.00]');
+  const word = original.phrases[0].words[0];
+  const proposal = { wordId: word.id, startMs: 1100, endMs: 1500, accepted: false, evidenceId: 'audio' };
+  const preferred = score.setAlignmentTiming(original, [proposal], { mode: 'auto', includeProposals: true }, original.revision);
+  assert.equal(score.projectAlignmentTiming(preferred).phrases[0].words[0].startMs, 1100);
+  const changedOffset = score.applyOperation(preferred, { type: 'setOffset', offsetMs: 250 }, preferred.revision);
+  assert.equal(score.projectAlignmentTiming(changedOffset).phrases[0].words[0].startMs, word.startMs);
+  const differentVideo = structuredClone(preferred); differentVideo.source.videoId = 'DIFFVIDEO01';
+  assert.equal(score.projectAlignmentTiming(differentVideo).phrases[0].words[0].startMs, word.startMs);
+  const withSyllables = structuredClone(preferred), target = withSyllables.phrases[0].words[0];
+  target.syllables = [{ id: 'protected-part', text: target.text, startMs: target.startMs, endMs: target.endMs, provenance: 'manual', locked: true, effects: [] }];
+  score.validateScore(withSyllables);
+  assert.equal(score.projectAlignmentTiming(withSyllables).phrases[0].words[0].startMs, target.startMs);
+  assert.deepEqual(score.projectAlignmentTiming(withSyllables).phrases[0].words[0].syllables, target.syllables);
+});
+
 test('alignment may expand an estimated phrase, while explicit ends stay hard and locked timings stay put', () => {
   let estimated = makeScore('[00:01.00]one two\n[00:04.00]');
   const estimatedPhrase = estimated.phrases[0];
