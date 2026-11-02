@@ -128,7 +128,7 @@ test('rejects source, lyric hash, and revision mismatches before score mutation'
   const controller = await loadedController();
   const before = controller.getState().score;
   for (const [field, value, code] of [
-    ['mediaKey', 'youtube:FIXTURE0003', 'SOURCE_MISMATCH'],
+    ['mediaKey', 'youtube:FIXTURE0002', 'SOURCE_MISMATCH'],
     ['lyricsHash', 'c'.repeat(64), 'LYRIC_REVISION_MISMATCH'],
     ['expectedRevision', before.revision + 1, 'REVISION_CONFLICT'],
   ]) {
@@ -392,13 +392,13 @@ test('late media hash completion is discarded after source replacement', async (
     const file = { name: 'late.wav', size: 160044, arrayBuffer: async () => Uint8Array.from([1, 2, 3, 4]).buffer };
     const attaching = controller.attachRecording(file);
     await waitForSignal(started);
-    await controller.loadPackage(makePackage(makeScore('FIXTURE0003')));
+    await controller.loadPackage(makePackage(makeScore('FIXTURE0002')));
     finishDigest(new Uint8Array(32).buffer);
     const result = await waitForSignal(attaching);
     assert.equal(result.ok, false);
     assert.equal(result.error.code, 'SELECTION_CHANGED');
     assert.equal(controller.getState().packageAudio.sha256, AUDIO_HASH);
-    assert.equal(controller.getState().score.source.videoId, 'FIXTURE0003');
+    assert.equal(controller.getState().score.source.videoId, 'FIXTURE0002');
   } finally {
     controller?.dispose();
     restoreCrypto();
@@ -434,12 +434,12 @@ test('late media metadata completion is discarded after package replacement', as
     const attaching = controller.attachRecording(file);
     await waitForSignal(sourceAssigned);
     assert.equal(srcValue, 'blob:workspace-fixture');
-    assert.equal((await controller.loadPackage(makePackage(makeScore('FIXTURE0003')))).ok, true);
+    assert.equal((await controller.loadPackage(makePackage(makeScore('FIXTURE0002')))).ok, true);
     audio.emit('loadedmetadata');
     const result = await waitForSignal(attaching);
     assert.equal(result.ok, false);
     assert.equal(result.error.code, 'SELECTION_CHANGED');
-    assert.equal(controller.getState().score.source.videoId, 'FIXTURE0003');
+    assert.equal(controller.getState().score.source.videoId, 'FIXTURE0002');
     assert.deepEqual(revoked, ['blob:workspace-fixture']);
   } finally {
     controller?.dispose();
@@ -616,7 +616,7 @@ test('late local play completion after recording replacement cannot restore old 
     const pendingPlay = controller.dispatch({ type: 'LV_SCORE_TRANSPORT', ...envelope(before), action: 'play' });
     await waitForSignal(playStarted);
     assert.equal(controller.getState().playback.paused, true);
-    assert.equal((await controller.loadPackage(makePackage(makeScore('FIXTURE0003')))).ok, true);
+    assert.equal((await controller.loadPackage(makePackage(makeScore('FIXTURE0002')))).ok, true);
     resolvePlay();
     const result = await waitForSignal(pendingPlay);
     assert.equal(result.ok, false);
@@ -649,7 +649,7 @@ test('live playback requires extension sender, exact tab, and bound media key; d
   const message = { type: 'LV_SCORE_PLAYBACK', mediaKey, mediaMs: 2500, paused: true };
   runtime.emit(message, { id: 'wrong-extension', tab: { id: 17 } });
   runtime.emit(message, { id: runtime.id, tab: { id: 18 } });
-  runtime.emit({ ...message, mediaKey: 'youtube:FIXTURE0003' }, { id: runtime.id, tab: { id: 17 } });
+  runtime.emit({ ...message, mediaKey: 'youtube:FIXTURE0002' }, { id: runtime.id, tab: { id: 17 } });
   assert.equal(controller.getState().clockSeen, false);
   runtime.emit(message, { id: runtime.id, tab: { id: 17 } });
   assert.equal(controller.getState().clockSeen, true);
@@ -666,7 +666,7 @@ test('a confirmed video change disconnects the old clock while preserving score 
   runtime.emit({ type: 'LV_SCORE_PLAYBACK', mediaKey, mediaMs: 1500, paused: false }, { id: runtime.id, tab: { id: 17 } });
   controller.setDraft(true);
   const before = controller.getState();
-  const changed = { type: 'LV_SCORE_PLAYBACK', mediaKey: 'youtube:FIXTURE0003', mediaMs: 2000, paused: false };
+  const changed = { type: 'LV_SCORE_PLAYBACK', mediaKey: 'youtube:FIXTURE0002', mediaMs: 2000, paused: false };
   runtime.emit(changed, { id: runtime.id, tab: { id: 18 } });
   assert.equal(controller.getState().clockSeen, true);
   runtime.emit(changed, { id: runtime.id, tab: { id: 17 } });
@@ -713,8 +713,30 @@ test('audition controls preserve a timing draft while score changes remain block
     const undo = await controller.dispatch({ type: 'LV_SCORE_UNDO', ...envelope(score) });
     assert.equal(undo.ok, false);
     assert.equal(undo.error.code, 'EDITOR_BUSY');
-    const wrongSource = await controller.dispatch({ type: 'LV_SCORE_TRANSPORT', ...envelope(score), mediaKey: 'youtube:FIXTURE0003', action: 'pause' });
+    const wrongSource = await controller.dispatch({ type: 'LV_SCORE_TRANSPORT', ...envelope(score), mediaKey: 'youtube:FIXTURE0002', action: 'pause' });
     assert.equal(wrongSource.ok, false);
     assert.equal(wrongSource.error.code, 'SOURCE_MISMATCH');
   } finally { controller.dispose(); }
+});
+
+test('editor follows its source clock without focused-tab playback broadcasts and fences changed videos', async () => {
+  const score = makeScore(), key = core.mediaKey(score.source);
+  let clock = { mediaKey: key, currentTimeMs: 4123, paused: false };
+  const runtime = captureRuntime({ respond: async message => message.type === 'LV_SCORE_GET'
+    ? { ok: true, score, review: [] }
+    : message.type === 'LV_SCORE_CLOCK' ? { ok: true, clock } : { ok: true } });
+  const controller = createEditorController(controllerOptions({ runtime, tabId: 1, requestedMediaKey: key }));
+  assert.equal((await controller.initialize()).ok, true);
+  await new Promise(resolve => setTimeout(resolve, 350));
+  assert.equal(controller.getState().playback.mediaMs, 4123);
+  assert.equal(controller.getState().playback.paused, false);
+  clock = { mediaKey: 'youtube:FIXTURE0002', currentTimeMs: 7000, paused: false };
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(controller.getState().clockSeen, false);
+  assert.equal(controller.getState().playback.mediaMs, 4123);
+  assert.match(controller.getState().notice.message, /changed videos/);
+  controller.dispose();
+  const requests = runtime.sent.length;
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(runtime.sent.length, requests);
 });

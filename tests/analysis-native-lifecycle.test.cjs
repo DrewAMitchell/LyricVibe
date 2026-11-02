@@ -7,6 +7,7 @@ const crypto = require('node:crypto').webcrypto;
 const scoreCore = require('../extension/score-core.js');
 const anchors = require('../extension/analysis/anchors.js');
 const native = require('../extension/analysis/native-live.js');
+const songPass = require('../extension/analysis/song-pass.js');
 
 function event() {
   const listeners = new Set();
@@ -30,12 +31,12 @@ function setup() {
   }
   class Worker { constructor() { workerCreated = true; } }
   const sandbox = {
-    LvScore: scoreCore, LvAnchors: anchors, LvNativeLive: native, AudioContext, AudioWorkletNode, Worker, Float32Array, Date, crypto, btoa,
+    LvScore: scoreCore, LvAnchors: anchors, LvNativeLive: native, LvSongPass: songPass, AudioContext, AudioWorkletNode, Worker, Float32Array, Int16Array, Date, crypto, btoa,
     performance: { now: () => 0 }, navigator: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop: () => stopped++, addEventListener() {} }] }) } },
     setInterval: fn => { intervals.add(fn); return fn; }, clearInterval: fn => intervals.delete(fn), setTimeout, clearTimeout,
     chrome: { runtime: {
       id: 'fixture-extension', getURL: file => `chrome-extension://fixture-extension/${file}`,
-      sendMessage: async message => { if (message.type === 'LV_ANALYSIS_CLOCK_REQUEST') return { ...clock }; outgoing.push(message); if (message.type === 'LV_ALIGNMENT_PROPOSALS') return { ok: true, score: { ...scoreValue } }; },
+      sendMessage: async message => { if (message.type === 'LV_ANALYSIS_CLOCK_REQUEST') return { ...clock }; if (message.type === 'LV_ANALYSIS_CONTROL_REQUEST') { if (message.action === 'seek-start') clock.currentTimeMs = 0; if (message.action === 'play') clock.paused = false; return {ok:true}; } outgoing.push(message); if (message.type === 'LV_ALIGNMENT_PROPOSALS') return { ok: true, score: { ...scoreValue } }; },
       connect: () => {
         const onMessage = event(), onDisconnect = event();
         port = { onMessage, onDisconnect, posts: [], postMessage(message) { this.posts.push(message); if (message.type === 'hello') setImmediate(() => onMessage.emit({ version: native.VERSION, type: 'hello', hostName: native.HOST_NAME, hostVersion: 'fixture-1', state: 'ready', modelReady: true, alignmentReady: true, limits: { maxAudioMs: 12000, sampleRateHz: 16000, channels: 1, encoding: 'pcm_s16le', maxPcmBytes: 384000 } })); else if (message.type === 'analyze') setImmediate(() => onMessage.emit({ version: native.VERSION, type: 'status', state: 'accepted', requestId: message.requestId, sessionId: message.sessionId, source: { ...message.source }, audio: { audioStartMs: message.audio.audioStartMs, sha256: message.audio.sha256 } })); }, disconnect() { this.disconnected = true; onDisconnect.emit(); } };
@@ -229,4 +230,45 @@ test('native silent-audio result keeps only its allowlisted reason in bounded wi
   assert.equal(status.analysis.lastWindow.nativeWordCount, 0);
   assert.equal(status.analysis.lastWindow.resultReason, 'emptyaligned');
   assert.equal(status.analysis.lastWindow.nativeReasonCode, 'SILENT_AUDIO');
+});
+
+test('whole-song capture runs the selected phrase windows and saves review-only alternatives', async () => {
+  const h = setup();
+  h.clock.paused = true;
+  const started = await h.request({ type: 'LV_ANALYSIS_OFFSCREEN_START', config: { engine: 'native', wholeSong: true, tabId: 7, mediaKey: h.clock.mediaKey, sessionId: 'song-session', score: h.score, streamId: 'synthetic' } });
+  assert.equal(started.analysis.songPass.phase, 'capturing');
+  assert.equal(h.clock.currentTimeMs, 0);
+  await [...h.intervals][0]();
+  h.emitPcm(new Float32Array(480000).fill(0.25), 0);
+  h.context.currentTime = 30;
+  h.clock.currentTimeMs = 30000;
+  h.clock.paused = true;
+  await [...h.intervals][0]();
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const request = h.port.posts.find(message => message.type === 'analyze');
+  assert.ok(request, JSON.stringify((await h.request({type:'LV_ANALYSIS_OFFSCREEN_STATUS'})).analysis));
+  assert.equal(request.expectedWords.length, 3);
+  assert.ok(request.audio.durationMs <= 12000);
+  h.port.onMessage.emit({ version: native.VERSION, type: 'result', requestId: request.requestId, sessionId: request.sessionId, source: { ...request.source }, audio: { audioStartMs: request.audio.audioStartMs, sha256: request.audio.sha256 }, accepted: false, alignmentKind: 'supplied-text-ctc', automaticAdmissionEnabled: false, adapter: 'fixture', model: 'fixture-model', modelRevision: 'r1', words: [{ wordId: request.expectedWords[0].wordId, startMs: 50, endMs: 300 }], warnings: [] });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  const proposals = h.outgoing.find(message => message.type === 'LV_ALIGNMENT_PROPOSALS');
+  assert.equal(proposals.proposals.length, 1);
+  assert.equal(proposals.proposals[0].accepted, false);
+  assert.equal(proposals.proposals[0].preservePhraseBounds, true);
+  const result = (await h.request({ type: 'LV_ANALYSIS_OFFSCREEN_STATUS' })).analysis;
+  assert.equal(result.state, 'completed');
+  assert.equal(result.songPass.proposals, 1);
+  assert.equal(result.songPass.skipped, 2);
+});
+
+test('whole-song capture stops on a source clock jump without publishing partial alignment', async () => {
+  const h=setup(); h.clock.paused=true;
+  await h.request({type:'LV_ANALYSIS_OFFSCREEN_START',config:{engine:'native',wholeSong:true,tabId:7,mediaKey:h.clock.mediaKey,sessionId:'song-session',score:h.score,streamId:'synthetic'}});
+  await [...h.intervals][0](); h.emitPcm(new Float32Array(16000).fill(.25),0);
+  h.context.currentTime=1; h.clock.currentTimeMs=9000;
+  await [...h.intervals][0](); await new Promise(resolve=>setImmediate(resolve));
+  const status=(await h.request({type:'LV_ANALYSIS_OFFSCREEN_STATUS'})).analysis;
+  assert.equal(status.state,'error'); assert.equal(status.error.code,'SONG_CLOCK_DISCONTINUITY');
+  assert.equal(h.outgoing.some(m=>m.type==='LV_ALIGNMENT_PROPOSALS'),false);
+  assert.ok(h.stopped>0);
 });

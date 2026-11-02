@@ -153,6 +153,9 @@ export function createEditorController(options: EditorControllerOptions): Editor
   let disposed = false;
   let clockSourceChanged = false;
   let runtimeListener: RuntimeMessageListener | null = null;
+  let clockTimer: ReturnType<typeof setInterval> | null = null;
+  let clockPollPending = false;
+  let clockSequence = 0;
   let cancelMetadataWait: (() => void) | null = null;
   const audioListeners: Array<[string, EventListener]> = [];
 
@@ -465,6 +468,7 @@ export function createEditorController(options: EditorControllerOptions): Editor
       if (expectedKey && typeof message.mediaKey === "string" && message.mediaKey !== expectedKey &&
           core.mediaKey({ videoId: message.mediaKey.slice(8) }) === message.mediaKey &&
           sourcePlaybackMatches(message, sender, message.mediaKey)) {
+        clockSequence++;
         clockSourceChanged = true;
         state.clockSeen = false;
         state.playback.paused = true;
@@ -474,6 +478,7 @@ export function createEditorController(options: EditorControllerOptions): Editor
         return;
       }
       if (!expectedKey || !sourcePlaybackMatches(message, sender, expectedKey)) return;
+      clockSequence++;
       if (clockSourceChanged) {
         clockSourceChanged = false;
         state.notice = { message: "The original video clock is connected again. Review any draft before applying it.", kind: "" };
@@ -500,6 +505,33 @@ export function createEditorController(options: EditorControllerOptions): Editor
       return;
     }
     if (message.type === "LV_ANALYSIS_OFFSCREEN_STATE" && message.analysis) setAnalysis(message.analysis);
+  }
+
+  async function pollSourceClock(): Promise<void> {
+    if (disposed || !state.score || clockPollPending) return;
+    clockPollPending = true;
+    const binding = sourceEpoch, sequence = clockSequence;
+    const key = core.mediaKey(state.score.source);
+    try {
+      const result = await send("LV_SCORE_CLOCK");
+      const clock = result.clock;
+      if (disposed || binding !== sourceEpoch || sequence !== clockSequence || !isRecord(clock)) return;
+      if (clock.mediaKey !== key) {
+        clockSourceChanged = true;
+        state.clockSeen = false;
+        state.playback.paused = true;
+        state.playback.loop = null;
+        state.notice = { message: "The source tab changed videos. Your score and draft are preserved; reopen the editor from the current video.", kind: "error" };
+      } else if (typeof clock.currentTimeMs === "number" && Number.isFinite(clock.currentTimeMs) && clock.currentTimeMs >= 0 && typeof clock.paused === "boolean") {
+        if (clockSourceChanged) state.notice = { message: "The original video clock is connected again. Review any draft before applying it.", kind: "" };
+        clockSourceChanged = false;
+        state.playback.mediaMs = clock.currentTimeMs;
+        state.playback.paused = clock.paused;
+        state.clockSeen = true;
+      } else return;
+      notify();
+    } catch { /* A temporary clock failure must not discard the score or draft. */ }
+    finally { clockPollPending = false; }
   }
 
   function onAudioClock(): void {
@@ -594,6 +626,8 @@ export function createEditorController(options: EditorControllerOptions): Editor
       runtimeListener = (message, sender) => handleRuntimeMessage(message, sender);
       runtime.onMessage.addListener(runtimeListener);
     }
+    clockTimer = setInterval(() => { void pollSourceClock(); }, 250);
+    (clockTimer as unknown as { unref?: () => void }).unref?.();
     const bindingEpoch = sourceEpoch;
     const initialScoreEpoch = scoreEpoch;
     try {
@@ -791,7 +825,7 @@ export function createEditorController(options: EditorControllerOptions): Editor
       if ((request.type === "LV_NATIVE_ANALYSIS_START" || request.type === "LV_NATIVE_ANALYSIS_STOP" || request.type === "LV_NATIVE_ANALYSIS_STATUS" || request.type === "LV_ANALYSIS_START" || request.type === "LV_ANALYSIS_STOP" || request.type === "LV_ANALYSIS_STATUS") && live) {
         const bindingEpoch = sourceEpoch;
         const requestScoreEpoch = scoreEpoch;
-        const result = await send(request.type, { expectedRevision: state.score!.revision, lyricsHash: state.score!.lyrics.contentHash });
+        const result = await send(request.type, { expectedRevision: state.score!.revision, lyricsHash: state.score!.lyrics.contentHash, ...(request.type === "LV_NATIVE_ANALYSIS_START" && request.wholeSong === true ? { wholeSong: true } : {}) });
         if (disposed || bindingEpoch !== sourceEpoch) throw makeError("SELECTION_CHANGED", "Source selection changed while analysis was pending.");
         if (requestScoreEpoch !== scoreEpoch) throw makeError("REVISION_CONFLICT", "Score changed while analysis was pending. Read the current state before retrying.");
         const analysis = result.analysis || result.status || result;
@@ -869,6 +903,8 @@ export function createEditorController(options: EditorControllerOptions): Editor
     if (disposed) return;
     disposed = true;
     sourceEpoch++;
+    if (clockTimer) clearInterval(clockTimer);
+    clockTimer = null;
     detachMedia();
     if (runtimeListener && runtime?.onMessage?.removeListener) runtime.onMessage.removeListener(runtimeListener);
     runtimeListener = null;

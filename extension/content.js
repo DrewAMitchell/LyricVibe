@@ -1540,7 +1540,7 @@
   syncButton('tempo-downbeat').onclick=async()=>{await loadTempo();if(!tempoEditable())return;const now=Math.round(getMediaTimeMs());if(!tempo.map){tempo.taps=[];void tapTempo();return;}if(updateTempoMap({...tempo.map,anchorMs:now})){try{await enableBeatAudio();beatClick.rate=getMedia()?.playbackRate;playBeatClick(true,0,true);beatClick.scheduled.add(0);}catch(error){setSyncNotice(error.message,'warn');}}};
   syncButton('tempo-undo').onclick=()=>{if(!tempoEditable()||!tempo.history.length)return;tempo.map=tempo.history.pop();tempo.taps=[];tempo.revision++;cancelBeatClicks();void persistTempo();refreshTempoEditor();refreshBeatPulse(getMediaTimeMs());};
   syncButton('tempo-sections').onclick=()=>chrome.runtime.sendMessage({type:'LV_LIGHT_EDITOR_OPEN',mediaKey:LvScore.mediaKey(state.score.source),mode:'tempo'}).then(r=>{if(!r?.ok)setSyncNotice(r?.error?.message||'Tempo editor could not open.','error');});
-  // Phrases the user flags during playback for retiming, persisted per video.
+  // Phrases the listener flags during playback for retiming, persisted per video.
   const retimeFlags={mediaKey:null,items:[]};
   async function loadRetimeFlags(){
     const mediaKey=state.score?LvScore.mediaKey(state.score.source):null;
@@ -4136,7 +4136,7 @@
       const media = getMedia();
       const youtube = youtubeMediaState();
       const blocked = isAdvertisement() || youtube?.clockUsable === false;
-      sendResponse({ mediaKey: LvScore.mediaKey({ url: location.href }), currentTimeMs: Math.round((media?.currentTime || 0) * 1000), paused: blocked || (media?.paused ?? true), playbackRate: media?.playbackRate || 1, seeking: blocked || media?.seeking || false, isAd: isAdvertisement(), reason: youtube?.reason || null });
+      sendResponse({ mediaKey: LvScore.mediaKey({ url: location.href }), currentTimeMs: Math.round((media?.currentTime || 0) * 1000), durationMs: Number.isFinite(media?.duration) ? Math.round(media.duration * 1000) : null, paused: blocked || (media?.paused ?? true), playbackRate: media?.playbackRate || 1, seeking: blocked || media?.seeking || false, isAd: isAdvertisement(), reason: youtube?.reason || null });
       return;
     }
     if (message.type === 'LV_SCORE_UPDATED') {

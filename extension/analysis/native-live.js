@@ -101,7 +101,7 @@
     }
   }
 
-  function validateResult(message, expected, score) {
+  function validateResult(message, expected, score, { includeProtectedAlternatives = false } = {}) {
     validateEnvelope(message, expected);
     if (message.type === 'error') fail(message.error?.code || 'NATIVE_ALIGNMENT_FAILED', message.error?.message || 'Native alignment failed.');
     if (message.type !== 'result' || message.accepted !== false || message.alignmentKind !== 'supplied-text-ctc' || message.automaticAdmissionEnabled !== false ||
@@ -147,7 +147,7 @@
           (score.source.durationMs > 0 && endMs + offset > score.source.durationMs + 1000) ||
           (!phrase.endEstimated && (startMs < phrase.startMs || endMs > phrase.endMs))) continue;
       const currentWord = phrase.words.find(item => item.id === word.wordId);
-      if (!currentWord || currentWord.locked || (currentWord.syllables || []).some(syllable => syllable.locked)) continue;
+      if (!currentWord || !includeProtectedAlternatives && (currentWord.locked || (currentWord.syllables || []).some(syllable => syllable.locked))) continue;
       proposals.push({ wordId: word.wordId, startMs, endMs, accepted: false, evidenceId: `${expected.requestId}:${word.wordId}` });
     }
     return {
@@ -186,6 +186,6 @@
     return request;
   }
 
-  root.LvNativeLive = { VERSION, HOST_NAME, SAMPLE_RATE_HZ, MAX_WINDOW_MS, MAX_PCM_BYTES, MAX_EXPECTED_WORDS, ALLOWED_RESULT_REASON_CODES, encodePcm16, expectedWordsForWindow, validateHello, validateEnvelope, validateAccepted, validateResult, createRequest };
+  root.LvNativeLive = { VERSION, HOST_NAME, SAMPLE_RATE_HZ, MAX_WINDOW_MS, MAX_PCM_BYTES, MAX_EXPECTED_WORDS, ALLOWED_RESULT_REASON_CODES, normalizeExpectedWord, encodePcm16, expectedWordsForWindow, validateHello, validateEnvelope, validateAccepted, validateResult, createRequest };
   if (typeof module !== 'undefined') module.exports = root.LvNativeLive;
 })(globalThis);

@@ -6,7 +6,7 @@
   let generation = 0;
   let lastErrorStatus = null;
   const send = message => chrome.runtime.sendMessage(message).catch(() => undefined);
-  const publicStatus = () => session ? { state: session.state, tabId: session.tabId, mediaKey: session.mediaKey, sessionId: session.sessionId, engine: session.engine || 'browser', lyricsHash: session.score?.lyrics?.contentHash || null, expectedRevision: session.score?.revision ?? null, provider: session.provider || null, model: session.model || null, modelRevision: session.modelRevision || null, language: session.language || 'en', method: session.engine === 'native' ? 'native-live-supplied-text-ctc' : 'top-one-transcription-anchors', confidenceValidated: false, automaticAdmissionEnabled: false, bufferedSeconds: session.used / (session.context?.sampleRate || 16000), droppedSeconds: session.droppedSeconds, windows: session.windows, ...(session.engine === 'native' && session.lastWindow ? { lastWindow: { ...session.lastWindow } } : {}), progress: session.progress || session.unsupportedReason || null, error: session.error || null } : lastErrorStatus || { state: 'stopped', bufferedSeconds: 0, automaticAdmissionEnabled: false };
+  const publicStatus = () => session ? { state: session.state, tabId: session.tabId, mediaKey: session.mediaKey, sessionId: session.sessionId, engine: session.engine || 'browser', wholeSong: Boolean(session.wholeSong), ...(session.wholeSong ? { songPass: { phase: session.songPhase || 'starting', completed: session.songCompleted || 0, total: session.songPlans?.length || 0, proposals: session.songProposals || 0, skipped: session.songSkipped || 0, capturedMs: session.songUsed ? Math.round(session.songUsed / 16) : 0, durationMs: session.score?.source?.durationMs || 0 } } : {}), lyricsHash: session.score?.lyrics?.contentHash || null, expectedRevision: session.score?.revision ?? null, provider: session.provider || null, model: session.model || null, modelRevision: session.modelRevision || null, language: session.language || 'en', method: session.engine === 'native' ? 'native-live-supplied-text-ctc' : 'top-one-transcription-anchors', confidenceValidated: false, automaticAdmissionEnabled: false, bufferedSeconds: session.used / (session.context?.sampleRate || 16000), droppedSeconds: session.droppedSeconds, windows: session.windows, ...(session.engine === 'native' && session.lastWindow ? { lastWindow: { ...session.lastWindow } } : {}), progress: session.progress || session.unsupportedReason || null, error: session.error || null } : lastErrorStatus || { state: 'stopped', bufferedSeconds: 0, automaticAdmissionEnabled: false };
   function publish() { send({ type: 'LV_ANALYSIS_OFFSCREEN_STATE', analysis: publicStatus() }); }
   function scoreMatchesMedia(score, mediaKey) {
     try {
@@ -43,6 +43,7 @@
     s.source?.disconnect();
     s.stream?.getTracks().forEach(track => track.stop());
     clearWindow(s);
+    s.songPcm?.fill(0); s.songPcm = null;
     await s.context?.close().catch(() => undefined);
     s.score = null;
   }
@@ -77,6 +78,7 @@
   }
 
   async function nativeReply(s, message) {
+    if (s.wholeSong && s.songPhase === 'aligning') { await songReply(s, message); return; }
     const pending = s.inflight;
     if (s.cancelPending && message?.requestId === s.cancelPending.requestId && message?.sessionId === s.sessionId) {
       if (message.type === 'status' && message.state === 'accepted') return;
@@ -144,6 +146,80 @@
         : 'Native analysis failed validation; stop and explicitly start a new session.');
     }
     publish();
+  }
+
+  async function songNext(s) {
+    if (session !== s || s.songPhase !== 'aligning') return;
+    let plan, clip;
+    while (s.songCompleted < s.songPlans.length) {
+      plan = s.songPlans[s.songCompleted];
+      clip = LvSongPass.extract(s.songPcm, s.songUsed, s.songOriginMs, plan);
+      if (clip && !clip.clipped) break;
+      clip?.samples.fill(0); s.songSkipped += plan.expectedWords.length; s.songCompleted++;
+    }
+    if (s.songCompleted >= s.songPlans.length) {
+      s.state = 'completed'; s.songPhase = 'complete';
+      lastErrorStatus = { ...publicStatus(), bufferedSeconds: 0 };
+      const status = lastErrorStatus;
+      await stop(true);
+      await send({ type: 'LV_ANALYSIS_OFFSCREEN_STATE', analysis: status });
+      return;
+    }
+    // A clipped phrase is never submitted as if the complete audio had been heard.
+    const source = { tabId: s.tabId, mediaKey: s.mediaKey, lyricsHash: s.score.lyrics.contentHash, expectedRevision: s.score.revision, captureEpoch: s.songEpoch };
+    const requestId = crypto.randomUUID();
+    const request = await LvNativeLive.createRequest({ requestId, sessionId: s.sessionId, source, audioStartMs: clip.audioStartMs, playbackRate: 1, floatPcm: clip.samples, expectedWords: plan.expectedWords });
+    clip.samples.fill(0);
+    if (session !== s || s.songPhase !== 'aligning') { request.audio.pcmBase64 = ''; return; }
+    const expected = { ...request, expectedWords: plan.expectedWords, audio: { ...request.audio, pcmBase64: undefined } };
+    s.inflight = { requestId, source, expected, plan, accepted: false };
+    try { s.nativePort.postMessage(request); }
+    catch (_) { request.audio.pcmBase64 = ''; fail(s, 'NATIVE_SEND_FAILED', 'The song window could not be sent to the native host.'); return; }
+    request.audio.pcmBase64 = ''; publish();
+  }
+
+  async function songReply(s, message) {
+    const pending = s.inflight;
+    if (!pending || message?.requestId !== pending.requestId || message?.sessionId !== s.sessionId) return;
+    try {
+      if (message.type === 'status' && message.state === 'accepted') { LvNativeLive.validateAccepted(message, pending.expected); pending.accepted = true; return; }
+      if (message.type === 'status' && message.state === 'busy') throw Object.assign(new Error('The native host is busy.'), { code: 'NATIVE_HOST_BUSY' });
+      if (message.type !== 'result' && message.type !== 'error') return;
+      if (message.type === 'error' && ['ALIGNMENT_FAILED', 'ALIGNMENT_TIMEOUT'].includes(message.error?.code)) {
+        LvNativeLive.validateEnvelope(message, pending.expected);
+        s.songSkipped += pending.plan.expectedWords.length; s.songCompleted++; s.inflight = null; publish();
+        await songNext(s); return;
+      }
+      const result = LvNativeLive.validateResult(message, pending.expected, s.score, { includeProtectedAlternatives: true });
+      result.proposals = result.proposals.filter(p => {
+        const expected = pending.expected.expectedWords.find(word => word.wordId === p.wordId);
+        const phrase = s.score.phrases.find(item => item.id === expected?.phraseId);
+        return phrase && p.startMs >= phrase.startMs && p.endMs <= phrase.endMs;
+      }).map(p => ({ ...p, preservePhraseBounds: true, evidenceId: `${pending.requestId}:${pending.plan.overlap ? 'mixed-vocals:' : ''}${pending.plan.segmented ? 'segmented:' : ''}${p.wordId}` }));
+      result.diagnostics.sampleWindow.requestId = pending.requestId;
+      if (result.proposals.length) {
+        const response = await chrome.runtime.sendMessage({ type: 'LV_ALIGNMENT_PROPOSALS', engine: 'native', tabId: s.tabId, sessionId: s.sessionId, mediaKey: s.mediaKey, expectedRevision: s.score.revision, proposals: result.proposals, diagnostics: result.diagnostics });
+        if (session !== s) return;
+        if (!response?.ok || response.score?.revision !== s.score.revision) throw Object.assign(new Error('The source or score changed.'), { code: response?.error?.code || 'REVISION_CONFLICT' });
+        s.songProposals += result.proposals.length;
+      }
+      s.songSkipped += pending.plan.expectedWords.length - result.proposals.length;
+      s.songCompleted++; s.inflight = null; publish();
+      await songNext(s);
+    } catch (error) { fail(s, error.code || 'NATIVE_RESULT_INVALID', 'Whole-song alignment stopped safely. Existing suggestions are retained; check the source and try again.'); }
+  }
+
+  async function finishSongCapture(s) {
+    if (session !== s || s.songPhase !== 'capturing') return;
+    s.songPhase = 'aligning'; s.state = 'aligning';
+    clearInterval(s.clockTimer); s.clockTimer = null;
+    if (s.worklet) { s.worklet.port.onmessage = null; s.worklet.port.close(); s.worklet.disconnect(); s.worklet = null; }
+    s.source?.disconnect(); s.source = null;
+    s.stream?.getTracks().forEach(track => track.stop()); s.stream = null;
+    await s.context?.close().catch(() => undefined); s.context = null;
+    if (session !== s) return;
+    publish();
+    try { await songNext(s); } catch (error) { fail(s, error.code || 'NATIVE_REQUEST_FAILED', 'Could not prepare a whole-song alignment window.'); }
   }
 
   async function connectNative(s) {
@@ -232,9 +308,17 @@
           else if (clock?.error) fail(s, 'SOURCE_TAB_UNAVAILABLE', 'The source tab stopped reporting playback.');
           return;
         }
+        if (s.wholeSong && s.songPhase === 'capturing') {
+          if (clock.isAd) { fail(s, 'ADVERTISEMENT_ACTIVE', 'An advertisement interrupted the song pass. Existing suggestions are retained.'); return; }
+          const endMs = Number.isFinite(clock.durationMs) && clock.durationMs > 0 ? Math.min(clock.durationMs, s.score.source.durationMs) : s.score.source.durationMs;
+          if (s.songUsed > 0 && (clock.currentTimeMs >= endMs - 40 || clock.paused && clock.currentTimeMs >= endMs - 300)) { void finishSongCapture(s); return; }
+          if (clock.playbackRate !== 1 || clock.seeking || clock.paused) { fail(s, 'SONG_CAPTURE_INTERRUPTED', 'Playback changed during the song pass. Start again at normal speed.'); return; }
+        }
         const update = s.clock.update(clock, (before + after) / 2);
         s.lastClockAt = performance.now();
         if (update.discontinuity) clearWindow(s);
+        if (s.wholeSong && s.songPhase === 'capturing' && update.discontinuity) { fail(s, 'SONG_CLOCK_DISCONTINUITY', 'The source clock jumped during capture. Start the song pass again.'); return; }
+        if (s.wholeSong && s.songPhase === 'waiting-start' && update.usable && clock.currentTimeMs < 1500) { s.songPhase = 'capturing'; s.songEpoch = s.clock.epoch; }
         if (update.discontinuity && s.engine === 'native') cancelInflight(s);
         if (clock.isAd || clock.mediaReady === false) {
           clearWindow(s); cancelInflight(s);
@@ -253,6 +337,15 @@
     const input = data.pcm;
     s.droppedSeconds += (data.droppedFrames || 0) / data.sampleRate;
     if (session !== s || !s.ready || !s.clock.anchor || performance.now() - s.lastClockAt > 750) { input.fill(0); return; }
+    if (s.wholeSong) {
+      if (s.songPhase !== 'capturing') { input.fill(0); return; }
+      if (data.droppedFrames || s.songUsed && data.startFrame !== s.songStartFrame + s.songUsed || s.songUsed + input.length > s.songPcm.length) {
+        input.fill(0); fail(s, 'SONG_CAPTURE_GAP', 'Audio capture was interrupted or exceeded its memory limit. Start the song pass again.'); return;
+      }
+      if (!s.songUsed) { s.songStartFrame = data.startFrame; s.songOriginMs = Math.max(0, s.clock.mediaAt(data.startFrame / data.sampleRate)); }
+      for (let i = 0; i < input.length; i++) { const v = Math.max(-1, Math.min(1, Number.isFinite(input[i]) ? input[i] : 0)); s.songPcm[s.songUsed + i] = v < 0 ? Math.round(v * 32768) : Math.round(v * 32767); }
+      s.songUsed += input.length; input.fill(0); return;
+    }
     if (s.busy) { s.droppedSeconds += input.length / data.sampleRate; input.fill(0); return; }
     if (!s.used) s.startFrame = data.startFrame;
     // A dropped sample chunk cannot become an apparently contiguous acoustic window.
@@ -285,6 +378,13 @@
     const token = generation;
     const s = session = { ...config, state: 'loading-model', clock: new LvAnchors.MediaClock(), used: 0, startFrame: null, ready: false, busy: false, windows: 0, droppedSeconds: 0, lastClockAt: 0 };
     try {
+      if (s.wholeSong) {
+        const planned = LvSongPass.plan(s.score);
+        if (!planned.windows.length) throw Object.assign(new Error('No supported lyric phrases are available.'), { code: 'NO_ALIGNABLE_PHRASES' });
+        s.songPlans = planned.windows; s.songSkipped = planned.skipped.length; s.songCompleted = 0; s.songProposals = 0; s.songUsed = 0;
+        s.songPcm = new Int16Array(Math.ceil(s.score.source.durationMs * 16) + 32000);
+        s.songPhase = 'starting';
+      }
       s.phase = 'tab-capture';
       s.stream = await navigator.mediaDevices.getUserMedia({ audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: config.streamId } }, video: false });
       if (session !== s || token !== generation) { s.stream.getTracks().forEach(t => t.stop()); return; }
@@ -305,7 +405,7 @@
       s.worklet.port.onmessage = ({ data }) => {
         try { pcm(s, data); } finally { if (session === s) s.worklet.port.postMessage({ type: 'ack' }); }
       };
-      s.stream.getTracks().forEach(track => track.addEventListener('ended', () => { if (session === s) fail(s, 'CAPTURE_ENDED', 'The browser ended tab audio capture.'); }));
+      s.stream.getTracks().forEach(track => track.addEventListener('ended', () => { if (session === s && !(s.wholeSong && s.songPhase === 'aligning')) fail(s, 'CAPTURE_ENDED', 'The browser ended tab audio capture.'); }));
       if (s.engine === 'native') { s.phase = 'native-host'; await connectNative(s); }
       else s.worker = new Worker(chrome.runtime.getURL('analysis/model-worker.bundle.js'), { type: 'module' });
       if (s.engine !== 'native') {
@@ -337,8 +437,16 @@
       await clockTick(s);
       if (session === s) s.clockTimer = setInterval(() => clockTick(s), 250);
       s.phase = 'capturing';
+      if (s.wholeSong && session === s) {
+        s.songPhase = 'waiting-start';
+        const seek = await chrome.runtime.sendMessage({ type: 'LV_ANALYSIS_CONTROL_REQUEST', tabId: s.tabId, sessionId: s.sessionId, action: 'seek-start' });
+        if (!seek?.ok) throw Object.assign(new Error('The source could not seek to the beginning.'), { code: 'SONG_SEEK_FAILED' });
+        const play = await chrome.runtime.sendMessage({ type: 'LV_ANALYSIS_CONTROL_REQUEST', tabId: s.tabId, sessionId: s.sessionId, action: 'play' });
+        if (!play?.ok) throw Object.assign(new Error('The source could not start playback.'), { code: 'SONG_PLAY_FAILED' });
+        await clockTick(s);
+      }
       publish();
-    } catch (error) { fail(s, error.code || 'CAPTURE_SETUP_FAILED', 'The selected tab audio could not be captured and routed.', { phase: s.phase, causeName: error?.name, causeCode: error?.code }); }
+    } catch (error) { fail(s, error.code || 'CAPTURE_SETUP_FAILED', s.wholeSong && /^(SONG_|NO_ALIGNABLE)/.test(error.code || '') ? error.message : 'The selected tab audio could not be captured and routed.', { phase: s.phase, causeName: error?.name, causeCode: error?.code }); }
   }
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {

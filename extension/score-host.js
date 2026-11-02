@@ -197,6 +197,11 @@
         ? { ok: true, analysis: await root.LvAnalysis.stopAnalysis({ tabId, mediaKey: requested }) }
         : { ok: true, analysis: await root.LvAnalysis.analysisStatus() };
     }
+    if (message.type === 'LV_SCORE_CLOCK') {
+      if (!editorSourceBound(sender, tabId, message.mediaKey)) throw fail('EDITOR_REQUIRED', 'The source clock requires its connected editor.');
+      const clock = await chrome.tabs.sendMessage(tabId, { type: 'LV_ANALYSIS_CLOCK' });
+      return { ok: true, clock };
+    }
     const offlineCleanup=message.type==='LV_CAPTION_NOTES_CLEAN'&&exactExtensionPage(sender,'options.html');
     let key;if(offlineCleanup){const match=/^youtube:([A-Za-z0-9_-]{11})$/.exec(message.mediaKey||'');if(!match)throw fail('SOURCE_REQUIRED','Choose an exact YouTube score.');key=message.mediaKey;}else ({key}=await liveIdentity(tabId,message.mediaKey));
     if(message.type==='LV_SCORE_AUTHOR'){
@@ -224,7 +229,7 @@
         if (!record) throw fail('SCORE_MISSING', 'No timed score is loaded.');
         if (message.expectedRevision !== record.score.revision) throw fail('REVISION_CONFLICT', 'Reload the score before starting native analysis.');
         if (message.lyricsHash !== record.score.lyrics.contentHash) throw fail('LYRIC_REVISION_MISMATCH', 'The selected lyrics changed before analysis could start.');
-        return { ok: true, analysis: await root.LvAnalysis.startAnalysis({ tabId, score: record.score, engine: 'native', expectedRevision: message.expectedRevision, lyricsHash: message.lyricsHash }) };
+        return { ok: true, analysis: await root.LvAnalysis.startAnalysis({ tabId, score: record.score, engine: 'native', expectedRevision: message.expectedRevision, lyricsHash: message.lyricsHash, wholeSong: message.wholeSong === true }) };
       }
     }
     if (message.type === 'LV_ANALYSIS_START') {
@@ -434,7 +439,7 @@
       return { ok: true, score: next, review: record.review || [], tabId, mediaKey: key };
     });
   }
-  const types = new Set(['LV_ANALYSIS_CACHE_CLEAR_REQUEST', 'LV_EDITOR_OPEN', 'LV_LIGHT_EDITOR_OPEN', 'LV_SCORE_GET', 'LV_SCORE_OPERATION', 'LV_SCORE_IMPORT', 'LV_NATIVE_ALIGNMENT_IMPORT', 'LV_SCORE_UNDO', 'LV_SCORE_SEEK', 'LV_SCORE_TRANSPORT', 'LV_SCORE_REVIEW_APPLY', 'LV_ALIGNMENT_PREFERENCE_SET', 'LV_ANALYSIS_START', 'LV_ANALYSIS_STOP', 'LV_ANALYSIS_STATUS', 'LV_NATIVE_ANALYSIS_START', 'LV_NATIVE_ANALYSIS_STOP', 'LV_NATIVE_ANALYSIS_STATUS', 'LV_ALIGNMENT_PROPOSALS']);
+  const types = new Set(['LV_ANALYSIS_CACHE_CLEAR_REQUEST', 'LV_EDITOR_OPEN', 'LV_LIGHT_EDITOR_OPEN', 'LV_SCORE_GET', 'LV_SCORE_CLOCK', 'LV_SCORE_OPERATION', 'LV_SCORE_IMPORT', 'LV_NATIVE_ALIGNMENT_IMPORT', 'LV_SCORE_UNDO', 'LV_SCORE_SEEK', 'LV_SCORE_TRANSPORT', 'LV_SCORE_REVIEW_APPLY', 'LV_ALIGNMENT_PREFERENCE_SET', 'LV_ANALYSIS_START', 'LV_ANALYSIS_STOP', 'LV_ANALYSIS_STATUS', 'LV_NATIVE_ANALYSIS_START', 'LV_NATIVE_ANALYSIS_STOP', 'LV_NATIVE_ANALYSIS_STATUS', 'LV_ALIGNMENT_PROPOSALS']);
   types.add('LV_CAPTION_NOTES_CLEAN');types.add('LV_TEMPO_GET');types.add('LV_TEMPO_SET');types.add('LV_SCORE_AUTHOR');
   for (const type of ['LV_TIMING_SOURCES', 'LV_TIMING_COPY', 'LV_TIMING_PREPARE', 'LV_TIMING_CURRENT', 'LV_TIMING_TUNE', 'LV_TIMING_UNDO', 'LV_TIMING_APPLY', 'LV_TIMING_CANCEL']) types.add(type);
   chrome.runtime.onMessage.addListener((message, sender, respond) => {

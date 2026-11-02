@@ -42,7 +42,7 @@
     }
     return status;
   }
-  async function startAnalysis({ tabId, score, language = 'en', engine = 'browser', expectedRevision, lyricsHash }) {
+  async function startAnalysis({ tabId, score, language = 'en', engine = 'browser', expectedRevision, lyricsHash, wholeSong = false }) {
     if (!Number.isInteger(tabId) || !score?.source || !Number.isInteger(score.revision)) throw typed('INVALID_ANALYSIS_SOURCE', 'Choose a source tab and validated score.');
     globalThis.LvScore?.validateScore(score);
     if (expectedRevision != null && expectedRevision !== score.revision) throw typed('REVISION_CONFLICT', 'Reload the score before starting analysis.');
@@ -55,7 +55,9 @@
     const clock = reply?.clock || reply;
     if (clock?.mediaKey !== mediaKey) throw typed('SOURCE_MISMATCH', 'The score no longer belongs to the selected video.');
     if (clock.isAd) throw typed('ADVERTISEMENT_ACTIVE', 'Wait for the advertisement to finish.');
-    if (clock.paused || clock.seeking) throw typed('PLAYBACK_REQUIRED', 'Play the selected video before enabling audio analysis.');
+    if (!wholeSong && (clock.paused || clock.seeking)) throw typed('PLAYBACK_REQUIRED', 'Play the selected video before enabling audio analysis.');
+    if (wholeSong && (engine !== 'native' || clock.playbackRate !== 1)) throw typed('PLAYBACK_RATE_UNSUPPORTED', 'Set the source video to normal speed before whole-song alignment.');
+    if (wholeSong && (!Number.isSafeInteger(score.source.durationMs) || score.source.durationMs <= 0 || score.source.durationMs > 1200000)) throw typed('SONG_DURATION_UNSUPPORTED', 'Whole-song alignment needs a known duration of at most 20 minutes.');
     await ensureOffscreen();
     if (token !== generation) return status;
     try {
@@ -63,8 +65,8 @@
       const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
       if (token !== generation) return status;
       const sessionId = crypto.randomUUID();
-      status = { state: 'starting', engine, tabId, mediaKey, sessionId, lyricsHash: score.lyrics.contentHash, expectedRevision: score.revision, automaticAdmissionEnabled: false };
-      const response = await chrome.runtime.sendMessage({ target: 'lv-offscreen', type: 'LV_ANALYSIS_OFFSCREEN_START', config: { tabId, score, mediaKey, sessionId, streamId, language, engine } });
+      status = { state: 'starting', engine, wholeSong, tabId, mediaKey, sessionId, lyricsHash: score.lyrics.contentHash, expectedRevision: score.revision, automaticAdmissionEnabled: false };
+      const response = await chrome.runtime.sendMessage({ target: 'lv-offscreen', type: 'LV_ANALYSIS_OFFSCREEN_START', config: { tabId, score, mediaKey, sessionId, streamId, language, engine, wholeSong } });
       if (token === generation && response?.analysis) status = response.analysis;
       return status;
     } catch (error) {
@@ -90,6 +92,13 @@
     if (message.type === 'LV_ANALYSIS_CLOCK_REQUEST') {
       if (!status.sessionId || message.sessionId !== status.sessionId || message.tabId !== status.tabId) { respond({ error: 'ANALYSIS_SOURCE_MISMATCH' }); return; }
       chrome.tabs.sendMessage(message.tabId, { type: 'LV_ANALYSIS_CLOCK' }).then(clock => respond(clock), () => respond({ error: 'SOURCE_TAB_UNAVAILABLE' }));
+      return true;
+    }
+    if (message.type === 'LV_ANALYSIS_CONTROL_REQUEST') {
+      if (!status.sessionId || message.sessionId !== status.sessionId || message.tabId !== status.tabId || status.engine !== 'native' || !status.wholeSong) { respond({ ok: false, error: 'ANALYSIS_SOURCE_MISMATCH' }); return; }
+      const command = message.action === 'seek-start' ? { type: 'LV_SCORE_SEEK', mediaKey: status.mediaKey, mediaMs: 0 } : message.action === 'play' ? { type: 'LV_SCORE_TRANSPORT', mediaKey: status.mediaKey, action: 'play' } : null;
+      if (!command) { respond({ ok: false, error: 'INVALID_OPERATION' }); return; }
+      chrome.tabs.sendMessage(message.tabId, command).then(result => respond(result), () => respond({ ok: false, error: 'SOURCE_TAB_UNAVAILABLE' }));
       return true;
     }
   });

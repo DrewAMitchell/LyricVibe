@@ -38,3 +38,12 @@ details > summary:focus-visible { outline:2px solid var(--accent); outline-offse
 .wave-wrap.is-empty .wave-unavailable{position:sticky;left:0;top:0;width:max-content;height:28px;margin-top:-28px;padding:0 12px}
 .zoom-controls .follow-toggle[aria-pressed=true]{color:#dff4d3;border-color:#8db987;background:#304830}
 @media(max-width:650px){.song-overview{padding:6px 8px}.timing-legend{gap:4px 8px;font-size:9px}.timing-legend small{margin-left:0;font-size:9px}.phrase-canvas .playback-preview{height:58px}}
+
+.song-pass-status{padding:5px 14px;color:#a4b2ae;font-size:12px;border-top:1px solid #303b38;background:#151d1b}.song-align{white-space:nowrap}
+
+.analysis-footer { flex-wrap: wrap; gap: 6px 10px; }
+.analysis-footer label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.analysis-footer .song-align:not(:disabled) { background: #c7efc9; color: #12251b; border-color: #c7efc9; }
+.analysis-footer .song-align:disabled { color: #899b8e; border-color: #425248; }
+@media (max-width: 650px) { .analysis-footer { padding: 6px 12px; } .analysis-footer > span:first-child { display: none; } .analysis-footer > button:last-child { margin-left: 0; } }
+.song-pass-status { flex: none; }

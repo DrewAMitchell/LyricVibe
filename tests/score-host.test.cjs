@@ -12,7 +12,7 @@ const scoreSource = fs.readFileSync(path.join(root, 'extension/score-core.js'), 
 const hostSource = fs.readFileSync(path.join(root, 'extension/score-host.js'), 'utf8');
 const HASH = 'a'.repeat(64);
 const ID_A = 'FIXTURE0001';
-const ID_B = 'FIXTURE0003';
+const ID_B = 'FIXTURE0002';
 
 function makeHarness() {
   const values = Object.create(null);
@@ -355,8 +355,8 @@ test('partial timing preview changes preserve unmarked words and stale source re
 });
 
 test('hyphen word capture stages atomically and saved application can undo the structural split', async () => {
-  const h=makeHarness(), score=await h.ensure(1,ID_A,{lyrics:{synced:'[00:01.00]ice-breaker now\n[00:03.00]',provider:'fixture'}});
-  h.context.recognize=async()=>({ok:true,lyrics:{synced:'[00:05.00]ice-breaker now\n[00:07.00]'},match:{id:2}});
+  const h=makeHarness(), score=await h.ensure(1,ID_A,{lyrics:{synced:'[00:01.00]all-nighter now\n[00:03.00]',provider:'fixture'}});
+  h.context.recognize=async()=>({ok:true,lyrics:{synced:'[00:05.00]all-nighter now\n[00:07.00]'},match:{id:2}});
   const sender={id:'test-extension',tab:{id:1},url:`https://www.youtube.com/watch?v=${ID_A}`};
   const envelope={mediaKey:`youtube:${ID_A}`,expectedRevision:0,lyricsHash:score.lyrics.contentHash};
   const before=JSON.stringify(recordFor(h));
@@ -364,12 +364,12 @@ test('hyphen word capture stages atomically and saved application can undo the s
   assert.equal(prepared.ok,true);
   const wordId=score.phrases[0].words[0].id;
   const tuned=await h.dispatch({type:'LV_TIMING_TUNE',...envelope,token:prepared.preview.token,previewRevision:0,changes:[{
-    wordId,startMs:5050,endMs:5600,hyphenParts:[{text:'ice-',startMs:5050,endMs:5200},{text:'breaker',startMs:5250,endMs:5600}],
+    wordId,startMs:5050,endMs:5600,hyphenParts:[{text:'all-',startMs:5050,endMs:5200},{text:'nighter',startMs:5250,endMs:5600}],
   }]},sender);
   assert.equal(tuned.ok,true);assert.equal(JSON.stringify(recordFor(h)),before);
   const applied=await h.dispatch({type:'LV_TIMING_APPLY',...envelope,token:prepared.preview.token,previewRevision:tuned.preview.previewRevision},sender);
   assert.equal(applied.ok,true);
-  assert.deepEqual(Array.from(applied.score.phrases[0].words,w=>w.text),['ice-','breaker','now']);
+  assert.deepEqual(Array.from(applied.score.phrases[0].words,w=>w.text),['all-','nighter','now']);
   assert.equal(recordFor(h).history.length,1);
   const undone=await h.dispatch({type:'LV_SCORE_UNDO',mediaKey:envelope.mediaKey,expectedRevision:1},sender);
   assert.equal(undone.ok,true);
@@ -482,6 +482,9 @@ test('native analysis controls require the source-bound editor and exact score r
   assert.equal(h.analysisCalls[0].engine, 'native');
   assert.equal(h.analysisCalls[0].expectedRevision, score.revision);
   assert.equal(h.analysisCalls[0].lyricsHash, score.lyrics.contentHash);
+  const songPass = await h.dispatch({ ...base, wholeSong: true });
+  assert.equal(songPass.ok, true);
+  assert.equal(h.analysisCalls[1].wholeSong, true);
   h.tabs.get(1).isAd = true;
   const stopped = await h.dispatch({ ...base, type: 'LV_NATIVE_ANALYSIS_STOP' });
   assert.equal(stopped.analysis.state, 'stopped');
