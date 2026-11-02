@@ -7,6 +7,7 @@
   "analysis/native-live.js",
   "analysis/offscreen.html",
   "analysis/offscreen.js",
+  "analysis/song-pass.js",
   "analysis/vendor/ort-wasm-simd-threaded.asyncify.mjs",
   "analysis/vendor/ort-wasm-simd-threaded.asyncify.wasm",
   "background-stage.js",
