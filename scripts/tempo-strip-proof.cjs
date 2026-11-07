@@ -52,6 +52,7 @@ const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env
   assert.equal(await evaluate(()=>JSON.stringify({take:__qa.tapping.take,draft:__qa.timing.draft,paused:document.querySelector('video').paused})),before,'BPM adjustment preserves active take and score draft');
   await speed.selectOption('0.5');assert.equal(await evaluate(()=>document.querySelector('video').playbackRate),.5);assert.equal(await evaluate(()=>__qa.tapping.take.status),'armed');
   await page.setViewportSize({width:390,height:844});
+  assert.equal(await strip.getByRole('button',{name:'Half speed',exact:true}).isVisible(),true,'quick speeds remain visible on a narrow screen');
   const rect=await strip.boundingBox();assert.ok(rect.x>=0&&rect.x+rect.width<=391);
   console.log('Tempo strip, no-BPM recording, and hold repeat proof passed');
 })().catch(error=>{console.error(error.stack);process.exitCode=1}).finally(async()=>{await browser?.close();await server?.close();probe('END')});

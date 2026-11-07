@@ -3034,6 +3034,7 @@
 #lvx-root .lvx-sidebar[data-controls-open=false] .lvx-hud-status{flex:1 1 100%;min-height:18px}
 #lvx-root .lvx-sidebar[data-controls-open=false] .lvx-hud-group{padding:2px;gap:2px}
 #lvx-root .lvx-sidebar[data-controls-open=false] .lvx-hud-group>button{min-height:30px;padding:3px 6px}
+#lvx-root .lvx-sidebar[data-controls-open=false] .lvx-speed-group [data-playback-rate]{display:inline-flex;align-items:center;justify-content:center;min-width:30px}
 #lvx-root .lvx-sidebar[data-controls-open=false] .lvx-hud-offset{display:flex!important;align-items:center;gap:2px;padding:2px}
 #lvx-root .lvx-sidebar[data-controls-open=false] .lvx-sidebar-sync-heading,#lvx-root .lvx-sidebar[data-controls-open=false] .lvx-sync-save-note{display:none}
 #lvx-root .lvx-sidebar[data-controls-open=false] .lvx-sync-save-note[data-state=error]{display:block}
