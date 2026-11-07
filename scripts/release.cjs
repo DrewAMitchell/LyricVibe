@@ -169,6 +169,7 @@ async function main(command, args) {
   await run(process.execPath, ['scripts/live-progress-capture-proof.cjs'], source);
   await run(process.execPath, ['scripts/recorder-controls-proof.cjs'], source);
   await run(process.execPath, ['scripts/recorder-controls-proof.cjs', '--narrow'], source);
+  await run(process.execPath, ['scripts/syllable-holds-proof.cjs'], source);
   await run(process.execPath, ['scripts/live-stage-proof.cjs'], source);
   await run(process.execPath, ['scripts/lyric-rail-proof.cjs'], source);
   await run(process.execPath, ['scripts/held-controls-proof.cjs'], source);

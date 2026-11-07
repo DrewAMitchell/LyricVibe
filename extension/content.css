@@ -3517,3 +3517,21 @@
 #lvx-root .lvx-quick-mixer{margin-top:12px;border:1.5px solid #84aeb6;border-radius:6px}
 #lvx-root .lvx-quick-mixer>header{position:relative;top:-16px;margin-bottom:-10px}
 #lvx-root .lvx-quick-mixer>header strong{padding:0 6px;background:#142b35}
+#lvx-root .lvx-sync-panel .lvx-control-section .lvx-capture-keys{gap:4px;margin:4px 0}
+#lvx-root .lvx-sync-panel .lvx-control-section .lvx-capture-keys>[data-capture-key]{gap:2px 5px;padding:4px 6px;border-radius:5px}
+#lvx-root .lvx-sync-panel .lvx-control-section .lvx-capture-keys kbd{padding:2px 4px;font-size:10px}
+#lvx-root .lvx-sync-panel .lvx-control-section .lvx-capture-keys strong{font-size:11px}
+#lvx-root .lvx-sync-panel .lvx-control-section .lvx-capture-keys small,#lvx-root .lvx-sync-panel .lvx-control-section .lvx-capture-feedback{font-size:10px;line-height:1.25}
+#lvx-root .lvx-sync-panel .lvx-control-section .lvx-capture-keys output{font-size:13px}
+#lvx-root .lvx-sync-panel .lvx-control-section .lvx-capture-keys [data-capture-key] small{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+#lvx-root .lvx-sync-panel .lvx-completion-heading .lvx-completion-summary{flex:1;min-width:45px;margin:0;gap:4px}
+#lvx-root .lvx-sync-panel .lvx-completion-heading .lvx-completion-summary>strong{min-width:0;font-size:13px}
+#lvx-root .lvx-sync-panel .lvx-completion-heading .lvx-completion-summary>progress{min-width:20px}
+#lvx-root .lvx-sync-panel .lvx-completion-heading>strong,#lvx-root .lvx-sync-panel .lvx-completion-heading>small{white-space:nowrap}
+#lvx-root .lvx-sync-panel .lvx-completion-heading .lvx-completion-summary{flex:0 0 auto;min-width:0}
+#lvx-root .lvx-sync-panel .lvx-completion-heading .lvx-completion-summary>progress{position:absolute;min-width:0;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+#lvx-root .lvx-sync-panel .lvx-control-section .lvx-capture-keys[data-feedback=idle] .lvx-capture-feedback{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+#lvx-root .lvx-sync-panel .lvx-control-section:has(.lvx-capture-transport){margin-top:8px}
+#lvx-root .lvx-sync-panel{scroll-padding-bottom:90px}
+#lvx-root .lvx-record-footer button{scroll-margin-bottom:90px}
+#lvx-root .lvx-sync-panel .lvx-record-footer{border-top:1px solid #567984;margin-top:4px;padding-top:3px}
