@@ -71,7 +71,11 @@
   // A quiet hint is evidence, not an instruction to advance a take. Require
   // two neighboring words in one phrase and reject ambiguous repetitions.
   function phraseProgress(score, chunks, window) {
-    const matched = matchAnchors(score, chunks, window);
+    // Distinguish repeated choruses using the captured audio's position, while
+    // allowing a small margin for rough phrase boundaries.
+    const start = window.mediaStartMs - (score.offsetMs || 0), end = start + window.durationSec * 1000 * window.playbackRate;
+    const phrases = score.phrases.filter(p => !Number.isFinite(p.startMs) || !Number.isFinite(p.endMs) || p.endMs + 2000 >= start && p.startMs - 2000 <= end);
+    const matched = matchAnchors({ ...score, phrases }, chunks, window);
     if (matched.diagnostics.repeatedSequenceAmbiguous) return null;
     const ownership = new Map();
     for (const phrase of score.phrases) phrase.words.filter(w => !w.excluded).forEach((word, index) => ownership.set(word.id, { phraseId: phrase.id, index }));

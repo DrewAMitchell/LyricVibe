@@ -58,6 +58,11 @@ test('phrase progress remains unknown for repetitions or isolated matches', () =
   assert.equal(phraseProgress(score(['wake', 'me']), chunks(['wake', 'me']), window), null);
 });
 
+test('phrase progress can distinguish repeated lyrics at different song positions', () => {
+  const s=score(['wake me up','wake me up']);s.phrases[0].startMs=0;s.phrases[0].endMs=3000;s.phrases[1].startMs=20000;s.phrases[1].endMs=23000;
+  const hint=phraseProgress(s,chunks(['wake','me','up']),{...window,mediaStartMs:20000,durationSec:2});assert.equal(hint.phraseId,'p1');assert.equal(hint.wordId,'w5');
+});
+
 test('media clock uses sample/context position and invalidates pause, seek, rate and identity changes', () => {
   const clock = new MediaClock();
   const snapshot = { currentTimeMs: 1000, playbackRate: 1, paused: false, seeking: false, mediaKey: 'youtube:a' };
