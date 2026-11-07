@@ -3021,7 +3021,7 @@
 
 /* A compact strip opens the existing controls as one menu below it. */
 #lvx-root .lvx-sidebar[data-controls-open=false]:is(:hover,:focus-within,.lvx-sidebar-pinned),#lvx-root .lvx-sidebar[data-controls-open=false]{width:min(510px,calc(100% - 16px));grid-template-columns:minmax(0,1fr)}
-#lvx-root .lvx-sidebar[data-controls-open=false] :is(.lvx-sidebar-nav,.lvx-hud){display:none!important}
+#lvx-root .lvx-sidebar[data-controls-open=false] .lvx-sidebar-nav{display:none!important}
 #lvx-root .lvx-sidebar[data-controls-open=true]{grid-template-columns:minmax(0,1fr)}
 #lvx-root .lvx-sidebar[data-controls-open=true] .lvx-sidebar-nav{grid-column:1/-1}
 #lvx-root .lvx-sidebar[data-controls-open=true] .lvx-sidebar-items{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%;box-sizing:border-box}
@@ -3029,21 +3029,22 @@
 #lvx-root .lvx-sidebar[data-controls-open=true] .lvx-hud{grid-column:1/-1}
 #lvx-root.lvx-lyrics-only.lvx-recording-controls .lvx-sidebar{display:grid!important}
 #lvx-root.lvx-lyrics-only.lvx-recording-controls .lvx-controls-notice{display:none!important}
-#lvx-root.lvx-lyrics-only.lvx-recording-controls .lvx-sidebar[data-controls-open=false] .lvx-hud{display:flex!important;flex-direction:row;flex-wrap:wrap;align-items:center;grid-column:1/-1;width:auto;opacity:1;visibility:visible;pointer-events:auto;gap:3px;padding:4px}
-#lvx-root.lvx-lyrics-only.lvx-recording-controls .lvx-sidebar .lvx-hud>*{order:0;flex:0 1 auto}
-#lvx-root.lvx-lyrics-only.lvx-recording-controls .lvx-sidebar .lvx-hud-status{flex:1 1 100%;min-height:18px}
-#lvx-root.lvx-lyrics-only.lvx-recording-controls .lvx-sidebar .lvx-hud-group{padding:2px;gap:2px}
-#lvx-root.lvx-lyrics-only.lvx-recording-controls .lvx-sidebar .lvx-hud-group>button{min-height:30px;padding:3px 6px}
-#lvx-root.lvx-lyrics-only.lvx-recording-controls .lvx-sidebar .lvx-hud-offset{display:flex!important;align-items:center;gap:2px;padding:2px}
-#lvx-root.lvx-lyrics-only.lvx-recording-controls .lvx-sidebar .lvx-sidebar-sync-heading,#lvx-root.lvx-lyrics-only.lvx-recording-controls .lvx-sidebar .lvx-sync-save-note{display:none}
-#lvx-root.lvx-lyrics-only.lvx-recording-controls .lvx-sidebar .lvx-sync-save-note[data-state=error]{display:block}
-#lvx-root.lvx-lyrics-only.lvx-recording-controls .lvx-sidebar .lvx-hud-offset .lvx-offset-control{font-size:0}
+#lvx-root .lvx-sidebar[data-controls-open=false] .lvx-hud{display:flex!important;flex-direction:row;flex-wrap:wrap;align-items:center;grid-column:1/-1;width:auto;opacity:1;visibility:visible;pointer-events:auto;gap:3px;padding:4px}
+#lvx-root .lvx-sidebar[data-controls-open=false] .lvx-hud>*{order:0;flex:0 1 auto}
+#lvx-root .lvx-sidebar[data-controls-open=false] .lvx-hud-status{flex:1 1 100%;min-height:18px}
+#lvx-root .lvx-sidebar[data-controls-open=false] .lvx-hud-group{padding:2px;gap:2px}
+#lvx-root .lvx-sidebar[data-controls-open=false] .lvx-hud-group>button{min-height:30px;padding:3px 6px}
+#lvx-root .lvx-sidebar[data-controls-open=false] .lvx-hud-offset{display:flex!important;align-items:center;gap:2px;padding:2px}
+#lvx-root .lvx-sidebar[data-controls-open=false] .lvx-sidebar-sync-heading,#lvx-root .lvx-sidebar[data-controls-open=false] .lvx-sync-save-note{display:none}
+#lvx-root .lvx-sidebar[data-controls-open=false] .lvx-sync-save-note[data-state=error]{display:block}
+#lvx-root .lvx-sidebar[data-controls-open=false] .lvx-hud-offset .lvx-offset-control{font-size:0}
 #lvx-root .lvx-control-header{flex-wrap:wrap}
 #lvx-root .lvx-control-header .lvx-control-handle{flex:1 1 70px}
 #lvx-root .lvx-control-header .lvx-sidebar-tempo{display:flex;align-items:stretch;gap:3px;flex:0 1 auto}
 #lvx-root .lvx-sidebar .lvx-control-header .lvx-tempo-button{display:flex;gap:4px;width:auto;min-height:34px;padding:4px 7px;border-radius:6px;white-space:nowrap}
 #lvx-root .lvx-control-header .lvx-tempo-phase{display:none}
 #lvx-root .lvx-control-header .lvx-sidebar-downbeat{font-size:10px}
+#lvx-root .lvx-control-header .lvx-tempo-adjust{touch-action:none;user-select:none}
 
 /* Echo/Glitch own bounded paint only while their source-clock cue is active. */
 #lvx-root .lvx-accent-shadow{ text-shadow:var(--lvx-beat-shadow,var(--lvx-expression-shadow))!important }

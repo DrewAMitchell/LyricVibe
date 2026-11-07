@@ -2,7 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{chromium}=require('playwright');
 const root=path.resolve(__dirname,'..'),source='https://www.youtube.com/watch?v=TESTVIDEO01',next='https://www.youtube.com/watch?v=TESTVIDEO02';
 let server,browser,browserPid;
-const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env.LV_PROBE_LEDGER,`\n- ${new Date().toISOString()} ${state} LyricVibe live stage proof Node PID${process.pid}, Chrome PID${browserPid}; finite production UI verification, finally-close.\n`);};
+const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env.LV_PROBE_LEDGER,`\n- ${new Date().toISOString()} ${state} LyricVibe live stage proof Node PID${process.pid}, Chrome PID${browserPid}; finite production UI verification, finally-close; owner codex01a126ca.\n`);};
 (async()=>{
   server=await chromium.launchServer({channel:'chrome',headless:true});browserPid=server.process().pid;probe('START');console.log(JSON.stringify({browserPid}));
   browser=await chromium.connect(server.wsEndpoint());
@@ -63,6 +63,6 @@ const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env
   await evaluate(()=>{chrome.runtime.sendMessage=__originalSend;});
   await page.locator('[data-live-save]').click();await page.waitForFunction(()=>document.querySelector('[data-live-status]').textContent.includes('saved for this song'));
   assert.equal(await evaluate(()=>__qa.liveStage.ops.length),0);
-  await page.locator('[data-live-close]').click();await page.locator('[data-sidebar-view=live-stage]').click();assert.equal(await page.locator('.lvx-live-dock').isVisible(),true);
+  await page.locator('[data-live-close]').click();await page.getByRole('button',{name:'Open LyricVibe controls',exact:true}).click();await page.locator('[data-sidebar-view=live-stage]').click();assert.equal(await page.locator('.lvx-live-dock').isVisible(),true);
   fs.writeFileSync(path.join(root,'docs/live-stage-proof.json'),JSON.stringify({observedAt:new Date().toISOString(),basis:'Production Chrome, real score host, synthetic source/storage; no user song touched',result,keyboardLayerAddRemoveUndo:true,placementLayer:true,liveStageOnly:true,saveFailureRetainsTake:true,closeReopen:true,narrowDockNoOverflow:true},null,2)+'\n');console.log(JSON.stringify(result));
 })().catch(e=>{console.error(e.stack);process.exitCode=1}).finally(async()=>{await browser?.close();await server?.close();probe('END');});

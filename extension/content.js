@@ -425,7 +425,7 @@
   bindTempoPress(tempoButton,()=>void tapTempo());
   const sidebarDownbeat=document.createElement('button');sidebarDownbeat.type='button';sidebarDownbeat.className='lvx-sidebar-downbeat';sidebarDownbeat.textContent='Beat 1 here';sidebarDownbeat.title='Set beat 1 at the current song position, keeping the BPM';sidebarDownbeat.onclick=()=>syncButton('tempo-downbeat').click();
   const tempoMinus=document.createElement('button'),tempoPlus=document.createElement('button');
-  for(const [button,label,delta] of [[tempoMinus,'Decrease BPM',-1],[tempoPlus,'Increase BPM',1]]){button.type='button';button.textContent=delta<0?'−':'+';button.title=label+' · hold to repeat';button.setAttribute('aria-label',label);bindTempoAdjust(button,delta);}
+  for(const [button,label,delta] of [[tempoMinus,'Decrease BPM',-1],[tempoPlus,'Increase BPM',1]]){button.type='button';button.className='lvx-tempo-adjust';button.textContent=delta<0?'−':'+';button.title=label+' · hold to repeat';button.setAttribute('aria-label',label);bindTempoAdjust(button,delta);}
   tempoControls.append(tempoMinus,tempoButton,tempoPlus,sidebarDownbeat);
   const statusGroup = document.createElement('span'); statusGroup.className = 'lvx-hud-status'; statusGroup.append(hudLabel, hudText);
   const speedGroup=document.createElement('span');speedGroup.className='lvx-hud-group lvx-speed-group';

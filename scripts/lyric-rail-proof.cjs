@@ -2,7 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{chromium}=require('playwright');
 const root=path.resolve(__dirname,'..'),source='https://www.youtube.com/watch?v=TESTVIDEO01',next='https://www.youtube.com/watch?v=TESTVIDEO02';
 let server,browser,browserPid;
-const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env.LV_PROBE_LEDGER,`\n- ${new Date().toISOString()} ${state} LyricVibe lyric rail proof Node PID${process.pid}, Chrome PID${browserPid}; finite production UI verification, finally-close.\n`);};
+const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env.LV_PROBE_LEDGER,`\n- ${new Date().toISOString()} ${state} LyricVibe lyric rail proof Node PID${process.pid}, Chrome PID${browserPid}; finite production UI verification, finally-close; owner codex01a126ca.\n`);};
 (async()=>{
   server=await chromium.launchServer({channel:'chrome',headless:true});browserPid=server.process().pid;probe('START');console.log(JSON.stringify({browserPid}));
   browser=await chromium.connect(server.wsEndpoint());
@@ -71,7 +71,7 @@ const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env
   await page.screenshot({path:path.join(root,'docs/lyric-rail-recorded-motion.png')});
   await page.locator('[data-live-save]').click();await page.waitForFunction(()=>document.querySelector('[data-live-status]').textContent.includes('saved for this song'));
   assert.equal(await evaluate(()=>JSON.stringify(__store['lvScore:youtube:TESTVIDEO01'].score.phrases)===__timings),true);assert.equal(await evaluate(()=>__store['lvScore:youtube:TESTVIDEO01'].score.choreographyLayers.length),3);
-  await page.locator('[data-live-close]').click();await page.locator('[data-sidebar-view=live-stage]').click();await page.getByRole('button',{name:'Select MOON',exact:true}).click();assert.equal(await evaluate(()=>__qa.liveStage.preview?.choreographyLayers.length??__store['lvScore:youtube:TESTVIDEO01'].score.choreographyLayers.length),3);
+  await page.locator('[data-live-close]').click();await page.getByRole('button',{name:'Open LyricVibe controls',exact:true}).click();await page.locator('[data-sidebar-view=live-stage]').click();await page.getByRole('button',{name:'Select MOON',exact:true}).click();assert.equal(await evaluate(()=>__qa.liveStage.preview?.choreographyLayers.length??__store['lvScore:youtube:TESTVIDEO01'].score.choreographyLayers.length),3);
   // One complete motion capture is one local Undo, including all sampled points.
   await page.getByRole('button',{name:'Record motion',exact:true}).click();const again=await page.locator('[data-path-handle=end]').boundingBox();await page.mouse.move(again.x+again.width/2,again.y+again.height/2);await page.mouse.down();await evaluate(()=>document.querySelector('video').currentTime=3.8);await page.mouse.move(pt(.6,.6).x,pt(.6,.6).y);await page.mouse.up();await page.locator('[data-live-undo]').click();assert.equal(await evaluate(()=>__qa.liveStage.preview),null);
   // Source-clock cancellation restores the selected pause position and adds no operation.

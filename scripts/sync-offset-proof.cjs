@@ -51,6 +51,7 @@ log('START',process.pid);let server,browser;
   assert.equal(await page.locator('.lvx-sync-retry').isVisible(),true,'failed save exposes retry');
   assert.match(await page.locator('.lvx-sync-save-note').textContent(),/Not saved/);
   assert.equal(await evaluate(()=>__qa.hasUnsavedWork()),true,'unconfirmed offset remains protected as unsaved work');
+  if(await page.getByRole('button',{name:'Close error details'}).isVisible())await page.getByRole('button',{name:'Close error details'}).click();
   await page.locator('.lvx-sync-retry').click();
   await evaluate(async()=>{await new Promise(r=>setTimeout(r,180));});
   assert.equal(await evaluate(()=>__saved.offsetMs),-190);
