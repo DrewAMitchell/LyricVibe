@@ -19,6 +19,7 @@ const ledger=process.env.LV_PROBE_LEDGER;function mark(state){if(ledger)fs.appen
   assert.equal(await page.locator('[data-sync=transcript-text]').inputValue(),'HELLO WORLD');
   assert.equal(await evaluate(()=>JSON.stringify(__qa.timing.draft.score)),await evaluate(()=>__before));
   assert.match(await page.locator('[data-format=status]').innerText(),/original lyrics and timings have not changed/);
+  await page.locator('[data-sync=transcript-text]').fill('HELLO AGAIN');assert.equal(await result.isHidden(),true,'editing lyrics invalidates an old formatting preview');
   if(process.env.LV_FORMAT_PREVIEW_SCREENSHOT)await page.screenshot({path:process.env.LV_FORMAT_PREVIEW_SCREENSHOT});
   console.log(JSON.stringify({ok:true,previewSeparate:true,sourceScoreAndTimingUnchanged:true,mockModel:true}));
 })().catch(error=>{console.error(error.stack);process.exitCode=1}).finally(async()=>{await browser?.close();await server?.close();mark('END');});

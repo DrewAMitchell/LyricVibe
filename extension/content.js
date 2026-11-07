@@ -991,7 +991,7 @@
   transcriptDialog.querySelector('.lvx-transcript-pager').after(formatPanel);
   const formatButton=formatPanel.querySelector('[data-format=suggest]'),formatStatus=formatPanel.querySelector('[data-format=status]'),formatResult=formatPanel.querySelector('[data-format=result]'),formatCopy=formatPanel.querySelector('[data-format=copy]');
   formatCopy.onclick=async()=>{try{await navigator.clipboard.writeText(formatResult.value);formatStatus.textContent='Suggestion copied. Original lyrics and timings are unchanged.';}catch(_){formatResult.focus();formatResult.select();formatStatus.textContent='Select and copy the suggestion. Original lyrics and timings are unchanged.';}};
-  let formatBusy=false;
+  let formatBusy=false,formatShownFor=null;
   formatButton.onclick=async()=>{
     if(formatBusy||!timing.draft||transcript.dirty){formatStatus.textContent='Apply or undo lyric text edits before generating a separate suggestion.';return;}
     const draft=timing.draft,score=draft.score,revision=draft.previewRevision,source=LvScore.mediaKey(score.source),items=LvTranscriptText.formatWords(score),area=syncButton('transcript-text'),original=area.value;
@@ -1001,7 +1001,7 @@
       const response=await chrome.runtime.sendMessage({type:'LV_FORMAT_PREVIEW',mediaKey:source,words:items.map(item=>item.core)});
       if(!response?.ok)throw Error(response?.error?.message||'Formatting did not complete.');
       if(!transcriptDialog.open||timing.draft?.token!==draft.token||timing.draft?.previewRevision!==revision||transcript.dirty||area.value!==original||LvScore.mediaKey({url:location.href})!==source)throw Error('The lyrics changed while formatting. Generate a fresh suggestion.');
-      const result=LvTranscriptText.formatPreview(score,items,response.result);formatResult.value=result.text;formatResult.hidden=false;formatCopy.hidden=false;
+      const result=LvTranscriptText.formatPreview(score,items,response.result);formatResult.value=result.text;formatResult.hidden=false;formatCopy.hidden=false;formatShownFor=`${draft.token}:${revision}`;
       formatStatus.textContent=`Suggested formatting · ${result.matched} of ${result.total} words matched. Review it below; the original lyrics and timings have not changed.`;
     }catch(error){formatStatus.textContent=error.message||'Formatting failed. Original lyrics and timings are unchanged.';}
     finally{formatBusy=false;formatButton.disabled=false;}
@@ -1291,6 +1291,7 @@
     // An older worker may inject this overlay without the transcript module until the extension reloads.
     const missing=typeof LvTranscriptText==='undefined';syncButton('transcript-open').hidden=missing;if(missing)return;
     const draft=timing.draft,binding=draft?`${draft.token}:${draft.previewRevision}`:null;
+    if(formatShownFor&&(formatShownFor!==binding||transcript.dirty)){formatShownFor=null;formatResult.hidden=true;formatCopy.hidden=true;formatStatus.textContent='Lyrics changed. Generate a fresh formatting suggestion.';}
     if(!transcript.dirty&&draft&&transcript.shownFor!==binding){area.value=LvTranscriptText.toText(draft.score);transcript.shownFor=binding;transcript.laneEdits=[];}
     refreshTranscriptTracks();
     const sourceReady=Boolean(LvScore.mediaKey({url:location.href}));
