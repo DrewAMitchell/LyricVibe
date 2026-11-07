@@ -260,13 +260,6 @@
     teardown();
   });
 
-  const themeButton = document.createElement('button');
-  themeButton.className = 'lvx-theme-btn';
-  themeButton.textContent = 'SAMAY';
-  themeButton.title = 'Choose a lyric display style (previews use this video\u2019s lyrics)';
-  themeButton.setAttribute('aria-haspopup', 'dialog');
-  themeButton.addEventListener('click', () => void openLiveStage());
-
   const syncEarlier = document.createElement('button');
   syncEarlier.className = 'lvx-sync-btn';
   syncEarlier.textContent = '−';
@@ -344,7 +337,7 @@
   editButton.title = 'Open the full timeline editor in its own window';
   editButton.setAttribute('aria-label', 'Open the full timeline editor');
   editButton.addEventListener('click', async () => {
-    await loadTempo();if(!hasBaselineTempo()){await openTempoSetup();return;}
+    await loadTempo();
     chrome.runtime.sendMessage({ type: 'LV_EDITOR_OPEN', mediaKey: globalThis.LvScore?.mediaKey({ url: location.href }) }).then(result => {
       if (!result?.ok) setHud(result?.error?.message || 'Editor could not open', true, true);
     }).catch(error => setHud(error.message, true, true));
@@ -388,7 +381,6 @@
   const sidebar = document.createElement('aside'); sidebar.className = 'lvx-sidebar lvx-sidebar-pinned'; sidebar.setAttribute('aria-label','LyricVibe controls');
   const sidebarNav = document.createElement('nav'); sidebarNav.className = 'lvx-sidebar-nav'; sidebarNav.setAttribute('aria-label','LyricVibe views');
   const sidebarItems = document.createElement('div'); sidebarItems.className = 'lvx-sidebar-items';
-  const sidebarPin = document.createElement('button'); sidebarPin.type='button';sidebarPin.className='lvx-sidebar-pin';sidebarPin.textContent='LV';sidebarPin.title='Pin or unpin controls';sidebarPin.setAttribute('aria-label','Unpin controls');sidebarPin.setAttribute('aria-pressed','true');
   const sidebarView = (key,label,title,activate) => { const button=document.createElement('button');button.type='button';button.dataset.sidebarView=key;button.textContent=label;button.title=title;button.onclick=activate;sidebarItems.append(button);return button; };
   const liveStageView=sidebarView('live-stage','Stage live','Perform choreography on the song stage',()=>void openLiveStage());
   const displayLookView=sidebarView('display-look','Look','Display · choose a look',()=>{studio.view='look';toggleThemePicker(true);syncSidebarState();});
@@ -421,15 +413,20 @@
     listenRuntime((message,sender,respond)=>{if(message?.type==='LV_BACKGROUND_STAGE_STATE'){applyBackgroundStage(message);respond({ok:true});}});
     chrome.runtime.sendMessage({type:'LV_BACKGROUND_STAGE_GET'}).then(result=>{if(result?.ok)applyBackgroundStage(result);}).catch(()=>{});
   }
-  sidebarNav.append(sidebarPin,sidebarItems);
+  // Order the entry points by the usual workflow: prepare and record first,
+  // display choices next, then performance polish.
+  sidebarItems.prepend(timingRecordView,timingRefineView,displayWordsView,displayLookView,displayMotionView,timingEffectsView,timingBeatView,displayStageView,stageEditView,liveStageView);
+  sidebarNav.append(sidebarItems);
   const tempoControls=document.createElement('div');tempoControls.className='lvx-sidebar-tempo';tempoControls.setAttribute('role','group');tempoControls.setAttribute('aria-label','Beat timing');
   const tempoButton=document.createElement('button');tempoButton.className='lvx-theme-btn lvx-tempo-button';
   tempoButton.innerHTML='<span class="lvx-tempo-caption">♩ — BPM · T</span><span class="lvx-tempo-position" aria-hidden="true">—</span><span class="lvx-tempo-phase" aria-hidden="true"><i></i><b></b></span>';
   const tempoCaption=tempoButton.querySelector('.lvx-tempo-caption'),tempoPosition=tempoButton.querySelector('.lvx-tempo-position');
   tempoButton.title='Tap here or press T. The first tap sets beat 1. Beat clicker has exact BPM and Click controls; Sections opens duration blocks.';
-  bindTempoPress(tempoButton,()=>void (hasBaselineTempo()?tapTempo():openTempoSetup()));
+  bindTempoPress(tempoButton,()=>void tapTempo());
   const sidebarDownbeat=document.createElement('button');sidebarDownbeat.type='button';sidebarDownbeat.className='lvx-sidebar-downbeat';sidebarDownbeat.textContent='Beat 1 here';sidebarDownbeat.title='Set beat 1 at the current song position, keeping the BPM';sidebarDownbeat.onclick=()=>syncButton('tempo-downbeat').click();
-  tempoControls.append(tempoButton,sidebarDownbeat);
+  const tempoMinus=document.createElement('button'),tempoPlus=document.createElement('button');
+  for(const [button,label,delta] of [[tempoMinus,'Decrease BPM',-1],[tempoPlus,'Increase BPM',1]]){button.type='button';button.textContent=delta<0?'−':'+';button.title=label+' · hold to repeat';button.setAttribute('aria-label',label);bindTempoAdjust(button,delta);}
+  tempoControls.append(tempoMinus,tempoButton,tempoPlus,sidebarDownbeat);
   const statusGroup = document.createElement('span'); statusGroup.className = 'lvx-hud-status'; statusGroup.append(hudLabel, hudText);
   const speedGroup=document.createElement('span');speedGroup.className='lvx-hud-group lvx-speed-group';
   speedGroup.setAttribute('role','group');speedGroup.setAttribute('aria-label','Playback speed');
@@ -438,13 +435,17 @@
   for(const rate of PLAYBACK_RATES){const option=document.createElement('option');option.value=String(rate);option.textContent=rate+'×';speedSelect.append(option);}
   for(const [rate,label,title]of [[.5,'½×','Half speed'],[.75,'¾×','Three-quarter speed'],[1,'1×','Real-time speed']]){const button=document.createElement('button');button.type='button';button.textContent=label;button.dataset.playbackRate=rate;button.title=title;button.setAttribute('aria-label',title);button.onclick=()=>setPlaybackSpeed(rate);speedGroup.append(button);}
   speedGroup.append(speedSelect);speedSelect.onchange=()=>setPlaybackSpeed(Number(speedSelect.value));
-  hud.append(statusGroup, speedGroup, offsetGroup, editGroup, themeButton, tempoControls, errorButton, endGroup);
+  hud.append(statusGroup, speedGroup, offsetGroup, editGroup, errorButton, endGroup);
   sidebar.append(sidebarNav,hud);
   let controlPlacement={x:0,y:0,orientation:'vertical'},controlDrag=null;
   const controlHandle=document.createElement('button');controlHandle.type='button';controlHandle.className='lvx-control-handle';controlHandle.textContent='⠿ LyricVibe';controlHandle.title='Drag to move controls · arrow keys move when focused';controlHandle.setAttribute('aria-label','Move LyricVibe controls');
   const controlOrientation=document.createElement('button');controlOrientation.type='button';controlOrientation.className='lvx-control-orientation';
   const controlReset=document.createElement('button');controlReset.type='button';controlReset.textContent='↺';controlReset.title='Reset controls position';controlReset.setAttribute('aria-label','Reset controls position');
-  const controlHeader=document.createElement('div');controlHeader.className='lvx-control-header';controlHeader.append(controlHandle,controlOrientation,controlReset);sidebar.prepend(controlHeader);
+  const controlMenu=document.createElement('button');controlMenu.type='button';controlMenu.textContent='☰';controlMenu.title='Open LyricVibe controls';controlMenu.setAttribute('aria-label','Open LyricVibe controls');controlMenu.setAttribute('aria-expanded','false');
+  const controlHeader=document.createElement('div');controlHeader.className='lvx-control-header';controlHeader.append(controlMenu,controlHandle,tempoControls,controlOrientation,controlReset);sidebar.prepend(controlHeader);
+  sidebar.dataset.controlsOpen='false';
+  function setControlsOpen(open){sidebar.dataset.controlsOpen=String(open);controlMenu.setAttribute('aria-expanded',String(open));controlMenu.setAttribute('aria-label',open?'Close LyricVibe controls':'Open LyricVibe controls');controlMenu.title=open?'Close LyricVibe controls':'Open LyricVibe controls';}
+  controlMenu.onclick=()=>setControlsOpen(sidebar.dataset.controlsOpen!=='true');
   function placeControls(){
     sidebar.dataset.orientation=controlPlacement.orientation;
     controlOrientation.textContent=controlPlacement.orientation==='vertical'?'↔':'↕';controlOrientation.setAttribute('aria-label',controlPlacement.orientation==='vertical'?'Use horizontal controls':'Use vertical controls');controlOrientation.title=controlOrientation.getAttribute('aria-label');
@@ -461,7 +462,6 @@
   controlOrientation.onclick=()=>{controlPlacement.orientation=controlPlacement.orientation==='vertical'?'horizontal':'vertical';placeControls();saveControlPlacement();};
   controlReset.onclick=()=>{controlPlacement.x=0;controlPlacement.y=0;placeControls();saveControlPlacement();};
   const controlSizeObserver=new ResizeObserver(placeControls);controlSizeObserver.observe(sidebar);controlSizeObserver.observe(root);
-  sidebarPin.onclick=()=>{const pinned=sidebar.classList.toggle('lvx-sidebar-pinned');sidebarPin.setAttribute('aria-pressed',String(pinned));sidebarPin.setAttribute('aria-label',pinned?'Unpin controls':'Pin controls open');};
   const syncSidebarState=()=>{
     const locked=timing.busy||liveStage.active||tapping.take?.status==='armed'||performanceTake.armed||countIn.active;
     for(const button of [liveStageView,displayLookView,displayMotionView,displayWordsView,displayStageView,stageEditView,timingRecordView,timingRefineView,timingEffectsView,timingBeatView])button.disabled=locked;
@@ -755,7 +755,7 @@
   }
   function organizeStyleStudio({heading,performanceControls,motionControls,danceLabel,bloomLabel,lingerControls,settings,grid}){
     heading.className='lvx-studio-heading';heading.innerHTML='<div><small>LYRICVIBE</small><h2>Display style</h2></div><button type="button" aria-label="Close display studio">✕</button>';
-    heading.querySelector('button').onclick=()=>{toggleThemePicker(false);themeButton.focus();};
+    heading.querySelector('button').onclick=()=>{toggleThemePicker(false);controlMenu.focus();};
     const tabs=document.createElement('div');tabs.className='lvx-studio-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Display studio');
     const panels={};
     for(const [id,label,hint]of [['look','Look','Font & color'],['motion','Motion','Layout & dance'],['words','Words','Rules & emoji'],['stage','Stage','Position & exits']]){
@@ -823,14 +823,14 @@
   function toggleThemePicker(force) {
     const open = force ?? themePicker.hidden;
     if(open){void loadPlacement();const key=wordPresetKey();if(studio.wordSetMediaKey!==key){studio.wordSetMediaKey=key;studio.wordSetId=LvChoreography.wordSetFor(wordRuleSets,key).id;}buildThemePicker();}
-    themePicker.hidden = !open; themeButton.setAttribute('aria-expanded', String(open));
+    themePicker.hidden = !open;
     if(open)setPreviewPlaying(previewPlaying);else setPreviewPlaying(false);
     if(!open&&!placementEditing)bounds.hidden=true;
     if (open) themePicker.querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
   }
   function syncPlacementFields(){for(const input of themePicker.querySelectorAll('[data-placement]'))if(document.activeElement!==input)input.value=String(Math.round(placement[input.dataset.placement]*10)/10);const status=themePicker.querySelector('[data-placement-status]');if(status)status.textContent=placementSaveError?'Area not saved: '+placementSaveError:!placementSongKey()?'Global default · this player has no supported song identity':songPlacement?'This song · custom area':'This song · using global default';const inherit=themePicker.querySelector('[data-placement-inherit]');if(inherit)inherit.disabled=!songPlacement;const global=themePicker.querySelector('[data-placement-global]');if(global)global.disabled=!placementSongKey();}
-  themePicker.addEventListener('keydown', event => { if (event.key === 'Escape') { event.stopPropagation(); toggleThemePicker(false); themeButton.focus(); } });
-  listenGlobal(document,'pointerdown', event => { if (!themePicker.hidden && !themePicker.contains(event.target) && !bounds.contains(event.target) && event.target !== themeButton) toggleThemePicker(false); }, true);
+  themePicker.addEventListener('keydown', event => { if (event.key === 'Escape') { event.stopPropagation(); toggleThemePicker(false); controlMenu.focus(); } });
+  listenGlobal(document,'pointerdown', event => { if (!themePicker.hidden && !themePicker.contains(event.target) && !bounds.contains(event.target)) toggleThemePicker(false); }, true);
 
   let captureLeadInMs=800,captureLeadInEdited=false;
   function leadInControl(label){
@@ -853,6 +853,7 @@
   recordingTransport.append(leadInControl('Playback lead-in seconds'));
   function refreshRecordingTransport(){
     const take=tapping.take,visible=Boolean(timing.draft&&!syncPanel.hidden&&(countIn.previewTake||take&&['armed','complete'].includes(take.status)));
+    root.classList.toggle('lvx-recording-controls',visible);
     recordingTransport.hidden=!visible;if(!visible)return;
     const blocked=timing.busy||countIn.active||countIn.preparing||!take||take.pendingStartMs!==null||isAdvertisement()||youtubeMediaState()?.clockUsable===false;
     recordingTransport.querySelector('select').disabled=blocked;
@@ -1402,32 +1403,17 @@
     }catch(error){setSyncNotice(error.message,'error');}finally{timing.busy=false;refreshTimingPanel();}
   }
 
-  const tempo={mediaKey:null,taps:[],estimate:null,map:null,history:[],revision:0,sessionStartMs:null,write:Promise.resolve(),openAfterSetup:false};
+  const tempo={mediaKey:null,taps:[],estimate:null,map:null,history:[],revision:0,sessionStartMs:null,write:Promise.resolve()};
   const tempoSourceKey=()=>exportHost?LvScore.mediaKey(exportHost.packet.score.source):LvScore.mediaKey({url:location.href});
   const hasBaselineTempo=()=>Boolean(tempo.map&&tempo.mediaKey===tempoSourceKey());
   function refreshTempoGate(){
-    const required=Boolean(!liveStage.active&&!stageEdit?.active&&tempoSourceKey()&&tempo.mediaKey===tempoSourceKey()&&!tempo.map);
-    if(required&&!root.classList.contains('lvx-tempo-required'))setSyncNotice('Set the song’s baseline BPM first. It sets the count-in and beat grid; refine tempo sections later.');
-    root.classList.toggle('lvx-tempo-required',required);
-    syncPanel.querySelector('h2').textContent=required?'Set baseline BPM':'Edit timing';
-    syncButton('tempo-save').textContent=required?'Set BPM & continue':'Set BPM';
-    const summary=syncPanel.querySelector('.lvx-tempo-panel summary');summary.firstChild.nodeValue=required?'Baseline BPM ':'Beat clicker ';summary.querySelector('span').textContent=required?'type it or tap four beats':'T · tap the beat';
-    syncButton('tempo-sections').disabled=!state.score||required;
-    if(required){syncPanel.hidden=false;syncPanel.querySelector('.lvx-tempo-panel').open=true;if(typeof timingWorkspace!=='undefined'&&timingWorkspace.tabs)setTimingWorkspace('beat');}
-    return required;
-  }
-  async function openTempoSetup(editAfter=false){
-    tempo.openAfterSetup ||= editAfter;
-    await loadTempo();
-    if(hasBaselineTempo()){if(editAfter)await openTimingReview();return;}
-    refreshTempoGate();refreshTimingPanel();
-    setSyncNotice('Set the song’s baseline BPM first. It sets the count-in and beat grid; you can refine tempo sections later.');
-    syncButton('tempo-bpm').focus({preventScroll:true});syncButton('tempo-bpm').select();
+    root.classList.remove('lvx-tempo-required');
+    syncPanel.querySelector('h2').textContent='Edit timing';syncButton('tempo-save').textContent='Set BPM';
+    const summary=syncPanel.querySelector('.lvx-tempo-panel summary');summary.firstChild.nodeValue='Beat clicker ';summary.querySelector('span').textContent='T · tap the beat';
+    syncButton('tempo-sections').disabled=!state.score||!hasBaselineTempo();return false;
   }
   async function finishTempoSetup(){
     await persistTempo();refreshTempoGate();
-    if(tempo.openAfterSetup){tempo.openAfterSetup=false;await openTimingReview();}
-    else if(!timing.draft){syncPanel.hidden=true;refreshTimingPanel();setHud('BPM set. Open Edit timing to record or refine this video.');}
   }
   let observedRate=null,observedRateMedia=null,observedRateSource=null,preferredRate=null,ratePreferenceLoaded=false;
   function persistPlaybackRate(rate){
@@ -1510,7 +1496,7 @@
     tempo.mediaKey=mediaKey;applyTempoToGrid();refreshTempoEditor();refreshTempoGate();refreshTimingPanel();refreshBeatPulse(getMediaTimeMs());return tempo;
   }
   function applyTempoToGrid(){const value=LvTapTiming.tempoAt(tempo.map,getMediaTimeMs());if(!value)return;const bpm=syncButton('tap-bpm');bpm.step='1';bpm.value=String(Math.round(value.bpm));}
-  function tempoEditable(){if(tapping.take?.status==='armed'||performanceTake.armed||countIn.active||countIn.preparing){setSyncNotice('Stop the take before editing or tapping tempo.','warn');return false;}return Boolean(tempo.mediaKey&&tempo.mediaKey===tempoSourceKey());}
+  function tempoEditable(){if(countIn.active||countIn.preparing){setSyncNotice('Wait for the count-in before changing tempo.','warn');return false;}return Boolean(tempo.mediaKey&&tempo.mediaKey===tempoSourceKey());}
   function persistTempo(){
     const mediaKey=tempo.mediaKey,packet=JSON.parse(JSON.stringify({taps:tempo.taps,estimate:tempo.estimate,map:tempo.map,revision:tempo.revision,clickEnabled:beatClick.enabled,updatedAt:new Date().toISOString()}));
     tempo.write=tempo.write.catch(()=>{}).then(()=>chrome.storage.local.set({['lvTempo:'+mediaKey]:packet}));tempo.write.catch(error=>{syncPanel.querySelector('.lvx-tempo-status').textContent='Tempo kept in this tab; local save failed: '+error.message;});return tempo.write;
@@ -1526,6 +1512,19 @@
     button.addEventListener('pointerdown',event=>{if(event.button===0&&event.isPrimary&&!button.disabled)action();});
     // Keyboard and assistive activation still use click; pointer release must not add a second tap.
     button.addEventListener('click',event=>{if(event.detail===0&&!button.disabled)action();});
+  }
+  function bindTempoAdjust(button,delta){
+    let delay=null,repeat=null;
+    const stop=()=>{clearTimeout(delay);clearInterval(repeat);delay=repeat=null;};
+    button.addEventListener('pointerdown',event=>{if(event.button!==0||!event.isPrimary||button.disabled)return;event.preventDefault();button.setPointerCapture(event.pointerId);void adjustTempo(delta);delay=setTimeout(()=>{repeat=setInterval(()=>void adjustTempo(delta),180);},450);});
+    for(const type of ['pointerup','pointercancel','lostpointercapture'])button.addEventListener(type,stop);
+    button.addEventListener('click',event=>{if(event.detail===0&&!button.disabled)void adjustTempo(delta);});
+  }
+  async function adjustTempo(delta){
+    await loadTempo();if(!tempoEditable())return;
+    const at=Math.round(getMediaTimeMs()),current=tempo.map,point=current?LvTapTiming.tempoAt(current,at):null,bpm=Math.max(20,Math.min(400,Math.round(point?.bpm??120)+delta));
+    const map=current||{version:1,anchorMs:at,segments:[{startMs:0,bpm:120,transition:'step',provenance:'manual'}]};
+    updateTempoMap(LvTapTiming.setTempoPoint(map,{...map.segments[point?.index??0],bpm,transition:'step',provenance:'manual'}));
   }
   async function tapTempo(){
     const media=getMedia(),key=tempoSourceKey(),ms=Math.round((media?.currentTime||0)*1000);if(!media||!key)return;
@@ -1575,8 +1574,8 @@
     const phaseValue=e?e.phase:0,impact=e&&!bloomMotion.matches?Math.pow(1-phaseValue,3):0;
     tempoButton.style.setProperty('--lvx-beat-phase',phaseValue.toFixed(4));tempoButton.style.setProperty('--lvx-beat-impact',impact.toFixed(4));
     tempoButton.dataset.phase=phaseValue.toFixed(4);tempoButton.dataset.beat=String(beatInBar??'');tempoButton.dataset.ready=String(Boolean(e));
-    const locked=timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active;
-    tempoButton.disabled=Boolean(locked);sidebarDownbeat.disabled=Boolean(locked||!valid||!getMedia());
+    const locked=countIn.active||countIn.preparing;
+    tempoButton.disabled=Boolean(locked);tempoMinus.disabled=tempoPlus.disabled=Boolean(locked||!valid||!getMedia());sidebarDownbeat.disabled=Boolean(locked||!valid||!getMedia());
     const accessible=e?`${Math.round(e.bpm)} BPM. Beat ${beatInBar} of ${beatsPerBar}. Tap tempo or press T.`:'Set tempo or tap four beats.';
     if(tempoButton.getAttribute('aria-label')!==accessible)tempoButton.setAttribute('aria-label',accessible);
     const on=String(Boolean(e&&e.phase<.18));if(tempoButton.dataset.on!==on)tempoButton.dataset.on=on;
@@ -2425,8 +2424,8 @@
       if(rawTake(tapping.take)&&recordingConflicts().size){await archiveEvents();discardTapTake();}
       const fromPause=media.paused&&!keepPlayback,keepPaused=keepPlayback&&media.paused;
       countIn.preparing=fromPause;
-      if(fromPause)await enableBeatAudio();
-      await loadTempo();if(!hasBaselineTempo())throw Error('Set baseline BPM before recording.');
+      await loadTempo();
+      if(fromPause&&hasBaselineTempo())await enableBeatAudio();
       const unplaced=unplacedWords().length>0;
       if(unplaced&&phrase.endEstimated&&mode==='syllable'&&!eventPass()&&!wordPass())throw Error('These lyrics have no reliable timing frames yet. Use freely recorded syllable holds, or record word/phrase timings first.');
       const syllableStart=mode==='syllable'&&!wordPass()&&!tapping.take&&tapping.syllableStartKey!==LvScore.mediaKey(state.score.source);
@@ -2520,7 +2519,7 @@
       if(!keepPlayback)media.currentTime = tapping.armSeekMs / 1000;
       renderScore(getMediaTimeMs());refreshCapturePlayback(getMediaTimeMs()-timingOffsetMs());
       const needsCountIn=fromPause&&(!partRun||partRun.index===0&&!partRun.repeating||partStep?.countIn);
-      if(needsCountIn)await countInToPhrase(media,phrase,tapping.armSeekMs);
+      if(needsCountIn&&hasBaselineTempo())await countInToPhrase(media,phrase,tapping.armSeekMs);
       if(!keepPaused)await media.play();
       if (!timing.draft || LvScore.mediaKey({url:location.href}) !== LvScore.mediaKey(state.score.source)) throw Error('Source changed before the take started.');
       if(syllableStart)tapping.syllableStartKey=LvScore.mediaKey(state.score.source);
@@ -3594,7 +3593,6 @@
     if(!state.score&&!state.plainLyrics?.text){await openTranscriptEditor();return;}
     if(stageEdit.active){closeStageEdit();if(stageEdit.active)return;}
     await loadTempo();
-    if(!hasBaselineTempo()){await openTempoSetup(true);return;}
     if (!syncPanel.hidden && timing.draft) { syncPanel.focus(); return; }
     if(timingWorkspace?.view==='beat')setTimingWorkspace('record');
     timing.priorLoop = state.auditionLoop; syncPanel.hidden = false; timing.busy = true; refreshTimingPanel();
@@ -3613,7 +3611,7 @@
     if(view==='effects'){await openEffectsWorkspace();return;}
     if(timing.busy||tapping.take?.status==='armed'||performanceTake.armed||countIn.active)return;
     await openTimingReview();
-    if(!syncPanel.hidden&&timing.draft&&hasBaselineTempo())setTimingWorkspace(view);
+    if(!syncPanel.hidden&&timing.draft)setTimingWorkspace(view);
     syncSidebarState();
   }
   function discardTimingLocal() {
@@ -7462,7 +7460,6 @@
     } else {
       root.setAttribute('data-lvx-theme', name);
     }
-    themeButton.textContent = `${THEME_LABELS[name] || name.toUpperCase()} ▾`; themeButton.dataset.theme = name;
     if (!themePicker.hidden) buildThemePicker();
     try {
       chrome.storage.local.set({ lvxTheme: name });

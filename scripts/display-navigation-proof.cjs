@@ -2,7 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{chromium}=require('playwright');
 const root=path.resolve(__dirname,'..'),source='https://www.youtube.com/watch?v=TESTVIDEO01',next='https://www.youtube.com/watch?v=TESTVIDEO02';
 let server,browser,browserPid;
-const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env.LV_PROBE_LEDGER,`\n- ${new Date().toISOString()} ${state} LyricVibe emoji version proof Node PID${process.pid}, Chrome PID${browserPid}; finite production UI verification, finally-close.\n`);};
+const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env.LV_PROBE_LEDGER,`\n- ${new Date().toISOString()} ${state} LyricVibe emoji version proof Node PID${process.pid}, Chrome PID${browserPid}; finite production UI verification, finally-close; owner codex01a126ca.\n`);};
 (async()=>{
   server=await chromium.launchServer({channel:'chrome',headless:true});browserPid=server.process().pid;probe('START');console.log(JSON.stringify({browserPid}));
   browser=await chromium.connect(server.wsEndpoint());
@@ -42,7 +42,7 @@ const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env
   await page.locator('.lvx-theme-picker').screenshot({path:path.join(root,'docs/display-navigation-motion.png')});
   await page.getByRole('tab',{name:'Words',exact:true}).click();const map=page.getByLabel('Emoji map text',{exact:true}),text='🌙✨ = (moon, glow, air, light)';await map.fill(text);
   await page.getByRole('tab',{name:'Stage',exact:true}).click();await page.getByRole('tab',{name:'Words',exact:true}).click();assert.equal(await map.inputValue(),text);
-  await page.getByRole('button',{name:'Close display studio',exact:true}).click();await page.locator('.lvx-sidebar').hover();await page.locator('[data-sidebar-view=display-words]').click();assert.equal(await map.inputValue(),text);
+  await page.getByRole('button',{name:'Close display studio',exact:true}).click();await page.getByRole('button',{name:'Open LyricVibe controls',exact:true}).click();await page.locator('[data-sidebar-view=display-words]').click();assert.equal(await map.inputValue(),text);
   await page.getByLabel('Emoji map save scope',{exact:true}).selectOption('shared');await page.getByRole('button',{name:'Save & enable map',exact:true}).click();await page.waitForFunction(()=>document.querySelector('[data-map-status]').textContent.startsWith('Map saved'));
   assert.ok(await evaluate(()=>__store.lvxWordRuleSets.sets.some(s=>s.emojiMap.some(g=>g.emoji==='🌙✨'&&g.terms.includes('moon')))));
   checks.push('Four tabs and direct sidebar routes agree; keyboard traversal; Motion dance save; map draft survives tab navigation and close/reopen, then saves through production host');
