@@ -317,7 +317,7 @@
   quickSyncButton.className = 'lvx-quick-sync-btn';
   quickSyncButton.textContent = '✎ Edit timing';
   quickSyncButton.title = 'Open the timing sidebar: record and refine this video\u2019s lyric timing';
-  quickSyncButton.addEventListener('click', async () => {const fresh=!timing.draft;await openTimingReview();if(fresh&&!syncPanel.hidden&&timing.draft)setTimingWorkspace('prepare');});
+  quickSyncButton.addEventListener('click', async () => {if(lyricsOnly)setLyricsOnly(false);const fresh=!timing.draft;await openTimingReview();if(fresh&&!syncPanel.hidden&&timing.draft)setTimingWorkspace('prepare');});
   // Auto-calibrating the offset applies only to lyrics without a timed score; it lives with the Sync offset.
   const autoSyncButton = document.createElement('button');
   autoSyncButton.className = 'lvx-sync-btn lvx-auto-sync';
