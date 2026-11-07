@@ -58,3 +58,5 @@ details > summary:focus-visible { outline:2px solid var(--accent); outline-offse
   .zoom-controls { order: 2; flex: 1; margin-left: 0; }
   .phrase-navigation > button[aria-expanded] { order: 3; }
 }
+.live-preview-notice { flex: none; padding: 6px 24px; border-bottom: 1px solid #6d7650; background: #2c3020; color: #e4e6b8; font-size: 11px; }
+.phrase-canvas.view-only .lyric-block { cursor: pointer; }

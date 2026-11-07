@@ -145,6 +145,7 @@ export interface EditorSnapshot {
   version: "lyricvibe.editor-state.v1";
   mode: EditorMode;
   score: LyricVibeScore | null;
+  preview: { token: string; revision: number; baseRevision: number } | null;
   review: AlignmentProposal[];
   queuedWordIds: string[];
   playback: PlaybackState;

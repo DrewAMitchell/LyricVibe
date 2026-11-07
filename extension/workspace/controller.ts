@@ -30,6 +30,7 @@ type UnknownRecord = Record<string, unknown>;
 interface InternalState {
   mode: EditorSnapshot["mode"];
   score: LyricVibeScore | null;
+  preview: { token: string; previewRevision: number; baseRevision: number; baseHash: string; score: LyricVibeScore } | null;
   review: AlignmentProposal[];
   queuedWordIds: string[];
   playback: EditorSnapshot["playback"];
@@ -124,6 +125,7 @@ export function createEditorController(options: EditorControllerOptions): Editor
   const state: InternalState = {
     mode,
     score: null,
+    preview: null,
     review: [],
     queuedWordIds: defaultQueue(),
     playback: { mediaMs: 0, paused: true, loop: null },
@@ -149,6 +151,7 @@ export function createEditorController(options: EditorControllerOptions): Editor
   let mediaEpoch = 0;
   let sourceEpoch = 0;
   let scoreEpoch = 0;
+  let previewEpoch = 0;
   let initialized = false;
   let disposed = false;
   let clockSourceChanged = false;
@@ -158,6 +161,8 @@ export function createEditorController(options: EditorControllerOptions): Editor
   let clockSequence = 0;
   let cancelMetadataWait: (() => void) | null = null;
   const audioListeners: Array<[string, EventListener]> = [];
+
+  function visibleScore(): LyricVibeScore | null { return state.preview?.score ?? state.score; }
 
   function playbackSnapshot(): EditorSnapshot["playback"] {
     if (state.mode === "local-recording" && state.audioReady && audio) {
@@ -171,7 +176,8 @@ export function createEditorController(options: EditorControllerOptions): Editor
     return {
       version: SNAPSHOT_VERSION,
       mode: state.mode,
-      score: state.score ? clone(state.score) : null,
+      score: visibleScore() ? clone(visibleScore()!) : null,
+      preview: state.preview ? { token: state.preview.token, revision: state.preview.previewRevision, baseRevision: state.preview.baseRevision } : null,
       review: clone(state.review),
       queuedWordIds: [...state.queuedWordIds],
       playback: playbackSnapshot(),
@@ -251,11 +257,13 @@ export function createEditorController(options: EditorControllerOptions): Editor
     if (previousKey === nextKey && state.score && value.revision < state.score.revision) throw makeError("STALE_SCORE_REVISION", "A stale score revision was ignored.");
     if (previousKey !== nextKey) sourceEpoch++;
     state.score = clone(value);
+    if (state.preview && (state.preview.baseRevision !== value.revision || state.preview.baseHash !== value.lyrics.contentHash)) { state.preview = null; previewEpoch++; }
     scoreEpoch++;
     if (state.reviewRevision !== null && state.reviewRevision !== state.score.revision) clearReview();
-    const priorWord = state.selection.wordId && findWord(state.score, state.selection.wordId);
+    const selectionScore = visibleScore()!;
+    const priorWord = state.selection.wordId && findWord(selectionScore, state.selection.wordId);
     if (!priorWord) {
-      const firstPhrase = state.score.phrases[0];
+      const firstPhrase = selectionScore.phrases[0];
       const firstWord = firstPhrase?.words[0];
       state.selection = { phraseId: firstPhrase?.id ?? null, wordId: firstWord?.id ?? null, syllableId: null };
     } else {
@@ -269,6 +277,44 @@ export function createEditorController(options: EditorControllerOptions): Editor
       state.draftRevision = null;
     }
     notify();
+  }
+
+  function setPreview(value: unknown): void {
+    if (value === null) {
+      if (state.preview) {
+        state.preview = null; previewEpoch++;
+        if (state.draft) state.notice = { message: 'The source timing draft closed. Your unsent input is preserved; discard it before continuing.', kind: 'error' };
+        else if (state.score && (!state.selection.wordId || !findWord(state.score, state.selection.wordId))) {
+          const phrase = state.score.phrases[0];
+          state.selection = { phraseId: phrase?.id ?? null, wordId: phrase?.words[0]?.id ?? null, syllableId: null };
+        }
+        notify();
+      }
+      return;
+    }
+    if (!state.score || !isRecord(value) || typeof value.token !== 'string' || !value.token || !Number.isSafeInteger(value.previewRevision) || (value.previewRevision as number) < 0 || value.baseRevision !== state.score.revision || value.baseHash !== state.score.lyrics.contentHash || !isRecord(value.score)) return;
+    try { core.validateScore(value.score); } catch { return; }
+    const score = value.score as unknown as LyricVibeScore;
+    if (core.mediaKey(score.source) !== core.mediaKey(state.score.source) || score.lyrics.contentHash !== state.score.lyrics.contentHash) return;
+    if (state.preview?.token === value.token && (value.previewRevision as number) <= state.preview.previewRevision) return;
+    state.preview = { token: value.token, previewRevision: value.previewRevision as number, baseRevision: value.baseRevision as number, baseHash: value.baseHash as string, score: clone(score) };
+    previewEpoch++;
+    const current = state.selection.wordId && findWord(score, state.selection.wordId);
+    if (!current && !state.draft) { const phrase = score.phrases[0]; state.selection = { phraseId: phrase?.id ?? null, wordId: phrase?.words[0]?.id ?? null, syllableId: null }; }
+    else if (current && !state.draft) state.selection = { phraseId: current.phraseId, wordId: current.word.id, syllableId: state.selection.syllableId && current.word.syllables?.some(item => item.id === state.selection.syllableId) ? state.selection.syllableId : null };
+    if (state.draft) state.notice = { message: 'The source timing draft changed. Your unsent input is preserved; discard it before continuing.', kind: 'error' };
+    notify();
+  }
+
+  async function refreshPreview(): Promise<void> {
+    if (!live || !state.score || disposed) return;
+    const binding = sourceEpoch, sequence = previewEpoch, revision = state.score.revision;
+    try {
+      const result = await send('LV_TIMING_VIEW', { expectedRevision: revision, lyricsHash: state.score.lyrics.contentHash });
+      if (disposed || binding !== sourceEpoch || sequence !== previewEpoch || state.score?.revision !== revision) return;
+      if (result.previewStale === true) { setPreview(null); state.notice = { message: 'The source has an older timing draft that needs review in the YouTube panel.', kind: 'error' }; notify(); return; }
+      setPreview(result.preview ?? null);
+    } catch { /* An unavailable preview must not discard the saved score or draft. */ }
   }
 
   function checkedReviewProtection(proposal: AlignmentProposal): string {
@@ -285,11 +331,12 @@ export function createEditorController(options: EditorControllerOptions): Editor
   function assertCurrentEnvelope(request: EditorDispatchRequest): void {
     if (!state.score) throw makeError("EDITOR_BUSY", "Open a score first.");
     if (!isRecord(request)) throw makeError("INVALID_OPERATION", "Editor request must be an object.");
-    const audition = request.type === "LV_SCORE_TRANSPORT" || request.type === "LV_SCORE_SEEK";
+    const audition = request.type === "LV_SCORE_TRANSPORT" || request.type === "LV_SCORE_SEEK" || request.type === "LV_NATIVE_ANALYSIS_STOP" || request.type === "LV_NATIVE_ANALYSIS_STATUS";
     if (state.busy || (state.draft && !audition)) throw makeError("EDITOR_BUSY", "Apply or discard the current draft and wait for pending work first.");
     if (request.mediaKey !== core.mediaKey(state.score.source)) throw makeError("SOURCE_MISMATCH", "Editor source does not match request.");
     if (request.lyricsHash !== state.score.lyrics.contentHash) throw makeError("LYRIC_REVISION_MISMATCH", "Editor lyric hash does not match request.");
-    if (request.expectedRevision !== state.score.revision) throw makeError("REVISION_CONFLICT", "Editor revision changed; read state before retrying.");
+    if (request.expectedRevision !== visibleScore()?.revision) throw makeError("REVISION_CONFLICT", "Editor revision changed; read state before retrying.");
+    if (state.preview && !audition) throw makeError("PREVIEW_PENDING", "This is the live YouTube timing draft. Save or discard it in the timing panel before editing here.");
   }
 
   function clearReview(): void {
@@ -489,7 +536,14 @@ export function createEditorController(options: EditorControllerOptions): Editor
       notify();
       return;
     }
-    if (message.tabId !== requestedTabId || (expectedKey && message.mediaKey !== expectedKey)) return;
+    const scoreBroadcast = message.type === 'LV_SCORE_UPDATED' || message.type === 'LV_TIMING_PREVIEW_UPDATED' || message.type === 'LV_TIMING_PREVIEW_CLOSED';
+    if (!expectedKey || message.mediaKey !== expectedKey || (!scoreBroadcast && message.tabId !== requestedTabId)) return;
+    if (message.type === "LV_TIMING_PREVIEW_UPDATED") {
+      if (state.preview && isRecord(message.preview) && message.preview.token !== state.preview.token) { void refreshPreview(); return; }
+      setPreview(message.preview);
+      return;
+    }
+    if (message.type === "LV_TIMING_PREVIEW_CLOSED") { void refreshPreview(); return; }
     if (message.type === "LV_SCORE_UPDATED") {
       if (!message.score) return;
       try {
@@ -639,6 +693,7 @@ export function createEditorController(options: EditorControllerOptions): Editor
       setScore(result.score as unknown as LyricVibeScore);
       setReview((Array.isArray(result.review) ? result.review : []) as AlignmentProposal[], result.diagnostics ?? null);
       setAnalysis(result.analysis);
+      void refreshPreview();
       setNotice("Select a word to adjust timing. Changes save to this exact video and lyric revision.", "success");
       return { ok: true, score: clone(state.score!) };
     } catch (cause) {
@@ -719,6 +774,7 @@ export function createEditorController(options: EditorControllerOptions): Editor
 
   async function importScore(input: unknown): Promise<EditorResult<{ score?: LyricVibeScore; review?: AlignmentProposal[] }>> {
     if (!state.score) return failure(makeError("EDITOR_BUSY", "Open a score before importing."), "EDITOR_BUSY");
+    if (state.preview) return failure(makeError("PREVIEW_PENDING", "Save or discard the YouTube timing draft before importing here."), "PREVIEW_PENDING");
     if (state.draft || state.busy) return failure(makeError("EDITOR_BUSY", "Apply or discard your current draft before importing."), "EDITOR_BUSY");
     const startingRevision = state.score.revision;
     try {
@@ -762,6 +818,7 @@ export function createEditorController(options: EditorControllerOptions): Editor
 
   function exportScore(): LyricVibeScore {
     if (!state.score) throw makeError("NO_SCORE", "Open a score before exporting.");
+    if (state.preview) throw makeError("PREVIEW_PENDING", "Save the live timing draft in the YouTube panel before exporting here.");
     core.validateScore(state.score);
     const value = clone(state.score);
     state.persistence = "export-requested";
@@ -778,10 +835,11 @@ export function createEditorController(options: EditorControllerOptions): Editor
   }
 
   function selectPhrase(phraseId: string): boolean {
-    if (!state.score || state.draft) return false;
-    const phrase = state.score.phrases.find(item => item.id === phraseId);
+    const currentScore = visibleScore();
+    if (!currentScore || state.draft) return false;
+    const phrase = currentScore.phrases.find(item => item.id === phraseId);
     if (!phrase) return false;
-    const current = state.selection.wordId ? findWord(state.score, state.selection.wordId) : null;
+    const current = state.selection.wordId ? findWord(currentScore, state.selection.wordId) : null;
     const word = current?.phraseId === phraseId ? current.word : phrase.words[0];
     state.selection = { phraseId, wordId: word?.id ?? null, syllableId: null };
     notify();
@@ -789,13 +847,14 @@ export function createEditorController(options: EditorControllerOptions): Editor
   }
 
   function selectWord(wordId: string, syllableId?: string): boolean {
-    if (!state.score) return false;
+    const currentScore = visibleScore();
+    if (!currentScore) return false;
     const nextSyllableId = syllableId ?? null;
     if (state.draft && (wordId !== state.selection.wordId || nextSyllableId !== state.selection.syllableId)) {
       setNotice("Apply your current timing draft before selecting another word or syllable, or discard it.", "error");
       return false;
     }
-    const located = findWord(state.score, wordId);
+    const located = findWord(currentScore, wordId);
     if (!located) return false;
     if (syllableId && !located.word.syllables?.some(item => item.id === syllableId)) return false;
     state.selection = { phraseId: located.phraseId, wordId, syllableId: nextSyllableId };

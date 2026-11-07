@@ -14,7 +14,8 @@ function event() {
   return { addListener: fn => listeners.add(fn), removeListener: fn => listeners.delete(fn), emit: value => { for (const fn of listeners) fn(value); } };
 }
 
-function setup() {
+function setup({ deferGuard = false } = {}) {
+  let resolveGuard;
   const outgoing = [], intervals = new Set();
   const clock = { mediaKey: 'youtube:FIXTURE0001', currentTimeMs: 10250, paused: false, seeking: false, playbackRate: 1 };
   let listener, port, worklet, context, workerCreated = false, stopped = 0;
@@ -36,7 +37,7 @@ function setup() {
     setInterval: fn => { intervals.add(fn); return fn; }, clearInterval: fn => intervals.delete(fn), setTimeout, clearTimeout,
     chrome: { runtime: {
       id: 'fixture-extension', getURL: file => `chrome-extension://fixture-extension/${file}`,
-      sendMessage: async message => { if (message.type === 'LV_ANALYSIS_CLOCK_REQUEST') return { ...clock }; if (message.type === 'LV_ANALYSIS_CONTROL_REQUEST') { if (message.action === 'seek-start') clock.currentTimeMs = 0; if (message.action === 'play') clock.paused = false; return {ok:true}; } outgoing.push(message); if (message.type === 'LV_ALIGNMENT_PROPOSALS') return { ok: true, score: { ...scoreValue } }; },
+      sendMessage: async message => { if (message.type === 'LV_ANALYSIS_CLOCK_REQUEST') return { ...clock }; if (message.type === 'LV_ANALYSIS_CONTROL_REQUEST') { if (message.action === 'guard-start' && deferGuard) return new Promise(resolve => { resolveGuard = resolve; }); if (message.action === 'seek-start') clock.currentTimeMs = 0; if (message.action === 'play') clock.paused = false; return {ok:true}; } outgoing.push(message); if (message.type === 'LV_ALIGNMENT_PROPOSALS') return { ok: true, score: { ...scoreValue } }; },
       connect: () => {
         const onMessage = event(), onDisconnect = event();
         port = { onMessage, onDisconnect, posts: [], postMessage(message) { this.posts.push(message); if (message.type === 'hello') setImmediate(() => onMessage.emit({ version: native.VERSION, type: 'hello', hostName: native.HOST_NAME, hostVersion: 'fixture-1', state: 'ready', modelReady: true, alignmentReady: true, limits: { maxAudioMs: 12000, sampleRateHz: 16000, channels: 1, encoding: 'pcm_s16le', maxPcmBytes: 384000 } })); else if (message.type === 'analyze') setImmediate(() => onMessage.emit({ version: native.VERSION, type: 'status', state: 'accepted', requestId: message.requestId, sessionId: message.sessionId, source: { ...message.source }, audio: { audioStartMs: message.audio.audioStartMs, sha256: message.audio.sha256 } })); }, disconnect() { this.disconnected = true; onDisconnect.emit(); } };
@@ -50,7 +51,7 @@ function setup() {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../extension/analysis/offscreen.js'), 'utf8'), sandbox);
   const sender = { id: 'fixture-extension', url: 'chrome-extension://fixture-extension/service-worker.js' };
   const request = message => new Promise(resolve => listener({ target: 'lv-offscreen', ...message }, sender, resolve));
-  return { request, clock, outgoing, intervals, score: scoreValue, emitPcm: (pcm, startFrame) => worklet.port.onmessage({ data: { pcm, startFrame, sampleRate: 16000 } }), get worklet() { return worklet; }, get port() { return port; }, get context() { return context; }, get workerCreated() { return workerCreated; }, get stopped() { return stopped; } };
+  return { request, clock, outgoing, intervals, score: scoreValue, resolveGuard: () => resolveGuard?.({ok:true}), guardPending: () => Boolean(resolveGuard), emitPcm: (pcm, startFrame) => worklet.port.onmessage({ data: { pcm, startFrame, sampleRate: 16000 } }), get worklet() { return worklet; }, get port() { return port; }, get context() { return context; }, get workerCreated() { return workerCreated; }, get stopped() { return stopped; } };
 }
 
 test('native offscreen runs without browser worker fallback, submits bounded audio, and creates review-only source-time proposals', async () => {
@@ -271,4 +272,17 @@ test('whole-song capture stops on a source clock jump without publishing partial
   assert.equal(status.state,'error'); assert.equal(status.error.code,'SONG_CLOCK_DISCONTINUITY');
   assert.equal(h.outgoing.some(m=>m.type==='LV_ALIGNMENT_PROPOSALS'),false);
   assert.ok(h.stopped>0);
+});
+
+
+test('whole-song capture waits for the autoplay guard and rewind before accepting source audio', async () => {
+  const h=setup({deferGuard:true});h.clock.currentTimeMs=800;h.clock.paused=false;
+  const pending=h.request({type:'LV_ANALYSIS_OFFSCREEN_START',config:{engine:'native',wholeSong:true,tabId:7,mediaKey:h.clock.mediaKey,sessionId:'song-session',score:h.score,streamId:'synthetic'}});
+  for(let i=0;i<40&&!h.guardPending();i++)await new Promise(resolve=>setTimeout(resolve,10));
+  assert.equal(h.guardPending(),true);await [...h.intervals][0]();
+  assert.equal((await h.request({type:'LV_ANALYSIS_OFFSCREEN_STATUS'})).analysis.songPass.phase,'starting');
+  const input=new Float32Array(1024).fill(.25);h.emitPcm(input,0);assert.equal(input.every(value=>value===0),true);
+  assert.equal((await h.request({type:'LV_ANALYSIS_OFFSCREEN_STATUS'})).analysis.songPass.capturedMs,0);
+  h.resolveGuard();const started=await pending;assert.equal(started.analysis.songPass.phase,'capturing');
+  await h.request({type:'LV_ANALYSIS_OFFSCREEN_STOP'});
 });

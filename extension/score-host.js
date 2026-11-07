@@ -229,6 +229,7 @@
         if (!record) throw fail('SCORE_MISSING', 'No timed score is loaded.');
         if (message.expectedRevision !== record.score.revision) throw fail('REVISION_CONFLICT', 'Reload the score before starting native analysis.');
         if (message.lyricsHash !== record.score.lyrics.contentHash) throw fail('LYRIC_REVISION_MISMATCH', 'The selected lyrics changed before analysis could start.');
+        if (message.wholeSong === true && await readTimingPreview(key)) throw fail('PREVIEW_PENDING', 'Save or discard the YouTube timing draft before aligning the saved song.');
         return { ok: true, analysis: await root.LvAnalysis.startAnalysis({ tabId, score: record.score, engine: 'native', expectedRevision: message.expectedRevision, lyricsHash: message.lyricsHash, wholeSong: message.wholeSong === true }) };
       }
     }
@@ -277,7 +278,7 @@
       if (message.type.startsWith('LV_TIMING_')) {
         if (!timingControlBound(sender, tabId, key)) throw fail('SOURCE_REQUIRED', 'This editor is not connected to the current video. Open Edit timing on that video to reconnect.');
         if (message.lyricsHash !== record.score.lyrics.contentHash) throw fail('LYRIC_REVISION_MISMATCH', 'Saved lyric revision changed. Refresh the preview.');
-        if (editorSourceBound(sender, tabId, key) && !['LV_TIMING_CURRENT','LV_TIMING_SOURCES'].includes(message.type)) {
+        if (editorSourceBound(sender, tabId, key) && !['LV_TIMING_CURRENT','LV_TIMING_VIEW','LV_TIMING_SOURCES'].includes(message.type)) {
           const guard=await chrome.tabs.sendMessage(tabId,{type:'LV_TIMING_EDIT_CHECK',mediaKey:key});
           if(!guard?.ok||guard.mediaKey!==key||guard.canEdit!==true)throw fail('CAPTURE_PENDING','Stop or keep the take and apply pending lyric text in the video before editing or saving here.');
         }
@@ -310,12 +311,12 @@
           await liveIdentity(tabId, key); await writeTimingPreview(previewKey, draft); await publishTimingPreview(tabId, key, draft);
           return { ok: true, preview: draft, tabId, mediaKey: key };
         }
-        if (message.type === 'LV_TIMING_CURRENT') {
+        if (message.type === 'LV_TIMING_CURRENT' || message.type === 'LV_TIMING_VIEW') {
           const preview = await readTimingPreview(previewKey);
           const currentPreview = preview && preview.baseRevision === record.score.revision && preview.baseHash === record.score.lyrics.contentHash
             ? preview : null;
-          if (preview && !currentPreview) await clearTimingPreview(previewKey);
-          return { ok: true, score: record.score, preview: currentPreview, tabId, mediaKey: key };
+          if (message.type === 'LV_TIMING_CURRENT' && preview && !currentPreview) await clearTimingPreview(previewKey);
+          return { ok: true, score: record.score, preview: currentPreview, previewStale: Boolean(preview && !currentPreview), tabId, mediaKey: key };
         }
         const draft = await readTimingPreview(previewKey);
         if (!draft || draft.token !== message.token || draft.baseRevision !== record.score.revision || draft.baseHash !== record.score.lyrics.contentHash) throw fail('PREVIEW_EXPIRED', 'Refresh this timing preview before continuing.');
@@ -365,6 +366,9 @@
         return { ok: true, score: record.score, tabId, mediaKey: key };
       }
       let next;
+      if (editorSourceBound(sender, tabId, key) && ['LV_SCORE_OPERATION', 'LV_SCORE_UNDO', 'LV_SCORE_IMPORT', 'LV_SCORE_REVIEW_APPLY'].includes(message.type) && await readTimingPreview(key)) {
+        throw fail('PREVIEW_PENDING', 'Save or discard the live timing draft in YouTube before changing the saved score here.');
+      }
       if (message.type === 'LV_NATIVE_ALIGNMENT_IMPORT') {
         if (!timingControlBound(sender, tabId, key)) throw fail('EDITOR_REQUIRED', 'Import alignment from LyricVibe on the current source.');
         const receipt = LvScore.validateAlignmentReceipt(record.score, message.receipt);
@@ -441,7 +445,7 @@
   }
   const types = new Set(['LV_ANALYSIS_CACHE_CLEAR_REQUEST', 'LV_EDITOR_OPEN', 'LV_LIGHT_EDITOR_OPEN', 'LV_SCORE_GET', 'LV_SCORE_CLOCK', 'LV_SCORE_OPERATION', 'LV_SCORE_IMPORT', 'LV_NATIVE_ALIGNMENT_IMPORT', 'LV_SCORE_UNDO', 'LV_SCORE_SEEK', 'LV_SCORE_TRANSPORT', 'LV_SCORE_REVIEW_APPLY', 'LV_ALIGNMENT_PREFERENCE_SET', 'LV_ANALYSIS_START', 'LV_ANALYSIS_STOP', 'LV_ANALYSIS_STATUS', 'LV_NATIVE_ANALYSIS_START', 'LV_NATIVE_ANALYSIS_STOP', 'LV_NATIVE_ANALYSIS_STATUS', 'LV_ALIGNMENT_PROPOSALS']);
   types.add('LV_CAPTION_NOTES_CLEAN');types.add('LV_TEMPO_GET');types.add('LV_TEMPO_SET');types.add('LV_SCORE_AUTHOR');
-  for (const type of ['LV_TIMING_SOURCES', 'LV_TIMING_COPY', 'LV_TIMING_PREPARE', 'LV_TIMING_CURRENT', 'LV_TIMING_TUNE', 'LV_TIMING_UNDO', 'LV_TIMING_APPLY', 'LV_TIMING_CANCEL']) types.add(type);
+  for (const type of ['LV_TIMING_SOURCES', 'LV_TIMING_COPY', 'LV_TIMING_PREPARE', 'LV_TIMING_CURRENT', 'LV_TIMING_VIEW', 'LV_TIMING_TUNE', 'LV_TIMING_UNDO', 'LV_TIMING_APPLY', 'LV_TIMING_CANCEL']) types.add(type);
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!types.has(message?.type)) return;
     // Only this extension can submit score mutations; content scripts supply their own tab ID.

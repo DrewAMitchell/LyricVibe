@@ -448,7 +448,6 @@
       if (session === s) s.clockTimer = setInterval(() => clockTick(s), 250);
       s.phase = 'capturing';
       if (s.wholeSong && session === s) {
-        s.songPhase = 'waiting-start';
         const guard = await chrome.runtime.sendMessage({ type: 'LV_ANALYSIS_CONTROL_REQUEST', tabId: s.tabId, sessionId: s.sessionId, action: 'guard-start' });
         if (!guard?.ok) throw Object.assign(new Error(guard?.error?.message || 'YouTube autoplay could not be paused safely.'), { code: guard?.error?.code || 'AUTOPLAY_GUARD_UNAVAILABLE' });
         if (session !== s) { await send({ type: 'LV_ANALYSIS_CONTROL_REQUEST', tabId: s.tabId, sessionId: s.sessionId, action: 'guard-release' }); return; }
@@ -457,6 +456,7 @@
         if (!seek?.ok) throw Object.assign(new Error('The source could not seek to the beginning.'), { code: 'SONG_SEEK_FAILED' });
         const play = await chrome.runtime.sendMessage({ type: 'LV_ANALYSIS_CONTROL_REQUEST', tabId: s.tabId, sessionId: s.sessionId, action: 'play' });
         if (!play?.ok) throw Object.assign(new Error('The source could not start playback.'), { code: 'SONG_PLAY_FAILED' });
+        s.songPhase = 'waiting-start';
         await clockTick(s);
       }
       publish();

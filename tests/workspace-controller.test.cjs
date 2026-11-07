@@ -740,3 +740,27 @@ test('editor follows its source clock without focused-tab playback broadcasts an
   await new Promise(resolve => setTimeout(resolve, 300));
   assert.equal(runtime.sent.length, requests);
 });
+
+test('live timing preview follows same-song broadcasts across tabs without overwriting saved work', async () => {
+  const saved=makeScore(), key=core.mediaKey(saved.source), word=saved.phrases[0].words[0];
+  const previewScore=core.applyOperation(saved,{type:'setWordTiming',wordId:word.id,startMs:word.startMs+30,endMs:word.endMs-30},saved.revision);
+  const preview={token:'preview-a',previewRevision:1,baseRevision:saved.revision,baseHash:saved.lyrics.contentHash,score:previewScore};
+  let current=preview;
+  const runtime=captureRuntime({respond:async m=>m.type==='LV_SCORE_GET'?{ok:true,score:saved,review:[]}:m.type==='LV_TIMING_VIEW'?{ok:true,preview:current}:m.type==='LV_SCORE_TRANSPORT'?{ok:true}:{ok:false,error:{code:'UNHANDLED'}}});
+  const controller=createEditorController(controllerOptions({runtime,tabId:17,requestedMediaKey:key}));
+  assert.equal((await controller.initialize()).ok,true);await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(controller.getState().preview.revision,1);assert.equal(controller.getState().score.phrases[0].words[0].startMs,word.startMs+30);
+  const next=structuredClone(preview);next.previewRevision=2;next.score.phrases[0].words[0].startMs+=10;
+  runtime.emit({type:'LV_TIMING_PREVIEW_UPDATED',tabId:19,mediaKey:key,preview:next});
+  assert.equal(controller.getState().preview.revision,2);assert.equal(controller.getState().score.phrases[0].words[0].startMs,word.startMs+40);
+  runtime.emit({type:'LV_TIMING_PREVIEW_UPDATED',tabId:19,mediaKey:key,preview},{id:runtime.id});assert.equal(controller.getState().preview.revision,2,'older broadcasts cannot rewind the draft');
+  runtime.emit({type:'LV_TIMING_PREVIEW_UPDATED',tabId:19,mediaKey:'youtube:FIXTURE0002',preview:{...next,previewRevision:3}});assert.equal(controller.getState().preview.revision,2,'another video cannot change this draft');
+  const visible=controller.getState().score;const result=await controller.dispatch({type:'LV_SCORE_OPERATION',...envelope(visible),operation:{type:'setOffset',offsetMs:100}});
+  assert.equal(result.ok,false);assert.equal(result.error.code,'PREVIEW_PENDING');assert.equal(runtime.sent.some(m=>m.type==='LV_SCORE_OPERATION'),false);
+  const transport=await controller.dispatch({type:'LV_SCORE_TRANSPORT',...envelope(visible),action:'pause'});assert.equal(transport.ok,true);
+  controller.setDraft(true);const newer=structuredClone(next);newer.previewRevision=3;newer.score.phrases[0].words[0].startMs+=5;
+  runtime.emit({type:'LV_TIMING_PREVIEW_UPDATED',tabId:19,mediaKey:key,preview:newer});assert.equal(controller.getState().draft,true);assert.match(controller.getState().notice.message,/preserved/);controller.setDraft(false);
+  const savedFromOther=structuredClone(newer.score);runtime.emit({type:'LV_SCORE_UPDATED',tabId:19,mediaKey:key,score:savedFromOther,review:[]});
+  assert.equal(controller.getState().preview,null);assert.equal(controller.getState().score.revision,savedFromOther.revision);assert.equal(controller.getState().score.phrases[0].words[0].startMs,word.startMs+45);
+  current=null;runtime.emit({type:'LV_TIMING_PREVIEW_CLOSED',tabId:19,mediaKey:key});await new Promise(resolve=>setImmediate(resolve));controller.dispose();
+});

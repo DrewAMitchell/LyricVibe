@@ -981,3 +981,18 @@ test('offline caption cleanup requires the extension options page and refuses an
  const before=JSON.stringify(h.values);h.setOverlayOpen(true);let r=await h.dispatch(message,sender);assert.equal(r.error.code,'CAPTURE_PENDING');assert.equal(JSON.stringify(h.values),before);
  h.setOverlayOpen(false);r=await h.dispatch(message,sender);assert.equal(r.ok,true,r.error?.message);assert.equal(r.changed,1);assert.equal(r.score.phrases[0].words[0].excluded,true);assert.equal(recordFor(h).history.length,1);
 });
+
+test('timeline reads a live preview without clearing stale drafts and cannot overwrite a pending preview', async () => {
+  const h=makeHarness(),score=await h.ensure(),key=`youtube:${ID_A}`;
+  const overlay={id:'test-extension',tab:{id:1,url:`https://www.youtube.com/watch?v=${ID_A}`},url:`https://www.youtube.com/watch?v=${ID_A}`};
+  const editor={id:'test-extension',url:`chrome-extension://test/editor.html?sourceTab=1&mediaKey=${encodeURIComponent(key)}`};
+  const envelope={tabId:1,mediaKey:key,expectedRevision:score.revision,lyricsHash:score.lyrics.contentHash};
+  const prepared=await h.dispatch({type:'LV_TIMING_PREPARE',...envelope,fromSaved:true},overlay);assert.equal(prepared.ok,true);
+  const view=await h.dispatch({type:'LV_TIMING_VIEW',...envelope},editor);assert.equal(view.preview.token,prepared.preview.token);
+  const edit=await h.dispatch({type:'LV_SCORE_OPERATION',...envelope,operation:{type:'setOffset',offsetMs:100}},editor);
+  assert.equal(edit.ok,false);assert.equal(edit.error.code,'PREVIEW_PENDING');assert.equal(recordFor(h).score.revision,score.revision);
+  const start=await h.dispatch({type:'LV_NATIVE_ANALYSIS_START',...envelope,wholeSong:true},editor);assert.equal(start.ok,false);assert.equal(start.error.code,'PREVIEW_PENDING');assert.equal(h.analysisCalls.length,0);
+  h.values[`lvScore:${key}`].score.revision++;
+  const stale=await h.dispatch({type:'LV_TIMING_VIEW',...envelope,expectedRevision:score.revision+1},editor);
+  assert.equal(stale.preview,null);assert.equal(stale.previewStale,true);assert.ok(h.values[`lvTimingPreview:${key}`], 'read-only view must not clear a stale draft');
+});
