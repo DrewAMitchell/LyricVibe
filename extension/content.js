@@ -1621,6 +1621,7 @@
   function stopTapTake(reason = 'Take stopped. Completed marks are retained.') {
     partRun=null;
     if(cancelCountIn())return;
+    if(lyricsOnly&&!captureTracks.switching)setLyricsOnly(false);
     if(syncButton('record-repeat').checked&&tapping.take?.mode==='syllable'&&!continuousPass()&&tapping.take.marks.length===tapping.take.units.length)tapping.take={...tapping.take,status:'complete'};
     if (tapping.take && (tapping.take.status!=='complete' || rawTake(tapping.take) && !tapping.take.retime)) tapping.take = eventTake(tapping.take)?LvTapTiming.stopEvents(tapping.take):wordTake(tapping.take)?LvTapTiming.stopWordHolds(tapping.take):LvTapTiming.stop(tapping.take);
     if(streamTake(tapping.take)||rawTake(tapping.take))tapping.take={...tapping.take,stoppedScoreMs:Math.round((getMedia()?.currentTime||0)*1000-(rawTake(tapping.take)?0:timingOffsetMs()))};
@@ -2303,7 +2304,8 @@
       if(media&&media.playbackRate!==rate)setPlaybackSpeed(rate);
       if(tapping.take?.status==='armed')refreshPerformClock(now);
       state.scoreSignature='';refreshTimingPanel();renderScore(getMediaTimeMs());
-      setSyncNotice(tapping.take?.status==='armed'||!wasArmed?`Space → ${target.label||(target.role==='lead'?'Main':'Backing')}. ↑ / ↓ changes vocal track. Previous input is kept.`:`Could not start this track. Your previous track is kept; check the recording mode and start again.`,'warn');
+      const ready=tapping.take?.status==='armed'||!wasArmed;
+      setSyncNotice(ready?`Space → ${target.label||(target.role==='lead'?'Main':'Backing')}. ↑ / ↓ changes vocal track. Previous input is kept.`:`Could not start this track. Your previous track is kept; check the recording mode and start again.`,ready?'':'warn');
     }catch(error){setSyncNotice(error.message,'error');}
     finally{timing.busy=false;captureTracks.switching=false;refreshTimingPanel();}
   }
@@ -2346,9 +2348,9 @@
     if(!next){partRun=null;setSyncNotice('The next part changed. Completed timing stays in preview.','error');return;}
     timing.phraseIndex=score.phrases.indexOf(next);tapping.wordId=next.words.find(w=>!w.excluded)?.id;
     syncButton('tap-mode').value=run.mode;syncButton('tap-scope').value=run.scope;
-    refreshTimingPanel();await armTapTake();
+    refreshTimingPanel();await armTapTake({preserveView:true});
   }
-  async function armTapTake({keepPlayback=false}={}) {
+  async function armTapTake({keepPlayback=false,preserveView=false}={}) {
     if(trackWatch?.loading()&&trackWatch?.status().generation>0){clearStagePerformance();return;}
     if(tapping.binding!==tapBinding())rebindRecording(timing.draft);
     const mode=syncButton('tap-mode').value;
@@ -2458,7 +2460,7 @@
       // With a tapped tempo, snapping uses its beat phase instead of the first tap.
       if(take.bpm!==null&&tempo.estimate&&take.originMs===null&&Math.abs(take.bpm-tempo.estimate.bpm)<.01)take.originMs=tempo.estimate.anchorMs-timingOffsetMs();
       tapping.take = take; tapping.binding = tapBinding(); if(!retained)tapping.recordingContext=recordingContext(); tapping.clockMs = media.currentTime * 1000; tapping.rate = media.playbackRate;tapping.followSeek=false;tapping.seekPhraseId=null;tapping.streamWordId=null;tapping.trackSwitchFloor=null;tapping.listening=keepPlayback||fromPause||!unplaced;tapping.backAnchorMs=fromPause?tapping.armSeekMs:null;tapping.backIndex=fromPause?take.index:null;tapping.backPhraseId=fromPause?phrase.id:null;tapping.rewindPhraseId=null;
-      if(!keepPlayback&&!lyricsOnly)setLyricsOnly(true);
+      if(!keepPlayback&&!preserveView&&!lyricsOnly)setLyricsOnly(true);
       timing.view = 'proposed'; timing.auditioned = false; state.scoreSignature = '';
       setSyncNotice(mode === 'syllable' ? 'Tap Space at each syllable entrance, including the first. Phrase start and end stay fixed. The completed take plays back for review.' : syncButton('tap-cadence').value === 'hold' ? 'Hold Space for each sung word; release it at the end. Each release advances automatically.' : take.cadence === 'flow' ? 'Space starts each next lyric. Enter releases before a rest or at the end. Stop retains completed marks.' : 'Space marks START then END. Use take updates only the unsaved preview.');
       if(frameTake(take))setSyncNotice('Continuous syllable pass: tap each entrance. Two taps inside a word make two syllables. Stop whenever you want; untapped words keep their timing.');

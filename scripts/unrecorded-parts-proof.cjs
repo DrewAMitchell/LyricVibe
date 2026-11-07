@@ -2,7 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{chromium}=require('playwright');
 const root=path.resolve(__dirname,'..'),source='https://www.youtube.com/watch?v=TESTVIDEO01',next='https://www.youtube.com/watch?v=TESTVIDEO02';
 let server,browser,browserPid;
-const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env.LV_PROBE_LEDGER,`\n- ${new Date().toISOString()} ${state} LyricVibe unrecorded-parts proof Node PID${process.pid}, Chrome PID${browserPid}; finite production UI verification, finally-close.\n`);};
+const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env.LV_PROBE_LEDGER,`\n- ${new Date().toISOString()} ${state} LyricVibe unrecorded-parts proof Node PID${process.pid}, Chrome PID${browserPid}; finite production UI verification, finally-close; owner codex01a126ca.\n`);};
 (async()=>{
   server=await chromium.launchServer({channel:'chrome',headless:true});browserPid=server.process().pid;probe('START');console.log(JSON.stringify({browserPid}));
   browser=await chromium.connect(server.wsEndpoint());
@@ -57,7 +57,7 @@ const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env
   await mark(5.1,6.9);
   await waitFor(()=>__qa.getPartRun()?.index===1&&__qa.tapping.take?.status==='complete'&&!__qa.timing.busy);
   assert.equal(await evaluate(()=>document.querySelector('video').paused),false,'the final take remains available for retake');
-  await page.locator('[data-sync=tap-stop]').click();
+  await page.keyboard.press('\\');await page.locator('[data-sync=tap-stop]').click();
   await waitFor(()=>!__qa.getPartRun()&&!__qa.tapping.take&&!__qa.timing.busy);
   assert.equal(await evaluate(()=>document.querySelector('video').paused),true);
   assert.deepEqual(await evaluate(()=>__qa.timing.draft.score.phrases.filter(p=>['phrase-1','phrase-3','phrase-5'].includes(p.id)).map(p=>JSON.stringify(p))),await evaluate(()=>__completed));
@@ -86,7 +86,7 @@ const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env
   await waitFor(()=>__qa.getPartRun()?.index===1&&__qa.tapping.take?.status==='armed'&&!__qa.timing.busy);
   await mark(3.1,3.9);
   await waitFor(()=>__qa.getPartRun()?.index===1&&__qa.tapping.take?.status==='complete'&&!__qa.timing.busy);
-  await page.locator('[data-sync=tap-stop]').click();
+  await page.keyboard.press('\\');await page.locator('[data-sync=tap-stop]').click();
   await waitFor(()=>!__qa.getPartRun()&&!__qa.tapping.take&&!__qa.timing.busy);
   assert.equal(await evaluate(()=>JSON.stringify(__qa.timing.draft.score.phrases[0].words[0])),await evaluate(()=>__word));
   await evaluate(()=>{
@@ -135,6 +135,7 @@ const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env
   assert.equal(await evaluate(()=>JSON.stringify(__qa.timing.draft.score.phrases[1])),await evaluate(()=>__finishedMiddle));
   await page.locator('[data-sync=tap-mark]').focus();await page.keyboard.press('Shift+ArrowRight');
   assert.equal(await evaluate(()=>document.querySelector('video').currentTime),.2,'Shift+Right remains a lead-in shortcut in missing-only mode');
+  await page.keyboard.press('\\');
   await page.getByRole('button',{name:'Close error details',exact:true}).click();
   await page.screenshot({path:path.join(root,'docs/unrecorded-recovery-loop.png')});
   await evaluate(()=>{
