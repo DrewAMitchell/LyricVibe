@@ -6,6 +6,16 @@
   let generation = 0;
   let nativeBridge = null;
   let status = { state: 'stopped', automaticAdmissionEnabled: false };
+  let lastTabStatus = '';
+  function publishSongStatus(value) {
+    if (!value?.wholeSong || !Number.isInteger(value.tabId) || typeof value.mediaKey !== 'string') return;
+    const pass = value.songPass || {};
+    const compact = { state: value.state, phase: pass.phase || 'starting', capturedMs: Math.floor((pass.capturedMs || 0) / 1000) * 1000, durationMs: pass.durationMs || 0, completed: pass.completed || 0, total: pass.total || 0, proposals: pass.proposals || 0, skipped: pass.skipped || 0, error: value.error?.message || null };
+    const key = JSON.stringify([value.tabId, value.mediaKey, compact]);
+    if (key === lastTabStatus) return;
+    lastTabStatus = key;
+    chrome.tabs.sendMessage(value.tabId, { type: 'LV_SONG_ALIGNMENT_STATUS', mediaKey: value.mediaKey, analysis: compact }).catch(() => {});
+  }
   const isOffscreen = sender => sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL(path);
   async function exists() {
     return (await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'], documentUrls: [chrome.runtime.getURL(path)] })).length > 0;
@@ -29,6 +39,7 @@
         throw typed('ANALYSIS_SOURCE_MISMATCH', 'Stop was opened for a different analysis source.');
       }
     }
+    const previous = status;
     generation++;
     try {
       if (creating) await creating.catch(() => undefined);
@@ -39,6 +50,7 @@
     } finally {
       closeNativeBridge();
       status = { state: 'stopped', automaticAdmissionEnabled: false, bufferedSeconds: 0 };
+      if (previous.wholeSong && !['stopped', 'error', 'completed'].includes(previous.state)) publishSongStatus({ ...previous, state: 'stopped' });
     }
     return status;
   }
@@ -88,7 +100,7 @@
   }
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!isOffscreen(sender)) return;
-    if (message.type === 'LV_ANALYSIS_OFFSCREEN_STATE') { status = message.analysis; return; }
+    if (message.type === 'LV_ANALYSIS_OFFSCREEN_STATE') { status = message.analysis; publishSongStatus(status); return; }
     if (message.type === 'LV_ANALYSIS_CLOCK_REQUEST') {
       if (!status.sessionId || message.sessionId !== status.sessionId || message.tabId !== status.tabId) { respond({ error: 'ANALYSIS_SOURCE_MISMATCH' }); return; }
       chrome.tabs.sendMessage(message.tabId, { type: 'LV_ANALYSIS_CLOCK' }).then(clock => respond(clock), () => respond({ error: 'SOURCE_TAB_UNAVAILABLE' }));

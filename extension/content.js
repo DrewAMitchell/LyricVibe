@@ -365,8 +365,22 @@
   const playbackTimingLabel=document.createElement('label');playbackTimingLabel.className='lvx-playback-timing';playbackTimingLabel.append('Timing ');
   const playbackTiming=document.createElement('select');playbackTiming.setAttribute('aria-label','Song timing preference');playbackTiming.innerHTML='<option value="manual">Saved</option><option value="auto">Prefer auto</option>';playbackTiming.disabled=true;playbackTimingLabel.append(playbackTiming);
   let alignmentReviewCount=0;
+  let alignmentReviewSequence=0;
+  let songAlignmentStatus=null;
+  const alignmentStatus=document.createElement('span');alignmentStatus.className='lvx-alignment-status';alignmentStatus.setAttribute('role','status');alignmentStatus.setAttribute('aria-live','polite');
+  function refreshAlignmentStatus(){
+    const a=songAlignmentStatus,stored=alignmentReviewCount,candidates=state.score?.alignmentTiming?.candidates?.length||0,auto=state.score?.alignmentTiming?.mode==='auto';
+    const clock=ms=>`${Math.floor(Math.max(0,ms)/60000)}:${String(Math.floor(Math.max(0,ms)/1000)%60).padStart(2,'0')}`;
+    if(a?.state==='error')alignmentStatus.textContent=`Alignment stopped at ${clock(a.capturedMs||0)} · ${a.proposals||0} new suggestions. ${a.error||'Try again.'}`;
+    else if(a?.state==='stopped')alignmentStatus.textContent=`Alignment stopped · ${a.proposals||0} new suggestions saved`;
+    else if(a?.phase==='capturing'||a?.phase==='waiting-start'||a?.phase==='starting')alignmentStatus.textContent=`Capturing ${clock(a.capturedMs||0)} / ${clock(a.durationMs||0)}`;
+    else if(a?.phase==='aligning')alignmentStatus.textContent=`Aligning ${a.completed||0}/${a.total||0} · ${a.proposals||0} new suggestions saved`;
+    else if(stored||candidates){const label=stored?`${stored} suggestions`:`${candidates} automatic timings`;alignmentStatus.textContent=auto?`${label} · auto selected`:`${label} saved · choose Prefer auto`;}
+    else alignmentStatus.textContent=a?.state==='completed'?'Alignment complete · no suggestions produced':'No auto timings yet';
+    alignmentStatus.dataset.state=a?.state==='error'?'error':stored?'available':'idle';
+  }
   playbackTiming.onchange=async()=>{if(!state.score)return;const score=state.score;playbackTiming.disabled=true;try{const result=await chrome.runtime.sendMessage({type:'LV_ALIGNMENT_PREFERENCE_SET',mediaKey:LvScore.mediaKey(score.source),expectedRevision:score.revision,lyricsHash:score.lyrics.contentHash,preference:{mode:playbackTiming.value,includeProposals:true}});if(!result?.ok)throw Error(result?.error?.message||'Timing preference could not be saved.');setHud('Playback timing preference saved. Automatic timings remain unverified.',false,true);}catch(error){playbackTiming.value=score.alignmentTiming?.mode||'manual';setHud(error.message,true,true);}finally{playbackTiming.disabled=!alignmentReviewCount&&!state.score?.alignmentTiming?.candidates?.length;}};
-  const editGroup = document.createElement('span'); editGroup.className = 'lvx-hud-group lvx-editor-actions'; editGroup.append(quickSyncButton, editButton, playbackTimingLabel);
+  const editGroup = document.createElement('span'); editGroup.className = 'lvx-hud-group lvx-editor-actions'; editGroup.append(quickSyncButton, editButton, playbackTimingLabel, alignmentStatus);refreshAlignmentStatus();
   const resetVideoButton=document.createElement('button');resetVideoButton.className='lvx-theme-btn';resetVideoButton.textContent='Reset video';resetVideoButton.setAttribute('aria-label','Reset video: reload lyrics and display, keep edits');resetVideoButton.onclick=()=>resetCurrentVideo();
   const endGroup = document.createElement('span'); endGroup.className = 'lvx-hud-group'; endGroup.append(helpButton, resetVideoButton, stopButton);
   const sidebar = document.createElement('aside'); sidebar.className = 'lvx-sidebar lvx-sidebar-pinned'; sidebar.setAttribute('aria-label','LyricVibe controls');
@@ -4116,6 +4130,10 @@
       return true;
     }
     if(message.type==='LV_WATCH_STATUS'){sendResponse({ok:true,version:1,enabled:overlayEnabled,active:observationFocused()&&document.readyState==='complete'&&trackWatch?.ready(),navigationToken:trackWatch?.token()});return;}
+    if(message.type==='LV_SONG_ALIGNMENT_STATUS'){
+      if(sender.id===chrome.runtime.id&&message.mediaKey===LvScore.mediaKey({url:location.href})&&message.analysis){songAlignmentStatus=message.analysis;refreshAlignmentStatus();}
+      return;
+    }
     if(message.type==='LV_RESET_VIDEO'){resetCurrentVideo();sendResponse({ok:true});return;}
     if(message.type==='LV_OVERLAY_RESUME'){show();sendResponse({ok:true,version:1});return;}
     if(['LV_STATUS','LV_STATUS_WARNING','LV_ERROR','LV_API_ERROR','LV_TRACK','LV_SCORE_UPDATED'].includes(message.type)){
@@ -4179,7 +4197,7 @@
           sendResponse({ok:false,error:{code:'UNSAVED_SOURCE',message:'Return to the edited video to save its retained take.'}});
           return;
         }
-        if (switched) { discardTimingLocal(); transcript.dirty = false; transcript.shownFor = null; }
+        if (switched) { discardTimingLocal(); transcript.dirty = false; transcript.shownFor = null; songAlignmentStatus=null; }
         if (timing.draft && (message.score.revision !== timing.draft.baseRevision || message.score.lyrics.contentHash !== timing.draft.baseHash)) {
           const retainedTake = tapping.take, retainedBinding = tapping.binding, retainedContext=tapping.recordingContext||recordingContext(), retainedEffects = {...performanceTake,marks:[...performanceTake.marks]};
           discardTimingLocal();
@@ -4188,7 +4206,12 @@
           setSyncNotice(rawTake(retainedTake)?'Timings saved. Reopen Sync to review the retained recording against the current lyrics. Changed phrases stay separate.':'The saved score changed. Reopen Sync to refresh. Any retained take belongs to the previous revision and cannot be applied.');
         }
         state.score = message.score;
-        alignmentReviewCount=Array.isArray(message.review)?message.review.length:0;playbackTiming.value=message.score.alignmentTiming?.mode||'manual';playbackTiming.disabled=!alignmentReviewCount&&!message.score.alignmentTiming?.candidates?.length;
+        const reviewSequence=++alignmentReviewSequence,scoreKey=message.mediaKey,scoreRevision=message.score.revision;
+        alignmentReviewCount=Array.isArray(message.review)?message.review.length:0;playbackTiming.value=message.score.alignmentTiming?.mode||'manual';playbackTiming.disabled=!alignmentReviewCount&&!message.score.alignmentTiming?.candidates?.length;refreshAlignmentStatus();
+        if(!Array.isArray(message.review))chrome.runtime.sendMessage({type:'LV_SCORE_GET',mediaKey:scoreKey}).then(result=>{
+          if(reviewSequence!==alignmentReviewSequence||!result?.ok||!Array.isArray(result.review)||state.score?.revision!==scoreRevision||LvScore.mediaKey(state.score.source)!==scoreKey||LvScore.mediaKey({url:location.href})!==scoreKey)return;
+          alignmentReviewCount=result.review.length;playbackTiming.disabled=!alignmentReviewCount&&!state.score?.alignmentTiming?.candidates?.length;refreshAlignmentStatus();
+        }).catch(()=>{});
         trackWatch?.accept(message.mediaKey);
         void loadTempo();
         state.scoreSignature = '';

@@ -3423,4 +3423,7 @@
 #lvx-root .lvx-quick-axis :focus-visible{outline:2px solid #f7cc70;outline-offset:1px}
 #lvx-root .lvx-playback-timing{display:inline-flex;align-items:center;gap:4px;color:#c7d8df;font:11px system-ui}
 #lvx-root .lvx-playback-timing select{max-width:110px;background:#10232b;color:#edf7fa;border:1px solid #547581;border-radius:4px;padding:4px;font:11px system-ui}
+#lvx-root .lvx-alignment-status{max-width:260px;padding:4px 7px;color:#dfd1f7;font-size:11px;line-height:1.25;overflow-wrap:anywhere}
+#lvx-root .lvx-alignment-status[data-state="error"]{color:#ffcfb6}
+#lvx-root .lvx-alignment-status[data-state="idle"]{color:#c2ccd2}
 @media(max-width:760px){#lvx-root .lvx-quick-grid{grid-template-columns:1fr}}

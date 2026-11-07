@@ -60,3 +60,9 @@ details > summary:focus-visible { outline:2px solid var(--accent); outline-offse
 }
 .live-preview-notice { flex: none; padding: 6px 24px; border-bottom: 1px solid #6d7650; background: #2c3020; color: #e4e6b8; font-size: 11px; }
 .phrase-canvas.view-only .lyric-block { cursor: pointer; }
+.lyric-block.timing-auto{background:#4c3475;border-color:#c4a4f2;color:#f5eaff}
+.lyric-block.timing-available{background:#483554;border-color:#c5a0e5;color:#f6e9ff}
+.lyric-block.timing-proposal{background:#403049;border:1px dashed #d0aaf0;color:#f6e9ff}
+.timing-legend>.auto:before{background:#b48ce7}
+.timing-legend>.available:before{background:#c5a0e5}
+.timing-legend>.proposal:before{background:transparent;border:1px dashed #d0aaf0}

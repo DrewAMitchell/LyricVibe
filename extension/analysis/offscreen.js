@@ -310,6 +310,17 @@
         if (session !== s) return;
         const after = s.context.currentTime;
         const clock = reply?.clock || reply;
+        // A slow reply is not evidence of a seek. Keep the last confirmed
+        // anchor so the next timely reply can check actual continuity. PCM is
+        // still bounded by the existing 750 ms freshness and gap guards.
+        if (after - before > 0.2 && s.wholeSong && s.songPhase === 'capturing' && clock?.mediaKey === s.mediaKey && !clock.error) {
+          if (clock.isAd) { fail(s, 'ADVERTISEMENT_ACTIVE', 'An advertisement interrupted the song pass. Existing suggestions are retained.'); return; }
+          if (clock.autoplayGuardValid === false) { fail(s, 'AUTOPLAY_GUARD_CHANGED', 'YouTube autoplay changed during capture; the song pass stopped.'); return; }
+          if (clock.ended && s.songUsed > 0) { void finishSongCapture(s); return; }
+          if (clock.playbackRate !== 1 || clock.seeking || clock.paused) { fail(s, 'SONG_CAPTURE_INTERRUPTED', 'Playback changed during the song pass. Start again at normal speed.'); return; }
+          s.state = 'waiting-clock';
+          return;
+        }
         if (after - before > 0.2 || !clock || clock.mediaKey !== s.mediaKey) {
           clearWindow(s); s.clock.reset(); s.state = 'waiting-clock';
           if (s.engine === 'native') cancelInflight(s);

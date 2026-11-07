@@ -32,6 +32,19 @@ test('source-scoped Stop preserves another tab analysis and closes the matching 
   assert.equal(stops, 1); assert.equal(closes, 1);
 });
 
+test('whole-song status reaches only its source tab with deduplicated bounded progress', async () => {
+  const onMessage=event(),sent=[];
+  const chrome={runtime:{id:'fixture-extension',getURL:file=>`chrome-extension://fixture-extension/${file}`,onMessage,onConnect:event(),getContexts:async()=>[]},tabs:{sendMessage:async(tabId,message)=>{sent.push({tabId,message});return {ok:true}}}};
+  const sandbox={chrome,crypto:require('node:crypto').webcrypto};vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../extension/analysis/controller.js'),'utf8'),sandbox);
+  const sender={id:'fixture-extension',url:'chrome-extension://fixture-extension/analysis/offscreen.html'};
+  const analysis={state:'capturing',wholeSong:true,tabId:7,mediaKey:'youtube:FIXTURE0001',songPass:{phase:'capturing',capturedMs:1234,durationMs:30000,proposals:0},lyricsHash:'private',sessionId:'private'};
+  onMessage.emit({type:'LV_ANALYSIS_OFFSCREEN_STATE',analysis},sender,()=>{});onMessage.emit({type:'LV_ANALYSIS_OFFSCREEN_STATE',analysis},sender,()=>{});
+  assert.equal(sent.length,1);assert.equal(sent[0].tabId,7);assert.equal(sent[0].message.analysis.capturedMs,1000);assert.equal(sent[0].message.analysis.lyricsHash,undefined);assert.equal(sent[0].message.analysis.sessionId,undefined);
+  onMessage.emit({type:'LV_ANALYSIS_OFFSCREEN_STATE',analysis:{...analysis,state:'error',error:{message:'Capture stopped.'}}},sender,()=>{});
+  assert.equal(sent.length,2);assert.equal(sent[1].message.analysis.error,'Capture stopped.');
+  onMessage.emit({type:'LV_ANALYSIS_OFFSCREEN_STATE',analysis:{...analysis,tabId:8}}, {id:'foreign',url:sender.url},()=>{});assert.equal(sent.length,2);
+});
+
 test('service worker native bridge binds the exact offscreen session and rejects stale or foreign source frames', () => {
   const onMessage = event(), onConnect = event(), hostMessages = event(), hostDisconnect = event();
   let connectName, bridgePort, hostPort;
@@ -78,5 +91,5 @@ test('stopping during autoplay guard setup restores the original setting after s
   onMessage.emit({type:'LV_ANALYSIS_OFFSCREEN_STATE',analysis:{sessionId:'pass',tabId:3,mediaKey:'youtube:FIXTURE0001',engine:'native',wholeSong:true}},sender,()=>{});
   const response=new Promise(resolve=>onMessage.emit({type:'LV_ANALYSIS_CONTROL_REQUEST',sessionId:'pass',tabId:3,action:'guard-start'},sender,resolve));
   await sandbox.LvAnalysis.stopAnalysis();resolveGuard({ok:true});await response;
-  assert.deepEqual(sent,['start','release']);
+  assert.deepEqual(sent.filter(Boolean),['start','release']);
 });
