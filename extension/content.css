@@ -3564,3 +3564,28 @@
 #lvx-root .lvx-sync-panel{scroll-padding-bottom:90px}
 #lvx-root .lvx-record-footer button{scroll-margin-bottom:90px}
 #lvx-root .lvx-sync-panel .lvx-record-footer{border-top:1px solid #567984;margin-top:4px;padding-top:3px}
+
+/* Workspace navigation is a separate compact panel, not a full-width row. */
+#lvx-root .lvx-workspace-menu{position:fixed;z-index:61;width:min(248px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto;pointer-events:auto}
+#lvx-root .lvx-workspace-menu[hidden]{display:none!important}
+#lvx-root.lvx-lyrics-only:not(.lvx-recording-controls)>.lvx-workspace-menu,#lvx-root.lvx-stage-editing>.lvx-workspace-menu,#lvx-root.lvx-live-stage>.lvx-workspace-menu{display:none!important}
+#lvx-root .lvx-workspace-menu .lvx-sidebar-items{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;width:100%;box-sizing:border-box;padding:6px;border:1px solid #72928a;border-radius:10px;background:#10221ff5;box-shadow:0 8px 25px #000a}
+#lvx-root .lvx-workspace-menu .lvx-sidebar-items button{width:auto;min-width:0;min-height:36px;padding:6px;border:1px solid #405b56;border-radius:7px;background:#1c3431;color:#e8f4ef;font:600 12px/1.2 system-ui;text-align:left;cursor:pointer}
+#lvx-root .lvx-workspace-menu .lvx-sidebar-items button::after{content:none!important}
+#lvx-root .lvx-workspace-menu .lvx-sidebar-items button:is(:hover,:focus-visible,[aria-current=page]){background:#34554c;border-color:#b5dccc}
+#lvx-root .lvx-workspace-menu .lvx-sidebar-items button:disabled{opacity:.42;cursor:default}
+@media(pointer:coarse){#lvx-root .lvx-workspace-menu .lvx-sidebar-items button{min-height:44px}}
+#lvx-root .lvx-sidebar:is([data-controls-open=true],[data-controls-open=false]):is(:hover,:focus-within,.lvx-sidebar-pinned){width:min(640px,calc(100% - 16px));grid-template-columns:minmax(0,1fr)}
+#lvx-root .lvx-sidebar .lvx-control-header{justify-self:start;max-width:100%}
+#lvx-root .lvx-sidebar .lvx-control-header .lvx-control-handle{flex:0 0 auto}
+#lvx-root .lvx-sidebar .lvx-control-header .lvx-control-menu{background:#bde4b4;color:#10251c;border:1px solid #e0ffd5;font-size:17px;line-height:1;min-width:40px}
+#lvx-root .lvx-sidebar .lvx-control-header .lvx-control-menu[aria-expanded=true]{background:#72c7a0;color:#08261b}
+#lvx-root .lvx-sidebar:is([data-controls-open=true],[data-controls-open=false]) .lvx-hud{display:flex!important;flex-direction:row;flex-wrap:wrap;align-items:center;justify-self:start;grid-column:1/-1;width:fit-content;max-width:min(520px,100%);opacity:1;visibility:visible;pointer-events:auto;gap:3px;padding:4px}
+#lvx-root .lvx-sidebar:is([data-controls-open=true],[data-controls-open=false]) .lvx-hud>*{order:0;flex:0 1 auto}
+#lvx-root .lvx-sidebar:is([data-controls-open=true],[data-controls-open=false]) .lvx-hud-status{flex:1 1 100%;min-height:18px}
+#lvx-root .lvx-sidebar:is([data-controls-open=true],[data-controls-open=false]) .lvx-hud-group{padding:2px;gap:2px}
+#lvx-root .lvx-sidebar:is([data-controls-open=true],[data-controls-open=false]) .lvx-hud-group>button{min-height:30px;padding:3px 6px}
+#lvx-root .lvx-sidebar:is([data-controls-open=true],[data-controls-open=false]) .lvx-hud-offset{display:flex!important;align-items:center;gap:2px;padding:2px}
+#lvx-root .lvx-sidebar:is([data-controls-open=true],[data-controls-open=false]) :is(.lvx-sidebar-sync-heading,.lvx-sync-save-note){display:none}
+#lvx-root .lvx-sidebar:is([data-controls-open=true],[data-controls-open=false]) .lvx-sync-save-note[data-state=error]{display:block}
+#lvx-root .lvx-sidebar:is([data-controls-open=true],[data-controls-open=false]) .lvx-speed-group [data-playback-rate]{display:inline-flex;align-items:center;justify-content:center;min-width:30px}

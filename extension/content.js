@@ -377,9 +377,8 @@
   playbackTiming.onchange=async()=>{if(!state.score)return;const score=state.score;playbackTiming.disabled=true;try{const result=await chrome.runtime.sendMessage({type:'LV_ALIGNMENT_PREFERENCE_SET',mediaKey:LvScore.mediaKey(score.source),expectedRevision:score.revision,lyricsHash:score.lyrics.contentHash,preference:{mode:playbackTiming.value,includeProposals:true}});if(!result?.ok)throw Error(result?.error?.message||'Timing preference could not be saved.');setHud('Playback timing preference saved. Automatic timings remain unverified.',false,true);}catch(error){playbackTiming.value=score.alignmentTiming?.mode||'manual';setHud(error.message,true,true);}finally{playbackTiming.disabled=!alignmentReviewCount&&!state.score?.alignmentTiming?.candidates?.length;}};
   const editGroup = document.createElement('span'); editGroup.className = 'lvx-hud-group lvx-editor-actions'; editGroup.append(quickSyncButton, editButton, playbackTimingLabel, alignmentStatus);refreshAlignmentStatus();
   const resetVideoButton=document.createElement('button');resetVideoButton.className='lvx-theme-btn';resetVideoButton.textContent='Reset video';resetVideoButton.setAttribute('aria-label','Reset video: reload lyrics and display, keep edits');resetVideoButton.onclick=()=>resetCurrentVideo();
-  const endGroup = document.createElement('span'); endGroup.className = 'lvx-hud-group'; endGroup.append(helpButton, resetVideoButton, stopButton);
   const sidebar = document.createElement('aside'); sidebar.className = 'lvx-sidebar lvx-sidebar-pinned'; sidebar.setAttribute('aria-label','LyricVibe controls');
-  const sidebarNav = document.createElement('nav'); sidebarNav.className = 'lvx-sidebar-nav'; sidebarNav.setAttribute('aria-label','LyricVibe views');
+  const sidebarNav = document.createElement('nav'); sidebarNav.className = 'lvx-sidebar-nav lvx-workspace-menu'; sidebarNav.id='lvx-workspace-menu';sidebarNav.hidden=true;sidebarNav.setAttribute('aria-label','LyricVibe views');
   const sidebarItems = document.createElement('div'); sidebarItems.className = 'lvx-sidebar-items';
   const sidebarView = (key,label,title,activate) => { const button=document.createElement('button');button.type='button';button.dataset.sidebarView=key;button.textContent=label;button.title=title;button.onclick=activate;sidebarItems.append(button);return button; };
   const liveStageView=sidebarView('live-stage','Stage live','Perform choreography on the song stage',()=>void openLiveStage());
@@ -435,22 +434,26 @@
   for(const rate of PLAYBACK_RATES){const option=document.createElement('option');option.value=String(rate);option.textContent=rate+'×';speedSelect.append(option);}
   for(const [rate,label,title]of [[.5,'½×','Half speed'],[.75,'¾×','Three-quarter speed'],[1,'1×','Real-time speed']]){const button=document.createElement('button');button.type='button';button.textContent=label;button.dataset.playbackRate=rate;button.title=title;button.setAttribute('aria-label',title);button.onclick=()=>setPlaybackSpeed(rate);speedGroup.append(button);}
   speedGroup.append(speedSelect);speedSelect.onchange=()=>setPlaybackSpeed(Number(speedSelect.value));
-  hud.append(statusGroup, speedGroup, offsetGroup, editGroup, errorButton, endGroup);
-  sidebar.append(sidebarNav,hud);
+  hud.append(statusGroup, speedGroup, offsetGroup, editGroup, errorButton);
+  sidebar.append(hud);
   let controlPlacement={x:0,y:0,orientation:'vertical'},controlDrag=null;
   const controlHandle=document.createElement('button');controlHandle.type='button';controlHandle.className='lvx-control-handle';controlHandle.textContent='⠿ LyricVibe';controlHandle.title='Drag to move controls · arrow keys move when focused';controlHandle.setAttribute('aria-label','Move LyricVibe controls');
   const controlOrientation=document.createElement('button');controlOrientation.type='button';controlOrientation.className='lvx-control-orientation';
   const controlReset=document.createElement('button');controlReset.type='button';controlReset.textContent='↺';controlReset.title='Reset controls position';controlReset.setAttribute('aria-label','Reset controls position');
-  const controlMenu=document.createElement('button');controlMenu.type='button';controlMenu.textContent='☰';controlMenu.title='Open LyricVibe controls';controlMenu.setAttribute('aria-label','Open LyricVibe controls');controlMenu.setAttribute('aria-expanded','false');
-  const controlHeader=document.createElement('div');controlHeader.className='lvx-control-header';controlHeader.append(controlMenu,controlHandle,tempoControls,controlOrientation,controlReset);sidebar.prepend(controlHeader);
+  const controlMenu=document.createElement('button');controlMenu.type='button';controlMenu.className='lvx-control-menu';controlMenu.textContent='☰';controlMenu.title='Open LyricVibe controls';controlMenu.setAttribute('aria-label','Open LyricVibe controls');controlMenu.setAttribute('aria-expanded','false');controlMenu.setAttribute('aria-controls',sidebarNav.id);
+  const controlHeader=document.createElement('div');controlHeader.className='lvx-control-header';controlHeader.append(controlMenu,controlHandle,tempoControls,helpButton,resetVideoButton,stopButton,controlOrientation,controlReset);sidebar.prepend(controlHeader);
   sidebar.dataset.controlsOpen='false';
-  function setControlsOpen(open){sidebar.dataset.controlsOpen=String(open);controlMenu.setAttribute('aria-expanded',String(open));controlMenu.setAttribute('aria-label',open?'Close LyricVibe controls':'Open LyricVibe controls');controlMenu.title=open?'Close LyricVibe controls':'Open LyricVibe controls';}
+  function placeWorkspaceMenu(){if(sidebarNav.hidden)return;const anchor=controlMenu.getBoundingClientRect(),controls=sidebar.getBoundingClientRect(),box=sidebarNav.getBoundingClientRect(),margin=8;const x=Math.max(margin,Math.min(anchor.left,innerWidth-box.width-margin));const below=controls.bottom+5,above=controls.top-box.height-5;const y=below+box.height<=innerHeight-margin?below:Math.max(margin,above);Object.assign(sidebarNav.style,{left:x+'px',top:y+'px'});}
+  function setControlsOpen(open){sidebar.dataset.controlsOpen=String(open);sidebarNav.hidden=!open;controlMenu.setAttribute('aria-expanded',String(open));controlMenu.setAttribute('aria-label',open?'Close LyricVibe controls':'Open LyricVibe controls');controlMenu.title=open?'Close LyricVibe controls':'Open LyricVibe controls';if(open)requestAnimationFrame(placeWorkspaceMenu);}
   controlMenu.onclick=()=>setControlsOpen(sidebar.dataset.controlsOpen!=='true');
+  listenGlobal(document,'pointerdown',event=>{if(!sidebarNav.hidden&&!sidebarNav.contains(event.target)&&!controlMenu.contains(event.target))setControlsOpen(false);},true);
+  sidebarItems.addEventListener('click',event=>{const button=event.target.closest('button');if(button&&!button.disabled)setControlsOpen(false);});
+  sidebarNav.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setControlsOpen(false);controlMenu.focus();}});
   function placeControls(){
     sidebar.dataset.orientation=controlPlacement.orientation;
     controlOrientation.textContent=controlPlacement.orientation==='vertical'?'↔':'↕';controlOrientation.setAttribute('aria-label',controlPlacement.orientation==='vertical'?'Use horizontal controls':'Use vertical controls');controlOrientation.title=controlOrientation.getAttribute('aria-label');
     const area=root.getBoundingClientRect(),box=sidebar.getBoundingClientRect();
-    sidebar.style.left=(8+controlPlacement.x*Math.max(0,area.width-box.width-16))+'px';sidebar.style.top=(8+controlPlacement.y*Math.max(0,area.height-box.height-16))+'px';
+    sidebar.style.left=(8+controlPlacement.x*Math.max(0,area.width-box.width-16))+'px';sidebar.style.top=(8+controlPlacement.y*Math.max(0,area.height-box.height-16))+'px';placeWorkspaceMenu();
   }
   function saveControlPlacement(){chrome.storage.local.set({lvxControlPlacement:{...controlPlacement}}).catch(()=>setHud('Controls moved; position could not save.',true,true));}
   function moveControls(x,y){const area=root.getBoundingClientRect(),box=sidebar.getBoundingClientRect();controlPlacement.x=clamp((x-area.left-8)/Math.max(1,area.width-box.width-16),0,1);controlPlacement.y=clamp((y-area.top-8)/Math.max(1,area.height-box.height-16),0,1);placeControls();}
@@ -467,7 +470,7 @@
     for(const button of [liveStageView,displayLookView,displayMotionView,displayWordsView,displayStageView,stageEditView,timingRecordView,timingRefineView,timingEffectsView,timingBeatView])button.disabled=locked;
     for(const [button,on] of [[liveStageView,liveStage.active],[displayLookView,themePicker.hidden===false&&studio.view==='look'],[displayMotionView,themePicker.hidden===false&&studio.view==='motion'],[displayWordsView,themePicker.hidden===false&&studio.view==='words'],[displayStageView,themePicker.hidden===false&&studio.view==='stage'],[timingRecordView,!syncPanel.hidden&&timingWorkspace.view==='record'],[timingRefineView,!syncPanel.hidden&&timingWorkspace.view==='review'],[timingEffectsView,!syncPanel.hidden&&timingWorkspace.view==='effects'],[timingBeatView,!syncPanel.hidden&&timingWorkspace.view==='beat'],[stageEditView,stageEdit.active]])button.setAttribute('aria-current',on?'page':'false');
   };
-  sidebar.addEventListener('pointerenter',syncSidebarState);
+  sidebar.addEventListener('pointerenter',syncSidebarState);sidebarNav.addEventListener('pointerenter',syncSidebarState);
   for(const button of sidebarItems.children)button.addEventListener('click',syncSidebarState);
   const hudSizeObserver=new ResizeObserver(()=>root.style.setProperty('--lvx-toolbar-height','0px'));
 
@@ -4147,7 +4150,7 @@
     stageSurface.addEventListener('pointermove',move);stageSurface.addEventListener('pointerup',finish);stageSurface.addEventListener('pointercancel',finish);
   });
   stage.addEventListener('click',event=>{if(!stageEdit.active||stageEditBusy()||stageEdit.fieldsDirty)return;const word=event.target.closest('[data-word]'),phrase=event.target.closest('[data-phrase]');if(!word||!phrase)return;stageEdit.phraseId=phrase.dataset.phrase;refreshStageEdit(true);stageEdit.wordId=word.dataset.word;refreshStageEdit();stageControl('look').closest('details').open=true;});
-  root.append(viewport, preview, progress, sidebar, themePicker, shortcutsPanel, syncPanel, errorPanel,controlsNotice,stagePanel,transcriptDialog);
+  root.append(viewport, preview, progress, sidebar, sidebarNav, themePicker, shortcutsPanel, syncPanel, errorPanel,controlsNotice,stagePanel,transcriptDialog);
   installSongLibrary();
   buildEffectsWorkspace();
   function mountRoot() {
@@ -6689,6 +6692,7 @@
   function handleKeys(event) {
     const target = event.target;
     const tagName = target && target.tagName ? target.tagName.toLowerCase() : '';
+    if(!sidebarNav.hidden&&event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();setControlsOpen(false);controlMenu.focus();return;}
     if(!quickFix.hidden&&event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();quickFix.hidden=true;return;}
     if(transcriptDialog.open&&event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();transcriptDialog.close();return;}
     if (tagName === 'input' || tagName === 'textarea' || tagName === 'select' || (target && target.isContentEditable)) return;
