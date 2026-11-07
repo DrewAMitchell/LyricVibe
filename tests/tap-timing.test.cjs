@@ -2,6 +2,31 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const tap = require('../extension/tap-timing.js');
 
+test('a partially timed phrase retains every spoken word while preserving completed timings',()=>{
+  const units=['red','blue','soft','light','glows','new','stars','over','us'].map((id,i)=>({id,wordId:id,text:id,minMs:0,maxMs:20000,preserveTiming:[2,3,4,5,6].includes(i)}));
+  let take=tap.begin(units,{mode:'word',cadence:'pairs'});
+  for(let i=0;i<units.length;i++){take=tap.mark(take,1000+i*300);take=tap.release(take,1200+i*300);}
+  assert.deepEqual(take.marks.map(m=>m.wordId),units.map(u=>u.wordId));
+  const plan=tap.wordTakeChanges(take);
+  assert.deepEqual(plan.changes.map(c=>c.wordId),['red','blue','over','us']);assert.deepEqual(plan.incomplete,[]);
+});
+
+test('a partial hold over a protected hyphenated word does not block new word timing',()=>{
+  const units=[{id:'a1',wordId:'a',text:'RED',spelling:'RED-',minMs:0,maxMs:10000,preserveTiming:true},{id:'a2',wordId:'a',text:'BLUE',spelling:'BLUE',minMs:0,maxMs:10000,preserveTiming:true},{id:'b',wordId:'b',text:'SKY',minMs:0,maxMs:10000}];
+  const take={...tap.begin(units),status:'stopped',marks:[{id:'a1',wordId:'a',startMs:1000,endMs:1400},{id:'b',wordId:'b',startMs:3000,endMs:4000}]};
+  assert.deepEqual(tap.wordTakeChanges(take),{changes:[{wordId:'b',startMs:3000,endMs:4000}],incomplete:[]});
+});
+
+test('undoing a wrongly assigned final hold keeps the earlier word timings',()=>{
+  const units=['red','blue','over'].map(id=>({id,wordId:id,text:id,minMs:0,maxMs:10000}));
+  let take=tap.punchIn(tap.begin(units,{mode:'word',cadence:'pairs'}),1000);
+  for(let i=0;i<3;i++){take=tap.mark(take,1000+i*400);take=tap.release(take,1200+i*400);}
+  take={...take,index:0,status:'armed'};
+  const recovered=tap.stop(tap.undo(take));
+  assert.equal(recovered.pendingStartMs,null);assert.deepEqual(recovered.marks.map(m=>m.wordId),['red','blue']);
+  assert.deepEqual(tap.wordTakeChanges(recovered).changes.map(c=>c.wordId),['red','blue']);
+});
+
 test('partial hyphen words do not block complete words or invent missing timing',()=>{
   const units=[{id:'a1',wordId:'a',text:'RED',spelling:'RED-',minMs:0,maxMs:10000},{id:'a2',wordId:'a',text:'BLUE',spelling:'BLUE',minMs:0,maxMs:10000},{id:'b',wordId:'b',text:'SKY',spelling:'SKY',minMs:0,maxMs:10000}];
   const take={...tap.begin(units),status:'complete',marks:[{id:'a1',wordId:'a',startMs:1000,endMs:1400},{id:'b',wordId:'b',startMs:3000,endMs:4000}]};
@@ -75,7 +100,7 @@ test('lead-in guidance follows source-clock time and clamps before and after the
   assert.deepEqual(tap.leadInProgress(3000, 3000, 1000), { remainingMs: 0, progress: 1 });
   assert.deepEqual(tap.leadInProgress(4000, 3000, 1000), { remainingMs: 0, progress: 1 });
   // A paused, sought, or rate-adjusted player supplies its current source time;
-  // the helper does not apply playback-rate or wice-clock estimates.
+  // the helper does not apply playback-rate or wall-clock estimates.
   assert.deepEqual(tap.leadInProgress(2000, 3000, 1000), { remainingMs: 1000, progress: 0 });
   assert.deepEqual(tap.leadInProgress(2500, 3500, 1000), { remainingMs: 1000, progress: 0 });
   assert.deepEqual(tap.leadInProgress(100, 200, 0), { remainingMs: 100, progress: 1 });
@@ -1214,7 +1239,7 @@ test('a Words hold take becomes a word pass, merging hyphen parts and applying t
     {id:'a__take-part-1',wordId:'a',startMs:100,endMs:200},{id:'a__take-part-2',wordId:'a',startMs:220,endMs:390},
     {id:'b',wordId:'b',startMs:500,endMs:900}]};
   const units=[
-    {wordId:'a',phraseId:'p',text:'ice-night',minMs:0,maxMs:2000,expectedCount:2},
+    {wordId:'a',phraseId:'p',text:'all-night',minMs:0,maxMs:2000,expectedCount:2},
     {wordId:'b',phraseId:'p',text:'long',minMs:0,maxMs:2000,expectedCount:1},
     {wordId:'c',phraseId:'q',text:'more',minMs:2000,maxMs:3000,expectedCount:1}];
   const syllables=[110,250,520].map((ms,i)=>({id:`e${i}`,kind:'syllable-entrance',sourceMs:ms+10}));
@@ -1289,7 +1314,7 @@ test('rewinding inside a phrase retime preserves later phrases and uses only the
 });
 
 test('a quick word keeps the tap inside its hold even when the next press follows within the lead', () => {
-  // Real Sample Track case: "bust a move" with a brief "a".
+  // Real All Nighter case: "bust a move" with a brief "a".
   const units=['bust','a','move'].map((text,i)=>({wordId:text,phraseId:'p',text,minMs:0,maxMs:30000,expectedCount:1}));
   const syllables=[19021,19261,19387].map((ms,i)=>({id:`e${i}`,sourceMs:ms}));
   let take=tap.beginWordHolds(units,syllables);

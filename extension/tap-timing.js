@@ -1570,6 +1570,7 @@
     }
     const changes=[],incomplete=[];
     for(const [wordId,marks]of groups){const units=take.units.filter(u=>u.wordId===wordId),ordered=units.map(u=>marks.find(m=>m.id===u.id)).filter(Boolean);
+      if(units.every(u=>u.preserveTiming===true))continue;
       if(units.length!==marks.length){incomplete.push(wordId);continue;}
       if(ordered.some((m,i)=>i&&m.startMs<ordered[i-1].endMs))fail('INVALID_TAKE','Hyphen parts overlap or are out of order.');
       changes.push({wordId,startMs:ordered[0].startMs,endMs:ordered.at(-1).endMs,...(units.length>1?{hyphenParts:ordered.map((m,i)=>({text:units[i].spelling,startMs:m.startMs,endMs:m.endMs}))}:{})});

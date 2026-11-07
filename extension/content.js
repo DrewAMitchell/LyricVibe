@@ -1950,7 +1950,8 @@
   function markCaptureTiming(span,item,phrase,take,recordedIds){
     const score=timing.draft?.score,word=phrase?.words.find(w=>w.id===item.wordId);if(!score||!word)return;
     const syllableId=word.syllables?.some(s=>s.id===item.id)?item.id:null;
-    const inTake=take?.mode==='phrase'?false:syllableId?Boolean((take?.marks||[]).some(m=>m.id===syllableId||m.syllableId===syllableId)):recordedIds.has(word.id);
+    const preserved=take?.units?.some(u=>u.wordId===word.id&&u.preserveTiming===true);
+    const inTake=!preserved&&(take?.mode==='phrase'?false:syllableId?Boolean((take?.marks||[]).some(m=>m.id===syllableId||m.syllableId===syllableId)):recordedIds.has(word.id));
     const status=LvScore.captureTimingStatus(score,phrase,word,{inTake,pending:capturePendingWords(score).has(word.id),syllableId});
     span.dataset.timingKind=status.kind;span.title=status.label;span.setAttribute('aria-label',`${item.spelling} · ${status.label}`);return status;
   }
@@ -2394,7 +2395,7 @@
     const remaining=steps.reduce((n,s)=>n+s.phraseIds.length,0);
     const finish=syncPanel.querySelector('[data-finish-missing]');if(finish){finish.hidden=!timing.draft||!supported||!missingPartSteps().length;finish.disabled=timing.busy||tapPending()||countIn.active||countIn.preparing;}
     hint.textContent=partRun?`${partRun.steps[partRun.index].label} · section ${partRun.index+1}/${partRun.steps.length}. Stop ends the run; completed timing stays in preview.`:
-      !supported?'Available for phrase/word takes and single-phrase syllable practice.':!checkbox.checked?'Off · record the selected track, including existing timing.':remaining?`On · ${remaining} unfinished phrase${remaining===1?'':'s'} for ${syncButton('tap-mode').value} timing${names.length?`; includes ${names.join(', ')}`:''}. Completed phrases are skipped.`:'All parts in this range already have this timing. Nothing to record.';
+      !supported?'Available for phrase/word takes and single-phrase syllable practice.':!checkbox.checked?'Off · record the selected track, including existing timing.':remaining?`On · ${remaining} unfinished phrase${remaining===1?'':'s'} for ${syncButton('tap-mode').value} timing${names.length?`; includes ${names.join(', ')}`:''}. Completed phrases are skipped.${syncButton('tap-mode').value==='word'?' Existing completed words keep their timing.':''}`:'All parts in this range already have this timing. Nothing to record.';
     const toggle=checkbox.closest('.lvx-toggle-host');if(toggle){toggle.title=hint.textContent;const button=toggle.querySelector('button');if(button)button.title=hint.textContent;}hint.hidden=!checkbox.checked&&!partRun;
   }
   async function advanceOtherParts(run){
@@ -2458,7 +2459,12 @@
       const units = eventPass()||wordPass() ? await prepareStreamUnits(phrase,true,0) : phraseStream() ? await prepareStreamUnits(phrase) : continuousSyllables() ? timing.draft.score.phrases.slice(timing.phraseIndex).filter(p=>p.laneId===phrase.laneId).flatMap(p=>p.words.filter(w=>!w.excluded&&w.startMs>=word.startMs&&w.endMs>w.startMs).map(w=>({id:w.id,wordId:w.id,phraseId:p.id,text:w.text,minMs:w.startMs,maxMs:w.endMs,estimatedStartMs:w.startMs}))).sort((a,b)=>a.minMs-b.minMs) : mode === 'phrase' ? phrases.map(p=>({id:p.id,phraseId:p.id,wordId:p.words.find(w=>!w.excluded).id,text:p.words.filter(w=>!w.excluded).map(w=>w.text).join(' '),estimatedStartMs:p.startMs,estimatedEndMs:p.endMs,minMs:0,maxMs:timing.draft.score.source.durationMs})) : mode === 'word' ? wordTimingUnits(selected) : selected.map(item => ({ id: item.id, wordId: word.id,
         ...(mode === 'syllable' ? { syllableId: item.id,wordId:item.wordId,phraseId:phrase.id } : {}), text: item.text,
         minMs: mode === 'word' ? 0 : phrase.startMs, maxMs: mode === 'word' ? timing.draft.score.source.durationMs : phrase.endMs }));
-      if(partStep&&mode==='word'){const unfinished=units.filter(u=>{const w=timing.draft.score.phrases.flatMap(p=>p.words).find(w=>w.id===u.wordId);return !(w?.provenance==='manual'&&w.locked&&w.endMs>w.startMs);});units.splice(0,units.length,...unfinished);}
+      if(partStep&&mode==='word'){
+        const words=new Map(timing.draft.score.phrases.flatMap(p=>p.words).map(w=>[w.id,w]));
+        // Keep the entire phrase in the performer's sequence. Completed words
+        // still receive a cue/hold, but their saved timing is not replaced.
+        for(const unit of units){const w=words.get(unit.wordId);unit.preserveTiming=Boolean(w?.provenance==='manual'&&w.locked&&w.endMs>w.startMs);}
+      }
       for(const unit of units){const owner=timing.draft.score.phrases.find(p=>p.id===unit.phraseId||p.words.some(w=>w.id===unit.wordId));unit.timingEstimated=untimedPhrase(owner)||mode==='phrase'&&LvScore.phraseTimingCoverage(owner).phrase.status!=='complete';}
       if(syncButton('record-repeat').checked&&continuousPass())units.splice(0,units.length,...units.filter(u=>u.phraseId===phrase.id));
       // A raw take of the other kind (syllable taps vs word holds) is archived and becomes the source, not a continuation.
@@ -2793,6 +2799,7 @@
     timing.busy = true; refreshTimingPanel();
     try {
       const wordPlan=take.mode==='word'?LvTapTiming.wordTakeChanges(take):null;
+      if(wordPlan&&!wordPlan.changes.length&&!wordPlan.incomplete.length){setSyncNotice('These holds follow already-timed words. Their timing is unchanged; the take remains available.');return;}
       if(wordPlan?.incomplete.length){
         const ids=new Set(wordPlan.incomplete),units=take.units.filter(u=>ids.has(u.wordId)),marks=take.marks.filter(m=>ids.has(m.wordId));
         const words=timing.draft.score.phrases.flatMap(p=>p.words),referenceWords=words.filter(w=>ids.has(w.id)).map(w=>({id:w.id,text:w.text,startMs:w.startMs,endMs:w.endMs}));

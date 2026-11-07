@@ -81,7 +81,10 @@ const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env
   });
   await page.getByRole('button',{name:'Record unrecorded parts',exact:true}).click();
   await evaluate(async()=>__qa.armTapTake());
-  assert.deepEqual(await evaluate(()=>__qa.tapping.take.units.map(u=>u.wordId)),['phrase-1-word-2']);
+  assert.deepEqual(await evaluate(()=>__qa.tapping.take.units.map(u=>u.wordId)),['phrase-1-word-1','phrase-1-word-2'],'a partial phrase remains in spoken order');
+  await mark(1.1,1.5);
+  assert.equal(await evaluate(()=>__qa.tapping.take.units[__qa.tapping.take.index].wordId),'phrase-1-word-2','a completed word consumes its own hold without skipping the next word');
+  assert.equal(await evaluate(()=>__qa.syncPanel.querySelector('.lvx-perform-phrase [data-unit="phrase-1-word-1"]').dataset.timingKind),'manual','a preserved word keeps its human-timed cue');
   await mark(1.8,2.9);
   await waitFor(()=>__qa.getPartRun()?.index===1&&__qa.tapping.take?.status==='armed'&&!__qa.timing.busy);
   await mark(3.1,3.9);
@@ -176,7 +179,28 @@ const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env
   await evaluate(()=>{const q=__qa,score=q.timing.draft.score;score.lyrics.timingBasis='caption-segments';score.lyrics.captionSource={kind:'automatic',language:'en'};q.refreshTimingPanel();});
   assert.equal(await evaluate(()=>__qa.plainTimingNotice.textContent),'YouTube captions (automatic, en) · Imported segment times; review words.');
   assert.equal(await evaluate(()=>__qa.plainTimingNotice.hidden),false,'caption provenance remains visible after word timing is recorded');
-  const checks=['Completed Main and backing phrases skipped; unfinished backing remains reachable through a completed Main anchor','Next unfinished Main phrase selected; final take stays live until explicit Stop','Completed phrase bytes and saved score unchanged','No remaining targets does not arm or play; switch off allows rerecording','Partial word pass keeps completed word bytes unchanged','New preference persists independently of legacy tour preference','Backspace removes unfinished phrase without appending or changing completed phrases','Syllable practice skips complete Main before spelling preparation, keeps its review step and ends even with Repeat enabled','Finish missing parts enables looping and unrecorded-only','unfinished phrase repeats','Next lead-in button and Shift+Right remain forward-only in missing-only mode without changing capture state','second Back exposes a completed phrase for retake without changing score until new inputs','hyphenated word retake preserves the existing subpart unit schema and future mark ids','caption origin remains visible with imported segment times after recording'];
+  // Reproduce a partially timed pair of phrases: completed words between and
+  // at the beginning of phrases must still occupy their spoken cue positions.
+  await evaluate(()=>{
+    const q=__qa,v=document.querySelector('video');q.discardTimingLocal();
+    const s=LvScore.createScore({platform:'youtube',videoId:'TESTVIDEO01',durationMs:30000},'[00:01.00]red blue soft light glows\n[00:06.00]new stars over us\n[00:11.00]',{provider:'fixture',entryId:'partial',contentHash:'b'.repeat(64)});
+    for(const [pi,indices] of [[0,[2,3,4]],[1,[0,1]]])for(const i of indices){s.phrases[pi].words[i].provenance='manual';s.phrases[pi].words[i].locked=true;}
+    q.state.score=s;__store['lvScore:youtube:TESTVIDEO01']={score:structuredClone(s),history:[],review:[]};q.timing.draft={...LvTimingVariant.merge(s,s),token:'partial',previewRevision:0,baseRevision:s.revision,baseHash:s.lyrics.contentHash,undoScores:[]};
+    window.__partialProtected=JSON.stringify([...s.phrases[0].words.slice(2),...s.phrases[1].words.slice(0,2)]);
+    q.timing.phraseIndex=0;q.tapping.wordId=s.phrases[0].words[0].id;q.syncPanel.hidden=false;
+    document.querySelector('[data-sync=tap-mode]').value='word';document.querySelector('[data-sync=tap-scope]').value='lane';
+    document.querySelector('[data-sync=record-other-parts]').checked=true;document.querySelector('[data-sync=record-repeat]').checked=false;
+    v.currentTime=1;v.paused=true;q.refreshTimingPanel();
+  });
+  await evaluate(async()=>{const q=__qa,r=await q.timingRequest('LV_TIMING_PREPARE',{fromSaved:true});q.timing.draft=r.preview;q.refreshTimingPanel();});
+  await evaluate(async()=>__qa.armTapTake());
+  assert.deepEqual(await evaluate(()=>__qa.tapping.take.units.map(u=>u.text)),['red','blue','soft','light','glows','new','stars','over','us']);
+  for(let i=0;i<9;i++){const start=i<5?1.1+i*.9:6.1+(i-5)*1.25;await mark(start,start+.2);}
+  assert.deepEqual(await evaluate(()=>__qa.tapping.take.marks.map(m=>__qa.tapping.take.units.find(u=>u.id===m.id).text)),['red','blue','soft','light','glows','new','stars','over','us']);
+  assert.deepEqual(await evaluate(()=>LvTapTiming.wordTakeChanges({...__qa.tapping.take,status:'stopped'}).changes.map(c=>__qa.tapping.take.units.find(u=>u.wordId===c.wordId).text)),['red','blue','over','us'],'previously completed words retain their saved timings');
+  await evaluate(async()=>__qa.stopTapTake());await waitFor(()=>!__qa.tapping.take&&!__qa.timing.busy);
+  assert.equal(await evaluate(()=>JSON.stringify([...__qa.timing.draft.score.phrases[0].words.slice(2),...__qa.timing.draft.score.phrases[1].words.slice(0,2)])),await evaluate(()=>__partialProtected),'applying the take preserves already-completed words');
+  const checks=['Completed Main and backing phrases skipped; unfinished backing remains reachable through a completed Main anchor','Next unfinished Main phrase selected; final take stays live until explicit Stop','Completed phrase bytes and saved score unchanged','No remaining targets does not arm or play; switch off allows rerecording','Partially timed adjacent phrases retain all spoken cues in sequence; completed word timing remains unchanged after apply','New preference persists independently of legacy tour preference','Backspace removes unfinished phrase without appending or changing completed phrases','Syllable practice skips complete Main before spelling preparation, keeps its review step and ends even with Repeat enabled','Finish missing parts enables looping and unrecorded-only','unfinished phrase repeats','Next lead-in button and Shift+Right remain forward-only in missing-only mode without changing capture state','second Back exposes a completed phrase for retake without changing score until new inputs','hyphenated word retake preserves the existing subpart unit schema and future mark ids','caption origin remains visible with imported segment times after recording'];
   fs.writeFileSync(path.join(root,'docs/unrecorded-parts-proof.json'),JSON.stringify({observedAt:new Date().toISOString(),basis:'Actual Chrome content UI and score host with synthetic media/storage; no human song edits.',checks},null,2)+'\n');
   console.log(JSON.stringify({checks}));
 })().catch(e=>{console.error(e);process.exitCode=1}).finally(async()=>{await browser?.close();await server?.close();probe('END');});
