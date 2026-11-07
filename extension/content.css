@@ -112,6 +112,8 @@
 #lvx-root .lvx-correction-times input[type=number] { width:100%; }
 #lvx-root .lvx-capture-transcript { max-width:900px; padding:24px 30px; border-radius:14px; background:#101710e8; text-align:left; text-transform:none; letter-spacing:normal; font-family:'Segoe UI',Arial,sans-serif; }
 #lvx-root .lvx-capture-transcript small { display:block; color:#bad1dc; font-size:12px; letter-spacing:.08em; }
+#lvx-root .lvx-capture-transcript .lvx-live-progress, #lvx-root .lvx-perform-cue .lvx-live-progress { display:block; color:#c9a9f2; font-size:11px; letter-spacing:normal; margin-top:4px; }
+#lvx-root .lvx-live-progress[hidden] { display:none; }
 #lvx-root .lvx-capture-transcript p { color:#edf1e8; font-size:clamp(26px,4vw,56px); line-height:1.65; margin:12px 0 0; font-weight:600; }
 #lvx-root .lvx-capture-transcript span { color:#edf1e8; border-radius:5px; padding:2px; box-decoration-break:clone; -webkit-box-decoration-break:clone; }
 #lvx-root .lvx-capture-transcript .lvx-estimated-playing { color:#f4fbff; background:#244f68; box-shadow:inset 0 -3px #85d2ff; }

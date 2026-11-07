@@ -4,9 +4,11 @@
   const path = 'analysis/offscreen.html';
   let creating;
   let generation = 0;
+  let starting = false;
   let nativeBridge = null;
   let status = { state: 'stopped', automaticAdmissionEnabled: false };
   let lastTabStatus = '';
+  let lastProgressStatus = '';
   function publishSongStatus(value) {
     if (!value?.wholeSong || !Number.isInteger(value.tabId) || typeof value.mediaKey !== 'string') return;
     const pass = value.songPass || {};
@@ -54,13 +56,20 @@
     }
     return status;
   }
-  async function startAnalysis({ tabId, score, language = 'en', engine = 'browser', expectedRevision, lyricsHash, wholeSong = false }) {
+  async function startAnalysis({ tabId, score, language = 'en', engine = 'browser', expectedRevision, lyricsHash, wholeSong = false, progressOnly = false, previewToken = null, previewRevision = null }) {
+    if(starting)throw typed('ANALYSIS_BUSY','Another analysis is starting.');
+    starting=true;
+    try {
     if (!Number.isInteger(tabId) || !score?.source || !Number.isInteger(score.revision)) throw typed('INVALID_ANALYSIS_SOURCE', 'Choose a source tab and validated score.');
     globalThis.LvScore?.validateScore(score);
     if (expectedRevision != null && expectedRevision !== score.revision) throw typed('REVISION_CONFLICT', 'Reload the score before starting analysis.');
     if (lyricsHash != null && lyricsHash !== score.lyrics.contentHash) throw typed('LYRIC_REVISION_MISMATCH', 'The selected lyrics changed before analysis could start.');
     if (!['browser', 'native'].includes(engine)) throw typed('ANALYSIS_ENGINE_INVALID', 'Choose a supported analysis engine.');
-    await stopAnalysis();
+    if (progressOnly) {
+      const active = await analysisStatus();
+      if (!['stopped', 'error'].includes(active.state)) throw typed('ANALYSIS_BUSY', 'Another analysis is already running.');
+    }
+    if (!progressOnly) await stopAnalysis();
     const token = generation;
     const mediaKey = globalThis.LvScore.mediaKey(score.source);
     const reply = await chrome.tabs.sendMessage(tabId, { type: 'LV_ANALYSIS_CLOCK' });
@@ -77,14 +86,15 @@
       const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
       if (token !== generation) return status;
       const sessionId = crypto.randomUUID();
-      status = { state: 'starting', engine, wholeSong, tabId, mediaKey, sessionId, lyricsHash: score.lyrics.contentHash, expectedRevision: score.revision, automaticAdmissionEnabled: false };
-      const response = await chrome.runtime.sendMessage({ target: 'lv-offscreen', type: 'LV_ANALYSIS_OFFSCREEN_START', config: { tabId, score, mediaKey, sessionId, streamId, language, engine, wholeSong } });
+      status = { state: 'starting', engine, wholeSong, progressOnly, tabId, mediaKey, sessionId, lyricsHash: score.lyrics.contentHash, expectedRevision: score.revision, automaticAdmissionEnabled: false };
+      const response = await chrome.runtime.sendMessage({ target: 'lv-offscreen', type: 'LV_ANALYSIS_OFFSCREEN_START', config: { tabId, score, mediaKey, sessionId, streamId, language, engine, wholeSong, progressOnly, previewToken, previewRevision } });
       if (token === generation && response?.analysis) status = response.analysis;
       return status;
     } catch (error) {
-      await stopAnalysis();
+      if (token === generation) await stopAnalysis();
       throw typed('TAB_CAPTURE_FAILED', 'Chrome could not capture this tab. Invoke LyricVibe on the playing source tab and enable analysis again.');
     }
+    } finally { starting=false; }
   }
   async function analysisStatus() {
     if (await exists()) {
@@ -106,7 +116,18 @@
   }
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!isOffscreen(sender)) return;
-    if (message.type === 'LV_ANALYSIS_OFFSCREEN_STATE') { status = message.analysis; publishSongStatus(status); return; }
+    if (message.type === 'LV_ANALYSIS_OFFSCREEN_STATE') {
+      status = message.analysis; publishSongStatus(status);
+      if (status?.progressOnly && Number.isInteger(status.tabId) && status.sessionId) {
+        const key=JSON.stringify([status.tabId,status.mediaKey,status.sessionId,status.state]);
+        if(key!==lastProgressStatus){lastProgressStatus=key;chrome.tabs.sendMessage(status.tabId, {type:'LV_LIVE_PROGRESS_STATUS',mediaKey:status.mediaKey,sessionId:status.sessionId,state:status.state}).catch(()=>{});}
+      }
+      return;
+    }
+    if (message.type === 'LV_LIVE_PROGRESS_RESULT') {
+      if (status.progressOnly && message.sessionId === status.sessionId && message.tabId === status.tabId && message.mediaKey === status.mediaKey) chrome.tabs.sendMessage(status.tabId, message).catch(() => {});
+      return;
+    }
     if (message.type === 'LV_ANALYSIS_CLOCK_REQUEST') {
       if (!status.sessionId || message.sessionId !== status.sessionId || message.tabId !== status.tabId) { respond({ error: 'ANALYSIS_SOURCE_MISMATCH' }); return; }
       chrome.tabs.sendMessage(message.tabId, { type: 'LV_ANALYSIS_CLOCK' }).then(clock => respond(clock), () => respond({ error: 'SOURCE_TAB_UNAVAILABLE' }));

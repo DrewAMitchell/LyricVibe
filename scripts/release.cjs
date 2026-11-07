@@ -165,6 +165,8 @@ async function main(command, args) {
   await run(process.execPath, ['scripts/song-timeline-proof.cjs'], source);
   await run(process.execPath, ['scripts/song-timeline-proof.cjs', '--narrow'], source);
   await run(process.execPath, ['scripts/whole-song-capture-proof.cjs'], source);
+  await run(process.execPath, ['scripts/live-progress-proof.cjs'], source);
+  await run(process.execPath, ['scripts/live-progress-capture-proof.cjs'], source);
   await run(process.execPath, ['scripts/live-stage-proof.cjs'], source);
   await run(process.execPath, ['scripts/lyric-rail-proof.cjs'], source);
   await run(process.execPath, ['scripts/held-controls-proof.cjs'], source);

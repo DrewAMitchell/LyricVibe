@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { matchAnchors, MediaClock } = require('../extension/analysis/anchors.js');
+const { matchAnchors, phraseProgress, MediaClock } = require('../extension/analysis/anchors.js');
 
 function score(lines) {
   let ordinal = 0;
@@ -44,6 +44,18 @@ test('phrase-only output, missing ends, and unsupported words never acquire inve
 
 test('isolated lexical coincidence is insufficient evidence', () => {
   assert.equal(matchAnchors(score(['wake me up']), chunks(['wake', 'a', 'foreign', 'song']), window).proposals.length, 0);
+});
+
+test('phrase progress follows neighboring recognized words without changing score', () => {
+  const s = score(['wake me up tonight']), before = JSON.stringify(s);
+  assert.deepEqual(phraseProgress(s, chunks(['wake', 'me', 'up']), window), { phraseId: 'p0', wordId: 'w2', heardThroughMs: 10850 });
+  assert.equal(JSON.stringify(s), before);
+});
+
+test('phrase progress remains unknown for repetitions or isolated matches', () => {
+  assert.equal(phraseProgress(score(['wake me up', 'wake me up']), chunks(['wake', 'me', 'up']), window), null);
+  assert.equal(phraseProgress(score(['wake me up']), chunks(['wake', 'other', 'things']), window), null);
+  assert.equal(phraseProgress(score(['wake', 'me']), chunks(['wake', 'me']), window), null);
 });
 
 test('media clock uses sample/context position and invalidates pause, seek, rate and identity changes', () => {

@@ -97,6 +97,18 @@ function makeHarness() {
 
 function recordFor(h, id = ID_A) { return h.values[`lvScore:youtube:${id}`]; }
 
+test('live listening uses only the current source-bound preview and stops only its own session', async () => {
+  const h=makeHarness(),score=await h.ensure(),key=`youtube:${ID_A}`,sender={id:'test-extension',tab:{id:1,url:`https://www.youtube.com/watch?v=${ID_A}`},url:`https://www.youtube.com/watch?v=${ID_A}`};
+  const prepared=await h.dispatch({type:'LV_TIMING_PREPARE',mediaKey:key,expectedRevision:score.revision,lyricsHash:score.lyrics.contentHash,fromSaved:true},sender);
+  const before=JSON.stringify(recordFor(h));
+  const start=await h.dispatch({type:'LV_LIVE_PROGRESS_START',mediaKey:key,previewToken:prepared.preview.token,previewRevision:prepared.preview.previewRevision},sender);
+  assert.equal(start.ok,true);assert.equal(h.analysisCalls.at(-1).progressOnly,true);assert.equal(JSON.stringify(recordFor(h)),before);
+  const stale=await h.dispatch({type:'LV_LIVE_PROGRESS_START',mediaKey:key,previewToken:prepared.preview.token,previewRevision:99},sender);assert.equal(stale.error.code,'PREVIEW_CONFLICT');
+  h.setAnalysisStatus({state:'capturing',progressOnly:true,tabId:1,mediaKey:key,sessionId:'current'});
+  await h.dispatch({type:'LV_LIVE_PROGRESS_STOP',mediaKey:key,sessionId:'old'},sender);assert.equal(h.analysisCalls.length,1);
+  await h.dispatch({type:'LV_LIVE_PROGRESS_STOP',mediaKey:key,sessionId:'current'},sender);assert.equal(h.analysisCalls.at(-1).stopScope.sessionId,'current');
+});
+
 test('exact song-wide sync survives worker restart and export without changing word times or another video', async () => {
   const h = makeHarness(); await h.ensure(1); await h.ensure(2);
   const before = structuredClone(recordFor(h).score), other = structuredClone(recordFor(h, ID_B));

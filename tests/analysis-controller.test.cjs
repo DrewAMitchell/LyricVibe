@@ -10,6 +10,20 @@ function event() {
   return { addListener: fn => listeners.add(fn), removeListener: fn => listeners.delete(fn), emit: (...args) => { for (const fn of listeners) fn(...args); } };
 }
 
+test('live progress never interrupts another analysis and only forwards its own result', async () => {
+  const onMessage=event(),sent=[];let stops=0;
+  const active={state:'capturing',tabId:9,mediaKey:'youtube:other',sessionId:'other'};
+  const chrome={runtime:{id:'fixture-extension',getURL:f=>`chrome-extension://fixture-extension/${f}`,onMessage,onConnect:event(),getContexts:async()=>[{}],sendMessage:async m=>{if(m.type==='LV_ANALYSIS_OFFSCREEN_STATUS')return {analysis:active};if(m.type==='LV_ANALYSIS_OFFSCREEN_STOP')stops++;}},offscreen:{closeDocument:async()=>{}},tabs:{sendMessage:async(tabId,message)=>sent.push({tabId,message})}};
+  const sandbox={chrome,LvScore:scoreCore,crypto:require('node:crypto').webcrypto};vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../extension/analysis/controller.js'),'utf8'),sandbox);
+  const score=scoreCore.createScore({videoId:'FIXTURE0001',durationMs:30000},'[00:01]wake me up',{contentHash:'a'.repeat(64)});
+  await assert.rejects(sandbox.LvAnalysis.startAnalysis({tabId:7,score,progressOnly:true}),e=>e.code==='ANALYSIS_BUSY');assert.equal(stops,0);
+  const sender={id:'fixture-extension',url:'chrome-extension://fixture-extension/analysis/offscreen.html'};
+  onMessage.emit({type:'LV_ANALYSIS_OFFSCREEN_STATE',analysis:{state:'capturing',progressOnly:true,tabId:7,mediaKey:'youtube:FIXTURE0001',sessionId:'mine'}},sender,()=>{});
+  onMessage.emit({type:'LV_LIVE_PROGRESS_RESULT',tabId:7,mediaKey:'youtube:FIXTURE0001',sessionId:'old',result:{}},sender,()=>{});
+  onMessage.emit({type:'LV_LIVE_PROGRESS_RESULT',tabId:7,mediaKey:'youtube:FIXTURE0001',sessionId:'mine',result:{wordId:'w'}},sender,()=>{});
+  assert.equal(sent.filter(x=>x.message.type==='LV_LIVE_PROGRESS_RESULT').length,1);
+});
+
 test('whole-song start accepts a paused source at a nonstandard speed and requests managed capture', async () => {
   const onMessage=event(), onConnect=event(); let startedConfig, open=false;
   const score=scoreCore.createScore({videoId:'FIXTURE0001',durationMs:30000},'[00:20]wake me up',{contentHash:'a'.repeat(64)});

@@ -51,7 +51,7 @@
     }).filter(Boolean).slice(0, 128);
     const allPaths = [];
     for (const lane of score.lanes) {
-      const expected = score.phrases.filter(p => p.laneId === lane.id).sort((a, b) => a.startMs - b.startMs).flatMap(p => p.words.map(w => ({ ...w, token: normalize(w.text), phraseId: p.id, laneId: lane.id }))).filter(w => w.token && !/\s/u.test(w.token)).slice(0, 1500);
+      const expected = score.phrases.filter(p => p.laneId === lane.id).sort((a, b) => a.startMs - b.startMs).flatMap(p => p.words.filter(w => !w.excluded).map(w => ({ ...w, token: normalize(w.text), phraseId: p.id, laneId: lane.id }))).filter(w => w.token && !/\s/u.test(w.token)).slice(0, 1500);
       allPaths.push(...paths(expected, heard));
     }
     allPaths.sort((a, b) => b.value - a.value);
@@ -68,6 +68,21 @@
     return { proposals, diagnostics: { method: 'top-one-transcription-anchors', heardWords: heard.length, matchedWords: proposals.length, unmatchedWords: heard.length - proposals.length, repeatedSequenceAmbiguous: ambiguous, provisionalThreshold: 0.85, confidenceValidated: false, automaticAdmissionEnabled: false, overlapSeparation: false } };
   }
 
+  // A quiet hint is evidence, not an instruction to advance a take. Require
+  // two neighboring words in one phrase and reject ambiguous repetitions.
+  function phraseProgress(score, chunks, window) {
+    const matched = matchAnchors(score, chunks, window);
+    if (matched.diagnostics.repeatedSequenceAmbiguous) return null;
+    const ownership = new Map();
+    for (const phrase of score.phrases) phrase.words.filter(w => !w.excluded).forEach((word, index) => ownership.set(word.id, { phraseId: phrase.id, index }));
+    const words = matched.proposals.map(p => ({ ...p, ...ownership.get(p.wordId) })).filter(p => p.phraseId);
+    const supported = words.filter((word, index) => words.some((other, j) => j !== index && other.phraseId === word.phraseId && Math.abs(other.index - word.index) === 1));
+    if (!supported.length) return null;
+    supported.sort((a, b) => b.endMs - a.endMs);
+    const latest = supported[0];
+    return { phraseId: latest.phraseId, wordId: latest.wordId, heardThroughMs: latest.endMs };
+  }
+
   class MediaClock {
     constructor() { this.reset(); }
     reset() { this.anchor = null; this.epoch = (this.epoch || 0) + 1; }
@@ -82,7 +97,7 @@
     mediaAt(contextSec) { return this.anchor ? this.anchor.mediaMs + (contextSec - this.anchor.contextSec) * 1000 * this.anchor.playbackRate : null; }
   }
 
-  const api = { normalize, matchAnchors, MediaClock };
+  const api = { normalize, matchAnchors, phraseProgress, MediaClock };
   root.LvAnchors = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(globalThis);

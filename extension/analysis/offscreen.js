@@ -7,7 +7,7 @@
   let lastErrorStatus = null;
   let formatting = false;
   const send = message => chrome.runtime.sendMessage(message).catch(() => undefined);
-  const publicStatus = () => session ? { state: session.state, tabId: session.tabId, mediaKey: session.mediaKey, sessionId: session.sessionId, engine: session.engine || 'browser', wholeSong: Boolean(session.wholeSong), ...(session.wholeSong ? { songPass: { phase: session.songPhase || 'starting', completed: session.songCompleted || 0, total: session.songPlans?.length || 0, proposals: session.songProposals || 0, skipped: session.songSkipped || 0, gaps: session.songGaps?.length || 0, capturedMs: session.songUsed ? Math.round(session.songUsed / 16) : 0, durationMs: session.score?.source?.durationMs || 0 } } : {}), lyricsHash: session.score?.lyrics?.contentHash || null, expectedRevision: session.score?.revision ?? null, provider: session.provider || null, model: session.model || null, modelRevision: session.modelRevision || null, language: session.language || 'en', method: session.engine === 'native' ? 'native-live-supplied-text-ctc' : 'top-one-transcription-anchors', confidenceValidated: false, automaticAdmissionEnabled: false, bufferedSeconds: session.used / (session.context?.sampleRate || 16000), droppedSeconds: session.droppedSeconds, windows: session.windows, ...(session.engine === 'native' && session.lastWindow ? { lastWindow: { ...session.lastWindow } } : {}), progress: session.progress || session.unsupportedReason || null, error: session.error || null } : lastErrorStatus || { state: 'stopped', bufferedSeconds: 0, automaticAdmissionEnabled: false };
+  const publicStatus = () => session ? { state: session.state, tabId: session.tabId, mediaKey: session.mediaKey, sessionId: session.sessionId, engine: session.engine || 'browser', wholeSong: Boolean(session.wholeSong), progressOnly: Boolean(session.progressOnly), ...(session.wholeSong ? { songPass: { phase: session.songPhase || 'starting', completed: session.songCompleted || 0, total: session.songPlans?.length || 0, proposals: session.songProposals || 0, skipped: session.songSkipped || 0, gaps: session.songGaps?.length || 0, capturedMs: session.songUsed ? Math.round(session.songUsed / 16) : 0, durationMs: session.score?.source?.durationMs || 0 } } : {}), lyricsHash: session.score?.lyrics?.contentHash || null, expectedRevision: session.score?.revision ?? null, provider: session.provider || null, model: session.model || null, modelRevision: session.modelRevision || null, language: session.language || 'en', method: session.engine === 'native' ? 'native-live-supplied-text-ctc' : 'top-one-transcription-anchors', confidenceValidated: false, automaticAdmissionEnabled: false, bufferedSeconds: session.used / (session.context?.sampleRate || 16000), droppedSeconds: session.droppedSeconds, windows: session.windows, ...(session.engine === 'native' && session.lastWindow ? { lastWindow: { ...session.lastWindow } } : {}), progress: session.progress || session.unsupportedReason || null, error: session.error || null } : lastErrorStatus || { state: 'stopped', bufferedSeconds: 0, automaticAdmissionEnabled: false };
   function publish() { send({ type: 'LV_ANALYSIS_OFFSCREEN_STATE', analysis: publicStatus() }); }
   function scoreMatchesMedia(score, mediaKey) {
     try {
@@ -443,7 +443,7 @@
       s.worklet = new AudioWorkletNode(s.context, 'lv-pcm-capture', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
       s.source.connect(s.worklet);
       s.worklet.connect(s.context.destination);
-      s.pcm = new Float32Array(Math.round(s.context.sampleRate * WINDOW_SEC));
+      s.pcm = new Float32Array(Math.round(s.context.sampleRate * (s.progressOnly ? 2 : WINDOW_SEC)));
       s.worklet.port.onmessage = ({ data }) => {
         if (data.type === 'flushed') { s.songFlushResolve?.(); return; }
         try { pcm(s, data); } finally { if (session === s) s.worklet.port.postMessage({ type: 'ack' }); }
@@ -468,6 +468,11 @@
           await clockTick(s);
           // Pause/seek/video/rate reset invalidates the whole in-flight result.
           if (session !== s || data.epoch !== s.clock.epoch || !s.clock.anchor || performance.now() - s.lastClockAt > 750 || data.window.expectedRevision !== s.score.revision) return;
+          if (s.progressOnly) {
+            const result = LvAnchors.phraseProgress(s.score, data.chunks, data.window);
+            send({ type: 'LV_LIVE_PROGRESS_RESULT', tabId: s.tabId, sessionId: s.sessionId, mediaKey: s.mediaKey, previewToken: s.previewToken, previewRevision: s.previewRevision, result });
+            publish(); return;
+          }
           const result = LvAnchors.matchAnchors(s.score, data.chunks, data.window);
           send({ type: 'LV_ALIGNMENT_PROPOSALS', tabId: s.tabId, sessionId: s.sessionId, mediaKey: s.mediaKey, expectedRevision: s.score.revision, proposals: result.proposals, diagnostics: { ...result.diagnostics, provider: data.provider, model: data.model, modelRevision: data.modelRevision, inferenceMs: data.inferenceMs, sampleWindow: data.window, droppedSeconds: s.droppedSeconds, audioRetained: false } });
           publish();

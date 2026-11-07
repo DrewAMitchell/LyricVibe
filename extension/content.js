@@ -939,7 +939,7 @@
     <details class="lvx-tempo-panel"><summary>Beat clicker <span>T · tap the beat</span></summary><div class="lvx-clicker-controls"><button data-sync="tempo-tap">Tap · T</button><button data-sync="tempo-downbeat">Beat 1 here</button><label>BPM<input data-sync="tempo-bpm" type="number" min="20" max="400" step="1" value="120"></label><button data-sync="tempo-save">Set BPM</button><label class="lvx-sync-loop"><input type="checkbox" data-sync="tempo-click"> Click</label><button data-sync="tempo-sections">Sections ↗</button></div><p class="lvx-sync-hint">First tap sets beat 1. Keep tapping to fit BPM, or type an exact integer.</p><p class="lvx-tempo-status" role="status"></p><button data-sync="tempo-undo">↶ Undo tempo</button></details>
     <details class="lvx-tap-panel"><summary>Record by ear <span>phrase → syllables · words optional</span></summary>
       <div class="lvx-capture-phases" role="group" aria-label="Syncing phase"><button data-phase="phrase">1 · Phrases</button><button data-phase="syllable">2 · Syllables</button><button data-phase="word">Words · optional</button></div>
-      <div class="lvx-record-choices"><label><input type="checkbox" data-sync="record-repeat"> Loop this phrase · L</label><small data-sync="record-repeat-hint"></small></div>
+      <div class="lvx-record-choices"><label><input type="checkbox" data-sync="record-repeat"> Loop this phrase · L</label><label title="Listen locally while recording and show a tentative heard-word hint. First use downloads model weights and may use CPU or GPU."><input type="checkbox" data-sync="live-progress" checked> AI follow</label><small data-sync="record-repeat-hint"></small></div>
       <p class="lvx-sync-hint">Hold Space while each word is sung. On the next pass, tap at syllable changes inside its saved boundaries.</p>
       <div class="lvx-perform-cue"><small>READY</small><strong class="lvx-perform-phrase"></strong><div class="lvx-timing-key" aria-label="Timing colors"><span data-kind="needs">Needs timing</span><span data-kind="manual">Human timing</span><span data-kind="auto">Auto</span><span data-kind="suggestion">Suggestion</span><span data-kind="take">This take</span></div><p class="lvx-word-timing-status" aria-live="off"></p><div class="lvx-upcoming-phrases" aria-label="Upcoming lyrics"></div><span class="lvx-perform-instruction">Then start performing</span><p class="lvx-estimated-phrase" aria-live="off"></p><p class="lvx-cue-legend">Blue follows your recording cue</p><div class="lvx-live-recovery" hidden><button data-sync="tap-back">← Back one</button><button data-sync="tap-skip">Skip one →</button><button data-sync="tap-reassign-back">Last tap ← word</button><button data-sync="tap-reassign-next">Last tap → word</button><small>Left / Right moves the cue; Ctrl + Left / Right reassigns the last tap. The song keeps playing.</small></div></div>
       <label class="lvx-practice-speed">YouTube practice speed <select data-sync="tap-speed" aria-label="Practice playback speed"><option value="0.5">½× · Half speed</option><option value="0.25">¼× · Quarter speed</option><option value="0.75">¾× · Slower</option><option value="1">1× · Normal</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
@@ -1052,6 +1052,33 @@
   const tapPending = () => timingTapPending() || effectPending();
   const tapWord = () => timingPhrase()?.words.find(w => w.id === tapping.wordId) || timingPhrase()?.words[0];
   const tapBinding = () => timing.draft ? `${LvScore.mediaKey(state.score.source)}:${timing.draft.token}:${timing.draft.previewRevision}` : null;
+  const liveProgress = { generation:0, sessionId:null, source:null, token:null, revision:null, result:null, status:'' };
+  function refreshLiveProgress() {
+    const phrase=timingPhrase(), result=liveProgress.result, now=getMediaTimeMs()-timingOffsetMs();
+    const word=result && phrase?.id===result.phraseId && now>=result.heardThroughMs && now-result.heardThroughMs<5000 ? phrase.words.find(w=>w.id===result.wordId&&!w.excluded) : null;
+    const text=word ? `AI heard through “${word.text}” · suggestion` : liveProgress.status;
+    for (const host of [syncPanel.querySelector('.lvx-perform-cue'),stage.querySelector('.lvx-capture-transcript')].filter(Boolean)) {
+      let label=host.querySelector('.lvx-live-progress');if(!label){label=document.createElement('small');label.className='lvx-live-progress';const line=host.querySelector('.lvx-perform-phrase')||host.querySelector(':scope > p');if(line)line.after(label);else host.append(label);}
+      const next=tapping.take?.status==='armed'?text:'';if(label.textContent!==next)label.textContent=next;label.hidden=!next;
+    }
+  }
+  function stopLiveProgress() {
+    liveProgress.generation++;const {sessionId,source}=liveProgress;liveProgress.sessionId=null;liveProgress.result=null;liveProgress.status='';refreshLiveProgress();
+    return sessionId&&source?chrome.runtime.sendMessage({type:'LV_LIVE_PROGRESS_STOP',mediaKey:source,sessionId}).catch(()=>{}):Promise.resolve();
+  }
+  async function startLiveProgress() {
+    const stopped=stopLiveProgress(), generation=++liveProgress.generation, draft=timing.draft, source=LvScore.mediaKey(state.score.source);
+    if(!draft||!source||!syncButton('live-progress').checked)return;
+    await stopped;if(generation!==liveProgress.generation||tapping.take?.status!=='armed')return;
+    Object.assign(liveProgress,{sessionId:null,source,token:draft.token,revision:draft.previewRevision,result:null,status:'AI listening…'});refreshLiveProgress();
+    try {
+      const reply=await chrome.runtime.sendMessage({type:'LV_LIVE_PROGRESS_START',mediaKey:source,previewToken:draft.token,previewRevision:draft.previewRevision});
+      if(!reply?.ok||!reply.analysis?.sessionId||reply.analysis.state==='error')throw Error('unavailable');
+      if(generation!==liveProgress.generation||tapping.take?.status!=='armed'||tapBinding()!==`${source}:${draft.token}:${draft.previewRevision}`){chrome.runtime.sendMessage({type:'LV_LIVE_PROGRESS_STOP',mediaKey:source,sessionId:reply.analysis.sessionId}).catch(()=>{});return;}
+      liveProgress.sessionId=reply.analysis.sessionId;
+    }catch(_){if(generation===liveProgress.generation){liveProgress.status='AI unavailable';refreshLiveProgress();}}
+  }
+  syncButton('live-progress').addEventListener('change',()=>{if(!syncButton('live-progress').checked)stopLiveProgress();else if(tapping.take?.status==='armed')void startLiveProgress();});
   const continuousSyllables = () => syncButton('tap-mode').value==='syllable' && syncButton('tap-syllable-flow').value==='continuous';
   const phraseStream = () => syncButton('tap-mode').value==='syllable' && syncButton('tap-syllable-flow').value==='phrase-stream';
   const streamTake = take => take?.cadence==='phrase-stream';
@@ -1118,7 +1145,7 @@
   const continuousPass = () => continuousSyllables() || phraseStream() || eventPass() || wordPass();
   const frameTake = take => take?.cadence==='word-frames';
   let partRun = null;
-  function discardTapTake(keepParts=false) { if(!keepParts)partRun=null; const restored=tapping.restored;tapping.restored=false;tapping.take = null; tapping.listening=false;tapping.backAnchorMs=null;tapping.backIndex=null;tapping.backPhraseId=null;tapping.rewindPhraseId=null; tapping.eventCounts={};tapping.eventApplied=[];tapping.eventErrors=[];tapping.eventReport=null;tapping.eventArchiveKey=null; tapping.frameWordId=null; tapping.streamWordId=null; tapping.followSeek=false;tapping.seekPhraseId=null;tapping.armSeekMs=null; tapping.auditionScore=null; tapping.auditionMarks=null; tapping.binding = null; tapping.recordingContext=null; tapping.clockMs = null; tapping.splitDirty = false; tapping.heldInput = null; tapping.cancelledSpace = false; tapping.reviewId = null; tapping.correctionUndo = [];if(restored)syncButton('tap-syllable-flow').value='events'; }
+  function discardTapTake(keepParts=false) { stopLiveProgress(); if(!keepParts)partRun=null; const restored=tapping.restored;tapping.restored=false;tapping.take = null; tapping.listening=false;tapping.backAnchorMs=null;tapping.backIndex=null;tapping.backPhraseId=null;tapping.rewindPhraseId=null; tapping.eventCounts={};tapping.eventApplied=[];tapping.eventErrors=[];tapping.eventReport=null;tapping.eventArchiveKey=null; tapping.frameWordId=null; tapping.streamWordId=null; tapping.followSeek=false;tapping.seekPhraseId=null;tapping.armSeekMs=null; tapping.auditionScore=null; tapping.auditionMarks=null; tapping.binding = null; tapping.recordingContext=null; tapping.clockMs = null; tapping.splitDirty = false; tapping.heldInput = null; tapping.cancelledSpace = false; tapping.reviewId = null; tapping.correctionUndo = [];if(restored)syncButton('tap-syllable-flow').value='events'; }
   function restartTranscript() {
     if(syncButton('tap-mode').value==='syllable'){
       const media=getMedia(),phrase=timingPhrase();media?.pause();state.auditionLoop=null;discardTapTake();
@@ -1643,6 +1670,7 @@
     if(run&&partRun===run&&completed&&!tapping.take)await advanceOtherParts(run);
   }
   function stopTapTake(reason = 'Take stopped. Completed marks are retained.') {
+    stopLiveProgress();
     partRun=null;
     if(cancelCountIn())return;
     if(lyricsOnly&&!captureTracks.switching)setLyricsOnly(false);
@@ -1970,6 +1998,7 @@
     }
   }
   function refreshCapturePlayback(now) {
+    refreshLiveProgress();
     refreshRecordingTransport();
     refreshMainReference(now);
     for(const span of root.querySelectorAll('.lvx-context-word,.lvx-capture-transcript [data-unit],.lvx-guide-syllable,.lvx-tap-blocks button')){
@@ -2484,6 +2513,7 @@
       // With a tapped tempo, snapping uses its beat phase instead of the first tap.
       if(take.bpm!==null&&tempo.estimate&&take.originMs===null&&Math.abs(take.bpm-tempo.estimate.bpm)<.01)take.originMs=tempo.estimate.anchorMs-timingOffsetMs();
       tapping.take = take; tapping.binding = tapBinding(); if(!retained)tapping.recordingContext=recordingContext(); tapping.clockMs = media.currentTime * 1000; tapping.rate = media.playbackRate;tapping.followSeek=false;tapping.seekPhraseId=null;tapping.streamWordId=null;tapping.trackSwitchFloor=null;tapping.listening=keepPlayback||fromPause||!unplaced;tapping.backAnchorMs=fromPause?tapping.armSeekMs:null;tapping.backIndex=fromPause?take.index:null;tapping.backPhraseId=fromPause?phrase.id:null;tapping.rewindPhraseId=null;
+      void startLiveProgress();
       if(!keepPlayback&&!preserveView&&!lyricsOnly)setLyricsOnly(true);
       timing.view = 'proposed'; timing.auditioned = false; state.scoreSignature = '';
       setSyncNotice(mode === 'syllable' ? 'Tap Space at each syllable entrance, including the first. Phrase start and end stay fixed. The completed take plays back for review.' : syncButton('tap-cadence').value === 'hold' ? 'Hold Space for each sung word; release it at the end. Each release advances automatically.' : take.cadence === 'flow' ? 'Space starts each next lyric. Enter releases before a rest or at the end. Stop retains completed marks.' : 'Space marks START then END. Use take updates only the unsaved preview.');
@@ -4215,6 +4245,16 @@
       if(sender.id===chrome.runtime.id&&message.mediaKey===LvScore.mediaKey({url:location.href})&&message.analysis){songAlignmentStatus=message.analysis;refreshAlignmentStatus();}
       return;
     }
+    if(message.type==='LV_LIVE_PROGRESS_RESULT'){
+      if(sender.id===chrome.runtime.id&&message.sessionId===liveProgress.sessionId&&message.mediaKey===liveProgress.source&&message.previewToken===timing.draft?.token&&message.previewRevision===timing.draft?.previewRevision&&tapping.take?.status==='armed'){
+        liveProgress.result=message.result;liveProgress.status='AI listening…';refreshLiveProgress();
+      }
+      return;
+    }
+    if(message.type==='LV_LIVE_PROGRESS_STATUS'){
+      if(sender.id===chrome.runtime.id&&message.sessionId===liveProgress.sessionId&&message.mediaKey===liveProgress.source&&message.state==='error'){liveProgress.result=null;liveProgress.status='AI unavailable';refreshLiveProgress();}
+      return;
+    }
     if(message.type==='LV_RESET_VIDEO'){resetCurrentVideo();sendResponse({ok:true});return;}
     if(message.type==='LV_OVERLAY_RESUME'){show();sendResponse({ok:true,version:1});return;}
     if(['LV_STATUS','LV_STATUS_WARNING','LV_ERROR','LV_API_ERROR','LV_TRACK','LV_SCORE_UPDATED'].includes(message.type)){
@@ -4958,6 +4998,7 @@
     state.autoCalibrated=false;flowTeardown();refreshTimingPanel();return true;
   }
   function resetCurrentVideo(){
+    stopLiveProgress();
     // Same-video reset keeps the open preview, typed edits, and completed marks.
     // Do not stop or advance a take by reloading the whole extension.
     if(timing.busy){setSyncNotice('Finish the current preview operation before resetting the video.');return;}
@@ -7417,6 +7458,7 @@
      TEARDOWN / SHOW
      ══════════════════════════════════════ */
   function teardown() {
+    stopLiveProgress();
     try{
       chrome.storage.onChanged?.removeListener(wordPresetStorageChanged);
       chrome.storage.onChanged?.removeListener(placementStorageChanged);

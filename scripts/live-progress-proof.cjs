@@ -1,0 +1,41 @@
+// Actual content handlers in a Chrome isolated world. No human browser/tab access.
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{chromium}=require('playwright');
+const root=path.resolve(__dirname,'..'),source='https://www.youtube.com/watch?v=TESTVIDEO01',next='https://www.youtube.com/watch?v=TESTVIDEO02';
+const ledger=process.env.LV_PROBE_LEDGER;
+const log=(state,pid)=>{if(ledger)fs.appendFileSync(ledger,`\n- ${new Date().toISOString()} ${state} LyricVibe save regression PID${pid}; finite Chrome proof; release verification.\n`);};
+log('START',process.pid);let server,browser;
+(async()=>{
+  server=await chromium.launchServer({channel:'chrome',headless:true});console.log(JSON.stringify({browserPid:server.process().pid}));
+  log('START',server.process().pid);browser=await chromium.connect(server.wsEndpoint());
+  const page=await browser.newPage();
+  await page.route('**/*',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><button id="activate">Activate</button><a id="next" href="'+next+'">Next</a><video></video>'}));
+  await page.goto(source);await page.addStyleTag({path:path.join(root,'extension/content.css')});await page.locator('#activate').click();
+  const session=await page.context().newCDPSession(page),tree=await session.send('Page.getFrameTree');
+  const {executionContextId}=await session.send('Page.createIsolatedWorld',{frameId:tree.frameTree.frame.id,worldName:'lyricvibe-navigation-proof'});
+  const evaluate=async value=>{const expression=typeof value==='function'?'('+value.toString()+')()':value;const r=await session.send('Runtime.evaluate',{expression,contextId:executionContextId,awaitPromise:true,returnByValue:true,userGesture:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
+  await evaluate(()=>{window.__messageListeners=[];window.__store={};window.chrome={runtime:{id:'fixture',getManifest:()=>({version:'fixture'}),onMessage:{addListener(fn){__messageListeners.push(fn)}},sendMessage:async()=>({ok:true})},storage:{local:{get:async(keys,cb)=>{cb?.(__store);return __store},set:async data=>Object.assign(__store,data)}}};const v=document.querySelector('video');Object.defineProperties(v,{currentTime:{value:2,writable:true,configurable:true},duration:{value:30},paused:{value:true,writable:true},playbackRate:{value:1,writable:true}});v.pause=()=>{v.paused=true};v.play=async()=>{v.paused=false};});
+  for(const name of ['score-core','tap-timing','beat-track','choreography','transcript-text','timing-variant','pronunciation'])await evaluate(fs.readFileSync(path.join(root,'extension',name+'.js'),'utf8'));
+  await evaluate(fs.readFileSync(path.join(root,'extension/content.js'),'utf8').replace(/\}\)\(\);\s*$/,'window.__qa={state,timing,tapping,tempo,syncPanel,tapBinding,eventEnvelope,archiveEvents,useEventAssignments,discardTapTake,restoreLastSyllablePass,root,renderEventReview,refreshTimingPanel,refreshSavedPrompts,liveProgress,refreshLiveProgress,renderCaptureScore,setLyricsOnly,startLiveProgress,disableWatch:()=>{trackWatch=null;}};})();'));
+
+
+  await evaluate(()=>{
+    const q=__qa;q.disableWatch();q.state.active=true;q.tempo.mediaKey='youtube:TESTVIDEO01';q.tempo.map={version:1,anchorMs:0,segments:[{startMs:0,bpm:120,transition:'step',provenance:'manual'}]};
+    q.state.score=LvScore.createScore({platform:'youtube',videoId:'TESTVIDEO01',durationMs:12000},'[00:01.00]hello\n[00:04.00]',{provider:'fixture',entryId:'capture',contentHash:'a'.repeat(64)});
+    const p=q.state.score.phrases[0];p.startMs=1000;p.endMs=4000;p.words[0].startMs=1500;p.words[0].endMs=2800;
+    q.timing.draft={...LvTimingVariant.merge(q.state.score,q.state.score),token:'capture',previewRevision:0,baseRevision:q.state.score.revision,baseHash:q.state.score.lyrics.contentHash,undoScores:[]};q.timing.phraseIndex=0;
+    window.__saved=JSON.stringify(q.state.score);window.__initial=JSON.stringify(q.timing.draft.score);
+    const units=p.words.map(w=>({id:w.id,wordId:w.id,phraseId:p.id,text:w.text,minMs:p.startMs,maxMs:p.endMs,expectedCount:1,referenceStartMs:w.startMs,referenceEndMs:w.endMs,referenceManual:true}));
+    q.tapping.take=LvTapTiming.beginEvents(units,{inputMode:'hold',captureId:'capture-browser-proof'});q.tapping.binding=q.tapBinding();q.tapping.rate=.5;q.tapping.listening=false;
+    q.syncPanel.hidden=false;q.syncPanel.querySelector('.lvx-tap-panel').open=true;q.syncPanel.querySelector('[data-sync="tap-mode"]').value='syllable';q.syncPanel.querySelector('[data-sync="tap-syllable-flow"]').value='holds';
+    const v=document.querySelector('video');v.paused=false;v.playbackRate=.5;v.currentTime=1.1;
+    chrome.runtime.sendMessage=async m=>{
+      if(m.type==='LV_PRONUNCIATION_SUGGEST')return {ok:true,suggestion:LvPronunciation.suggest(m.text,{hello:[1]})};
+      if(m.type==='LV_PRONUNCIATION_COUNT')return {ok:true,countSuggestion:LvPronunciation.partsForCount(m.text,m.count,{existingParts:m.existingParts,countsIndex:{hello:[1]}})};
+      if(m.type==='LV_TIMING_TUNE'){let score=q.timing.draft.score;const before=score;for(const op of m.operations)score=LvScore.applyOperation(score,op,score.revision);return {ok:true,preview:{...q.timing.draft,score,previewRevision:q.timing.draft.previewRevision+1,undoScores:[before]}};}
+      return {ok:true};
+    };q.refreshTimingPanel();
+  });
+  const result=await evaluate(()=>{const q=__qa,p=q.timing.draft.score.phrases[0];Object.assign(q.liveProgress,{sessionId:'live',source:'youtube:TESTVIDEO01',token:'capture',revision:0,status:'AI listening…'});const msg={type:'LV_LIVE_PROGRESS_RESULT',sessionId:'live',mediaKey:'youtube:TESTVIDEO01',previewToken:'capture',previewRevision:0,result:{phraseId:p.id,wordId:p.words[0].id,heardThroughMs:1000}};for(const fn of __messageListeners)fn(msg,{id:'fixture'},()=>{});q.root.classList.add('lvx-active');q.setLyricsOnly(true);q.renderCaptureScore();return {panel:q.syncPanel.querySelector('.lvx-live-progress')?.textContent,stage:q.root.querySelector('.lvx-capture-transcript .lvx-live-progress')?.textContent, stageOpacity:getComputedStyle(q.root.querySelector('.lvx-capture-transcript')).opacity, rootClass:q.root.className,saved:JSON.stringify(q.state.score)===__saved,take:q.tapping.take.status};});
+  assert.match(result.panel,/AI heard through.*hello/);assert.match(result.stage,/AI heard through.*hello/);assert.equal(result.saved,true);assert.equal(result.take,'armed');
+  const stale=await evaluate(()=>{const q=__qa,p=q.timing.draft.score.phrases[0];for(const fn of __messageListeners)fn({type:'LV_LIVE_PROGRESS_RESULT',sessionId:'stale',mediaKey:'youtube:TESTVIDEO01',previewToken:'capture',previewRevision:0,result:{phraseId:p.id,wordId:'bogus',heardThroughMs:1000}},{id:'fixture'},()=>{});return q.syncPanel.querySelector('.lvx-live-progress').textContent});assert.match(stale,/hello/);await page.waitForTimeout(800);if(process.env.LV_PROGRESS_SCREENSHOT)await page.screenshot({path:process.env.LV_PROGRESS_SCREENSHOT});const started=await evaluate(async()=>{const q=__qa;window.__aiCalls=[];chrome.runtime.sendMessage=async m=>{__aiCalls.push(m);return m.type==='LV_LIVE_PROGRESS_START'?{ok:true,analysis:{sessionId:'mine',state:'capturing'}}:{ok:true}};await q.startLiveProgress();return {session:q.liveProgress.sessionId,requests:__aiCalls.map(m=>m.type)};});assert.equal(started.session,'mine');assert.ok(started.requests.includes('LV_LIVE_PROGRESS_START'));const disabled=await evaluate(()=>{const q=__qa,c=q.syncPanel.querySelector('[data-sync=live-progress]');c.checked=false;c.dispatchEvent(new Event('change',{bubbles:true}));return {session:q.liveProgress.sessionId,text:q.syncPanel.querySelector('.lvx-live-progress').textContent,take:q.tapping.take.status,stop:__aiCalls.findLast(m=>m.type==='LV_LIVE_PROGRESS_STOP')?.sessionId};});assert.equal(disabled.session,null);assert.equal(disabled.text,'');assert.equal(disabled.take,'armed');assert.equal(disabled.stop,'mine');console.log(JSON.stringify({...result,disablePreservesTake:true}));
+})().catch(error=>{console.error(error.stack);process.exitCode=1}).finally(async()=>{await browser?.close();const pid=server?.process().pid;await server?.close();if(pid)log('END',pid);log('END',process.pid)});

@@ -56,6 +56,19 @@ test('synthetic Stop closes streams/context, terminates inference and clears buf
   assert.equal(h.timeouts.size, 0);
 });
 
+test('live progress submits short audio and emits a transient hint without saving proposals', async () => {
+  const h=harness();const before=JSON.stringify(h.score);
+  await h.request({type:'LV_ANALYSIS_OFFSCREEN_START',config:{tabId:4,mediaKey:h.clock.mediaKey,sessionId:'synthetic-session',score:h.score,streamId:'synthetic-stream',progressOnly:true,previewToken:'draft',previewRevision:2}});
+  await h.worker.onmessage({data:{type:'ready',provider:'synthetic',model:'fixture'}});
+  h.worklet.port.onmessage({data:{pcm:new Float32Array(32000).fill(.1),startFrame:0,sampleRate:16000}});
+  const job=h.worker.messages.find(m=>m.type==='transcribe');assert.equal(job.window.durationSec,2);
+  h.context.currentTime=2;h.clock.currentTimeMs=12000;
+  await h.worker.onmessage({data:{type:'result',epoch:job.epoch,window:job.window,chunks:[{text:'wake',timestamp:[0,1]},{text:'me',timestamp:[1,2]}]}});
+  const hint=h.outgoing.find(m=>m.type==='LV_LIVE_PROGRESS_RESULT');assert.equal(hint.result.wordId,h.score.phrases[0].words[1].id);assert.equal(hint.previewToken,'draft');
+  assert.equal(h.outgoing.some(m=>m.type==='LV_ALIGNMENT_PROPOSALS'),false);assert.equal(JSON.stringify(h.score),before);
+  await h.request({type:'LV_ANALYSIS_OFFSCREEN_STOP'});
+});
+
 test('synthetic model load timeout cleans capture and preserves typed causal error', async () => {
   const h = harness(); await h.start();
   assert.equal(h.timeouts.size, 1);
