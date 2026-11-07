@@ -853,7 +853,7 @@
   recordingTransport.append(leadInControl('Playback lead-in seconds'));
   function refreshRecordingTransport(){
     const take=tapping.take,visible=Boolean(timing.draft&&!syncPanel.hidden&&(countIn.previewTake||take&&['armed','complete'].includes(take.status)));
-    root.classList.toggle('lvx-recording-controls',Boolean(timing.draft&&!syncPanel.hidden&&(timingWorkspace.view==='record'||visible)));
+    root.classList.toggle('lvx-recording-controls',Boolean(timing.draft&&!syncPanel.hidden&&(timingWorkspace?.view==='record'||visible)));
     recordingTransport.hidden=!visible;if(!visible)return;
     const blocked=timing.busy||countIn.active||countIn.preparing||!take||take.pendingStartMs!==null||isAdvertisement()||youtubeMediaState()?.clockUsable===false;
     recordingTransport.querySelector('select').disabled=blocked;
