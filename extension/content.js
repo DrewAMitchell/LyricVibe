@@ -4246,7 +4246,7 @@
       return;
     }
     if(message.type==='LV_LIVE_PROGRESS_RESULT'){
-      if(sender.id===chrome.runtime.id&&message.sessionId===liveProgress.sessionId&&message.mediaKey===liveProgress.source&&message.previewToken===timing.draft?.token&&message.previewRevision===timing.draft?.previewRevision&&tapping.take?.status==='armed'){
+      if(sender.id===chrome.runtime.id&&message.sessionId===liveProgress.sessionId&&message.mediaKey===liveProgress.source&&message.previewToken===timing.draft?.token&&message.previewRevision===timing.draft?.previewRevision&&timing.draft?.baseRevision===state.score?.revision&&timing.draft?.baseHash===state.score?.lyrics?.contentHash&&tapping.take?.status==='armed'){
         liveProgress.result=message.result;liveProgress.status='AI listening…';refreshLiveProgress();
       }
       return;

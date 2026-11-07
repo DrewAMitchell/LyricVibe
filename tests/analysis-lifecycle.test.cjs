@@ -69,6 +69,14 @@ test('live progress submits short audio and emits a transient hint without savin
   await h.request({type:'LV_ANALYSIS_OFFSCREEN_STOP'});
 });
 
+test('live listening stops if the preview base changes even when the draft revision matches', async () => {
+  const h=harness();
+  await h.request({type:'LV_ANALYSIS_OFFSCREEN_START',config:{tabId:4,mediaKey:h.clock.mediaKey,sessionId:'synthetic-session',score:h.score,streamId:'synthetic-stream',progressOnly:true,baseRevision:0}});
+  await h.worker.onmessage({data:{type:'ready',provider:'synthetic',model:'fixture'}});
+  h.emit({type:'LV_SCORE_UPDATED',tabId:4,mediaKey:h.clock.mediaKey,score:h.score});await new Promise(resolve=>setImmediate(resolve));
+  const status=(await h.request({type:'LV_ANALYSIS_OFFSCREEN_STATUS'})).analysis;assert.equal(status.state,'error');assert.equal(status.error.code,'SCORE_REVISION_CHANGED');assert.ok(h.stopped>0);
+});
+
 test('synthetic model load timeout cleans capture and preserves typed causal error', async () => {
   const h = harness(); await h.start();
   assert.equal(h.timeouts.size, 1);

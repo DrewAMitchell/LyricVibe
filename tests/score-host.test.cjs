@@ -107,6 +107,8 @@ test('live listening uses only the current source-bound preview and stops only i
   h.setAnalysisStatus({state:'capturing',progressOnly:true,tabId:1,mediaKey:key,sessionId:'current'});
   await h.dispatch({type:'LV_LIVE_PROGRESS_STOP',mediaKey:key,sessionId:'old'},sender);assert.equal(h.analysisCalls.length,1);
   await h.dispatch({type:'LV_LIVE_PROGRESS_STOP',mediaKey:key,sessionId:'current'},sender);assert.equal(h.analysisCalls.at(-1).stopScope.sessionId,'current');
+  recordFor(h).score.revision++;
+  const staleBase=await h.dispatch({type:'LV_LIVE_PROGRESS_START',mediaKey:key,previewToken:prepared.preview.token,previewRevision:prepared.preview.previewRevision},sender);assert.equal(staleBase.error.code,'PREVIEW_CONFLICT');
 });
 
 test('exact song-wide sync survives worker restart and export without changing word times or another video', async () => {

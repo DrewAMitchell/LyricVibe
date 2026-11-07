@@ -212,8 +212,9 @@
         return {ok:true};
       }
       const preview = await readTimingPreview(key);
-      if (!preview || preview.token !== message.previewToken || preview.previewRevision !== message.previewRevision) throw fail('PREVIEW_CONFLICT', 'The timing draft changed.');
-      return {ok:true, analysis:await root.LvAnalysis.startAnalysis({tabId, score:preview.score, engine:'browser', progressOnly:true, previewToken:preview.token, previewRevision:preview.previewRevision})};
+      const record = await read(key);
+      if (!preview || !record || preview.baseRevision !== record.score.revision || preview.baseHash !== record.score.lyrics.contentHash || preview.token !== message.previewToken || preview.previewRevision !== message.previewRevision) throw fail('PREVIEW_CONFLICT', 'The timing draft changed.');
+      return {ok:true, analysis:await root.LvAnalysis.startAnalysis({tabId, score:preview.score, engine:'browser', progressOnly:true, previewToken:preview.token, previewRevision:preview.previewRevision, baseRevision:preview.baseRevision})};
     }
     if(message.type==='LV_FORMAT_PREVIEW'){
       if(!sourceOverlayBound(sender,tabId,key))throw fail('SOURCE_REQUIRED','Open the lyric overlay on this video first.');

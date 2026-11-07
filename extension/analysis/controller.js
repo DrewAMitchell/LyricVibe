@@ -56,7 +56,7 @@
     }
     return status;
   }
-  async function startAnalysis({ tabId, score, language = 'en', engine = 'browser', expectedRevision, lyricsHash, wholeSong = false, progressOnly = false, previewToken = null, previewRevision = null }) {
+  async function startAnalysis({ tabId, score, language = 'en', engine = 'browser', expectedRevision, lyricsHash, wholeSong = false, progressOnly = false, previewToken = null, previewRevision = null, baseRevision = null }) {
     if(starting)throw typed('ANALYSIS_BUSY','Another analysis is starting.');
     starting=true;
     try {
@@ -87,7 +87,7 @@
       if (token !== generation) return status;
       const sessionId = crypto.randomUUID();
       status = { state: 'starting', engine, wholeSong, progressOnly, tabId, mediaKey, sessionId, lyricsHash: score.lyrics.contentHash, expectedRevision: score.revision, automaticAdmissionEnabled: false };
-      const response = await chrome.runtime.sendMessage({ target: 'lv-offscreen', type: 'LV_ANALYSIS_OFFSCREEN_START', config: { tabId, score, mediaKey, sessionId, streamId, language, engine, wholeSong, progressOnly, previewToken, previewRevision } });
+      const response = await chrome.runtime.sendMessage({ target: 'lv-offscreen', type: 'LV_ANALYSIS_OFFSCREEN_START', config: { tabId, score, mediaKey, sessionId, streamId, language, engine, wholeSong, progressOnly, previewToken, previewRevision, baseRevision } });
       if (token === generation && response?.analysis) status = response.analysis;
       return status;
     } catch (error) {

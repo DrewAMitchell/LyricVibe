@@ -503,7 +503,11 @@
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('service-worker.js')) return;
+    if (message.type === 'LV_SCORE_UPDATED' && session?.progressOnly && message.mediaKey === session.mediaKey && message.tabId === session.tabId && Number.isInteger(session.baseRevision) && message.score?.revision !== session.baseRevision && scoreMatchesMedia(message.score, session.mediaKey)) {
+      fail(session, 'SCORE_REVISION_CHANGED', 'The saved score changed; the listening hint stopped.'); return;
+    }
     if (message.type === 'LV_SCORE_UPDATED' && session && message.mediaKey === session.mediaKey && message.tabId === session.tabId && message.score?.revision > session.score.revision && scoreMatchesMedia(message.score, session.mediaKey)) {
+      if (session.progressOnly) return;
       if(session.engine==='native'&&session.wholeSong&&!session.songFinishing&&['starting','waiting-start','capturing'].includes(session.songPhase)&&LvSongPass.canRebaseCapture(session.score,message.score)){
         const planned=LvSongPass.plan(message.score);
         if(planned.windows.length){session.score=message.score;session.songPlans=planned.windows;session.songSkipped=planned.skipped.length;session.progress={status:'Timing correction included in the upcoming alignment.'};publish();return;}
