@@ -12,6 +12,21 @@ function makeScore(lrc = '[00:01.00]We rise, again!\n[00:04.00]') {
 }
 function allWords(s) { return s.phrases.flatMap(p => p.words.map(word => ({ phrase: p, word }))); }
 function errorCode(fn, code) { assert.throws(fn, error => error.code === code); }
+test('recording cues distinguish needed, human, automatic, suggested and current-take timing',()=>{
+  let s=makeScore(),phrase=s.phrases[0],word=phrase.words[0];
+  assert.equal(score.captureTimingStatus(s,phrase,word).kind,'needs');
+  assert.equal(score.captureTimingStatus(s,phrase,word,{pending:true}).kind,'suggestion');
+  s=score.applyOperation(s,{type:'setWordTiming',wordId:word.id,startMs:word.startMs+10,endMs:word.endMs},s.revision);phrase=s.phrases[0];word=phrase.words[0];
+  assert.equal(score.captureTimingStatus(s,phrase,word,{pending:true}).kind,'manual');
+  const proposal={wordId:word.id,startMs:word.startMs+10,endMs:word.endMs,accepted:false,evidenceId:'fixture-auto'};
+  s=score.setAlignmentTiming(s,[proposal],{mode:'auto',includeProposals:true},s.revision);phrase=s.phrases[0];word=phrase.words[0];
+  assert.equal(score.captureTimingStatus(s,phrase,word).kind,'auto');
+  assert.equal(score.captureTimingStatus(s,phrase,word,{inTake:true}).kind,'take');
+  s=score.setAlignmentTiming(s,[],{wordId:word.id,choice:'manual'},s.revision);phrase=s.phrases[0];word=phrase.words[0];
+  assert.equal(score.captureTimingStatus(s,phrase,word).kind,'manual');
+  const fake={...word,syllables:[{id:'syllable-fixture',provenance:'estimated'}]};
+  assert.equal(score.captureTimingStatus(s,phrase,fake,{syllableId:'syllable-fixture'}).kind,'needs');
+});
 test('manual word illustrations and rocking persist without changing timing and reject unknown art',()=>{
   const base=makeScore(),word=base.phrases[0].words[0],before=[word.startMs,word.endMs];
   const next=score.applyOperation(base,{type:'setWordAppearance',wordId:word.id,appearance:{art:'bills',motion:'rock'}},base.revision);
@@ -202,9 +217,9 @@ test('phrase syllable performance rejects invalid ownership and syllables atomic
 test('exports global and CommonJS APIs and resolves only exact YouTube video identities', () => {
   assert.equal(globalThis.LvScore, score);
   assert.equal(score.mediaKey({ url: 'https://www.youtube.com/watch?v=FIXTURE0001&t=3' }), 'youtube:FIXTURE0001');
-  assert.equal(score.mediaKey({ url: 'https://music.youtube.com/watch?v=FIXTURE0003' }), 'youtube:FIXTURE0003');
-  assert.equal(score.mediaKey({ url: 'https://youtu.be/FIXTURE0003?si=abc' }), 'youtube:FIXTURE0003');
-  assert.equal(score.mediaKey({ source: { videoId: 'FIXTURE0001' }, videoId: 'FIXTURE0003' }), 'youtube:FIXTURE0001');
+  assert.equal(score.mediaKey({ url: 'https://music.youtube.com/watch?v=FIXTURE0002' }), 'youtube:FIXTURE0002');
+  assert.equal(score.mediaKey({ url: 'https://youtu.be/FIXTURE0002?si=abc' }), 'youtube:FIXTURE0002');
+  assert.equal(score.mediaKey({ source: { videoId: 'FIXTURE0001' }, videoId: 'FIXTURE0002' }), 'youtube:FIXTURE0001');
   for (const url of ['https://youtube.com.evil.test/watch?v=FIXTURE0001', 'javascript://youtube.com/watch?v=FIXTURE0001', 'https://youtube.com/watch?v=too-short']) {
     assert.equal(score.mediaKey({ url }), '');
   }
@@ -220,7 +235,7 @@ test('parseLrc retains empty cues and expands multiple timestamps', () => {
 
 test('hyphenWordParts splits only internal letter or digit joins and preserves source spelling', () => {
   for (const [text, expected] of [
-    ['ice-breaker', ['ice-', 'breaker']],
+    ['all-nighter', ['all-', 'nighter']],
     ['co‐operate', ['co‐', 'operate']],
     ['re‑enter', ['re‑', 'enter']],
     ['A1-B2', ['A1-', 'B2']],

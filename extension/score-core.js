@@ -907,6 +907,24 @@
     if ((word.syllables||[]).some(s=>s.locked || s.provenance!=='estimated' && (s.startMs<candidate.startMs || s.endMs>candidate.endMs))) return 'protected-syllable';
     return 'available';
   }
+  // This describes the timing actually in use, not whether an alternative exists.
+  function captureTimingStatus(score, phrase, word, { inTake = false, pending = false, syllableId = null } = {}) {
+    if (inTake) return { kind: 'take', label: 'Input captured in this take · save to keep' };
+    if (syllableId) {
+      const syllable = (word.syllables || []).find(item => item.id === syllableId);
+      if (syllable?.provenance === 'manual') return { kind: 'manual', label: 'Human syllable timing · recording is a correction' };
+      if (syllable?.provenance === 'aligned') return { kind: 'auto', label: 'Automatic syllable timing · recording overrides it' };
+      return { kind: 'needs', label: 'Estimated syllable timing · record to refine' };
+    }
+    const settings = score.alignmentTiming;
+    const candidate = (settings?.candidates || []).find(item => item.wordId === word.id);
+    const available = alignmentCandidateStatus(score, phrase, word, candidate) === 'available';
+    const choice = settings?.overrides?.[word.id] || settings?.mode || 'manual';
+    if (available && choice === 'auto' || word.provenance === 'aligned') return { kind: 'auto', label: 'Automatic timing in use · recording overrides it' };
+    if (word.provenance === 'manual') return { kind: 'manual', label: 'Human timing · recording is a correction' };
+    if (available || pending) return { kind: 'suggestion', label: 'Automatic suggestion available · not in use' };
+    return { kind: 'needs', label: 'Estimated timing · record to refine' };
+  }
   function alignmentPhraseSignature(score, phrase) {
     const settings=score.alignmentTiming, byId=new Map((settings?.candidates||[]).map(c=>[c.wordId,c]));
     return JSON.stringify([mediaKey(score.source),score.lyrics.contentHash,score.offsetMs,phrase.id,phrase.laneId,phrase.startMs,phrase.endMs,settings?.mode,phrase.words.map(w=>[w.id,w.text,w.spokenText??null,w.excluded,w.startMs,w.endMs,w.provenance,w.locked,(w.syllables||[]).map(s=>[s.id,s.startMs,s.endMs,s.provenance,s.locked]),settings?.overrides?.[w.id],byId.get(w.id)])]);
@@ -1089,5 +1107,5 @@
     }
     return phrases;
   }
-  return { VERSION, DISPLAY_CATALOG, choreographyTarget, choreographyTargetAt, projectChoreographyLayers, validEmoji, stageRegionAt, resolveStageRegionRect, ScoreError, mediaKey, parseLrc, parseVocalText, doubledText, displayToken, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, setAlignmentTiming, projectAlignmentTiming, alignmentCandidateStatus, alignmentCoverage, retainAlignmentProposals, phraseTimingCoverage, timingCoverage, timingCompleteness };
+  return { VERSION, DISPLAY_CATALOG, choreographyTarget, choreographyTargetAt, projectChoreographyLayers, validEmoji, stageRegionAt, resolveStageRegionRect, ScoreError, mediaKey, parseLrc, parseVocalText, doubledText, displayToken, hyphenWordParts, createScore, createPlainScore, validateScore, validateAlignmentReceipt, activeAt, revealProgress, presenceAt, applyOperation, applyAlignment, setAlignmentTiming, projectAlignmentTiming, alignmentCandidateStatus, captureTimingStatus, alignmentCoverage, retainAlignmentProposals, phraseTimingCoverage, timingCoverage, timingCompleteness };
 });
