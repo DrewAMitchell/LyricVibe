@@ -466,52 +466,91 @@
   // Reserve a stable slot for each voice that can be visible simultaneously.
   // Lead-ins are included so the first singer does not move when another is previewed.
   // Non-overlapping voices may share a slot. Authored stage regions remain separate.
-  function leadTrackPlan(score,displayEnds={},leadInMs=2000){
+  function leadTrackPlan(score,displayEnds={},leadInMs=2000,exclusiveEnds=false){
     const lanes=(score.lanes||[]).filter(l=>l.role==='lead'),nodes=[],byPhrase=new Map();
     for(const lane of lanes){
       const phrases=(score.phrases||[]).filter(p=>p.laneId===lane.id&&p.words?.some(w=>!w.excluded)).sort((a,b)=>a.startMs-b.startMs||a.id.localeCompare(b.id));
       const voices=[];
       for(const phrase of phrases){
-        let voice=voices.find(v=>v.until<phrase.startMs);
+        let voice=voices.find(v=>exclusiveEnds?v.until<=phrase.startMs:v.until<phrase.startMs);
         if(!voice){voice={laneId:lane.id,index:voices.length,until:-1,intervals:[],neighbors:new Set()};voices.push(voice);nodes.push(voice);}
         const end=Math.max(phrase.endMs,Number.isFinite(displayEnds[phrase.id])?displayEnds[phrase.id]:phrase.endMs);
         voice.until=end;voice.intervals.push({start:Math.max(0,phrase.startMs-leadInMs),end});byPhrase.set(phrase.id,voice);
       }
     }
-    const overlaps=(a,b)=>{const aa=a.intervals.slice().sort((x,y)=>x.start-y.start),bb=b.intervals.slice().sort((x,y)=>x.start-y.start);let i=0,j=0;while(i<aa.length&&j<bb.length){if(aa[i].start<=bb[j].end&&bb[j].start<=aa[i].end)return true;if(aa[i].end<bb[j].end)i++;else j++;}return false;};
+    const overlaps=(a,b)=>{const aa=a.intervals.slice().sort((x,y)=>x.start-y.start),bb=b.intervals.slice().sort((x,y)=>x.start-y.start);let i=0,j=0;while(i<aa.length&&j<bb.length){if(exclusiveEnds?aa[i].start<bb[j].end&&bb[j].start<aa[i].end:aa[i].start<=bb[j].end&&bb[j].start<=aa[i].end)return true;if(exclusiveEnds?aa[i].end<=bb[j].end:aa[i].end<bb[j].end)i++;else j++;}return false;};
     for(let i=0;i<nodes.length;i++)for(let j=i+1;j<nodes.length;j++)if(overlaps(nodes[i],nodes[j])){nodes[i].neighbors.add(nodes[j]);nodes[j].neighbors.add(nodes[i]);}
     nodes.sort((a,b)=>a.intervals[0].start-b.intervals[0].start||lanes.findIndex(l=>l.id===a.laneId)-lanes.findIndex(l=>l.id===b.laneId)||a.index-b.index);
     for(const node of nodes){const used=new Set([...node.neighbors].map(n=>n.slot).filter(Number.isInteger));let slot=0;while(used.has(slot))slot++;node.slot=slot;}
     const count=Math.max(1,...nodes.map(n=>n.slot+1));
     return {count,slots:Object.fromEntries([...byPhrase].map(([id,node])=>[id,node.slot])),laneColors:Object.fromEntries(lanes.map((lane,index)=>[lane.id,index])),multi:count>1};
   }
-  // A bounded, deterministic pile: each word lands on the floor or an earlier
-  // settled word. Pages prevent unbounded collision work and unreadable scaling.
+  // Precompute a bounded, source-clock physics pass. Frames are deterministic,
+  // so a seek or pause never depends on an animation loop's wall clock.
   function pileTrack(words,width,height,measure,{font=48,maxWords=32}={}){
     width=Math.max(1,width);height=Math.max(1,height);font=Math.max(4,Math.min(font,height*.38));maxWords=Math.max(1,Math.min(64,maxWords));
     const pages=[],ordered=[...words].sort((a,b)=>a.startMs-b.startMs||String(a.id).localeCompare(String(b.id)));
     const reuseWidths=new Map();for(const word of ordered)if(word._dejaReuse)reuseWidths.set(word._dejaReuse,Math.max(reuseWidths.get(word._dejaReuse)||0,measure(word.text,font,word)));
     const hash=text=>{let n=2166136261;for(const ch of String(text)){n^=ch.codePointAt(0);n=Math.imul(n,16777619);}return n>>>0;};
-    let page=null;
+    let page=null,area=0;
     for(const word of ordered){
-      const measured=word._dejaReuse?reuseWidths.get(word._dejaReuse):measure(word.text,font,word),size=Math.max(4,Math.min(font,font*(width*.92/Math.max(1,measured)))),w=Math.min(width,Math.max(1,measured*size/font+size*.12)),h=Math.min(height,Math.max(1,size*1.3)),seed=hash(word.id),gap=Math.min(5,size*.1);
-      const newPage=()=>{page={startMs:word.startMs,items:[]};pages.push(page);};
-      if(!page||page.items.length>=maxWords)newPage();
-      const previous=page.items.at(-1);if(word._dejaReuse&&previous?.reuseKey===word._dejaReuse){page.items.push({...previous,id:word.id,phraseId:word.phraseId,laneId:word.laneId,startMs:word.startMs,edge:seed%4,seed});continue;}
-      const place=()=>{let best=null;const span=Math.max(0,width-w),offset=(seed%1009)/1009,candidates=Array.from({length:12},(_,i)=>span*((offset+i*.61803398875)%1));candidates.push(0,span);for(const other of page.items)candidates.push(Math.max(0,Math.min(span,other.x+other.width+gap)),Math.max(0,Math.min(span,other.x-w-gap)));for(const x of candidates){let y=height-h;for(const other of page.items)if(x<other.x+other.width+gap&&x+w+gap>other.x)y=Math.min(y,other.y-h-gap);if(y>=0&&(!best||y>best.y))best={x,y};}return best;};
-      let point=place();if(!point){newPage();point=place();}if(!point)point={x:0,y:Math.max(0,height-h)};
-      page.items.push({id:word.id,phraseId:word.phraseId,laneId:word.laneId,startMs:word.startMs,x:point.x,y:point.y,width:w,height:h,font:size,edge:seed%4,seed,reuseKey:word._dejaReuse});
+      const measured=word._dejaReuse?reuseWidths.get(word._dejaReuse):measure(word.text,font,word),size=Math.max(4,Math.min(font,font*(width*.84/Math.max(1,measured)))),w=Math.min(width,Math.max(1,measured*size/font+size*.12)),h=Math.min(height,Math.max(1,size*1.3)),padX=Math.min((width-w)/2,h*.08+2),padY=Math.min((height-h)/2,w*.08+2),seed=hash(word.id);
+      const repeated=word._dejaReuse&&page?.items.at(-1)?.reuseKey===word._dejaReuse;
+      if(!page||page.items.length>=maxWords||!repeated&&page.items.length&&area+(w+padX*2)*(h+padY*2)>width*height*.58){page={startMs:word.startMs,items:[]};pages.push(page);area=0;}
+      const previous=page.items.at(-1),reuse=word._dejaReuse&&previous?.reuseKey===word._dejaReuse;
+      const item={id:word.id,phraseId:word.phraseId,laneId:word.laneId,startMs:word.startMs,width:w,height:h,padX,padY,font:size,edge:0,seed,reuseKey:word._dejaReuse,splatter:seed%4===0,frames:[]};
+      if(reuse)item.reuseId=previous.reuseId||previous.id;else area+=(w+padX*2)*(h+padY*2);
+      page.items.push(item);
+    }
+    for(let index=0;index<pages.length;index++){
+      const current=pages[index],overflow=[];
+      for(;;){
+        let previous=null;for(const item of current.items){item.frames=[];delete item.impact;delete item.reuseId;if(item.reuseKey&&previous?.reuseKey===item.reuseKey)item.reuseId=previous.reuseId||previous.id;previous=item;}
+        simulatePile(current,width,height);
+        if(current.items.length<=1||current.items.every(item=>item.y>=-.5))break;
+        overflow.unshift(current.items.pop());
+      }
+      if(overflow.length)pages.splice(index+1,0,{startMs:overflow[0].startMs,items:overflow});
     }
     return {width,height,pages};
   }
+  function simulatePile(page,width,height){
+    const step=1000/30,bodies=[],byId=new Map(),lastStart=page.items.at(-1)?.startMs??page.startMs;
+    let next=0,now=page.startMs,lastSpawn=now;
+    const record=(b,t)=>{b.item.frames.push(t,b.x+b.item.padX,b.y+b.item.padY,b.angle);};
+    while(next<page.items.length||now<lastStart+2200){
+      if(next<page.items.length&&now-lastSpawn>2200&&page.items[next].startMs>now+step){now=page.items[next].startMs;for(const b of bodies){b.vx=0;b.vy=0;b.spin=0;record(b,now);}}
+      while(next<page.items.length&&page.items[next].startMs<=now+.001){
+        const item=page.items[next++];lastSpawn=now;
+        if(item.reuseId){const base=byId.get(item.reuseId);if(base){base.x=Math.max(0,Math.min(width-base.w,(width-base.w)*(.28+.44*(item.seed%997)/997)));base.y=-base.h-2;base.vx=((item.seed>>>10)%161)-80;base.vy=220+(item.seed>>>18)%130;base.spin=((item.seed>>>15)%81)-40;base.impactItem=item;item.frames=base.item.frames;item.splatter=base.item.splatter;record(base,now);continue;}}
+        const w=item.width+item.padX*2,h=item.height+item.padY*2,span=Math.max(0,width-w),f=(item.seed%997)/997,body={item,impactItem:item,w,h,x:span*(.28+.44*f),y:-h-2,vx:((item.seed>>>10)%161)-80,vy:220+(item.seed>>>18)%130,angle:((item.seed>>>5)%15)-7,spin:((item.seed>>>15)%81)-40};
+        bodies.push(body);byId.set(item.id,body);record(body,item.startMs);
+      }
+      if(!bodies.length){if(next>=page.items.length)break;now=page.items[next].startMs;continue;}
+      const dt=step/1000;now+=step;
+      for(const b of bodies){b.vy+=850*dt;b.x+=b.vx*dt;b.y+=b.vy*dt;b.angle=Math.max(-9,Math.min(9,b.angle+b.spin*dt));b.spin*=.96;b.vx*=.995;
+        if(b.x<0){b.x=0;b.vx=Math.abs(b.vx)*.18;}if(b.x+b.w>width){b.x=Math.max(0,width-b.w);b.vx=-Math.abs(b.vx)*.18;}
+        if(b.y+b.h>=height){b.y=height-b.h;if(b.vy>45)b.vy=-b.vy*.18;else b.vy=0;b.vx*=.8;b.spin*=.8;if(b.impactItem.impact==null)b.impactItem.impact=now;}}
+      for(let pass=0;pass<14;pass++)for(let i=0;i<bodies.length;i++)for(let j=i+1;j<bodies.length;j++){
+        const a=bodies[i],b=bodies[j],ox=Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x),oy=Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y);
+        if(ox<=0||oy<=0)continue;
+        if(oy<=ox){const upper=a.y+a.h/2<b.y+b.h/2?a:b,lower=upper===a?b:a,push=oy/2+.01;upper.y-=push;lower.y+=push;const relative=upper.vy-lower.vy;if(relative>0){const impulse=relative*.54,side=upper.x+upper.w/2<lower.x+lower.w/2?-1:1,lateral=Math.min(70,relative*.22);upper.vy-=impulse;lower.vy+=impulse;upper.vx+=side*lateral;lower.vx-=side*lateral*.4;upper.spin+=side*Math.min(18,relative*.04);if(upper.impactItem.impact==null)upper.impactItem.impact=now;}}
+        else{const left=a.x+a.w/2<b.x+b.w/2?a:b,right=left===a?b:a,push=ox/2+.01;left.x-=push;right.x+=push;const relative=left.vx-right.vx;if(relative>0){left.vx-=relative*.52;right.vx+=relative*.52;}}
+        for(const body of [a,b]){body.x=Math.max(0,Math.min(width-body.w,body.x));if(body.y+body.h>height){body.y=height-body.h;body.vy=Math.min(0,body.vy);}}
+      }
+      for(const b of bodies)record(b,now);
+    }
+    for(const item of page.items){const base=item.reuseId?byId.get(item.reuseId)?.item:item;if(base&&base!==item){item.frames=base.frames;item.splatter=base.splatter;}const f=item.frames;item.x=f.length?f[f.length-3]:0;item.y=f.length?f[f.length-2]:height-item.height;}
+  }
   function pileAt(item,clock,width,height,{reduced=false}={}){
     if(clock<item.startMs)return null;
-    if(reduced)return {x:item.x,y:item.y};
-    const elapsed=clock-item.startMs,duration=720,u=clamp(elapsed/duration),f=(item.seed%997)/997;
-    const from=[{x:f*Math.max(0,width-item.width),y:-item.height},{x:width,y:f*height*.65},{x:f*Math.max(0,width-item.width),y:height},{x:-item.width,y:f*height*.65}][item.edge];
-    const arc=Math.min(60,height*.11),x=from.x+(item.x-from.x)*u,y=from.y+(item.y-from.y)*u-arc*u*(1-u);
-    const bounce=elapsed>duration?Math.min(7,item.height*.08)*Math.exp(-(elapsed-duration)/180)*Math.abs(Math.sin((elapsed-duration)/90)):0,drift=clamp((elapsed-duration-300)/800),phase=(elapsed+(item.seed%5000))/1500;
-    const dx=x+drift*.65*Math.sin(phase),dy=y-bounce-drift*.3*(1+Math.cos(phase*.8));return u===1?{x:Math.max(0,Math.min(Math.max(0,width-item.width),dx)),y:Math.max(0,Math.min(Math.max(0,height-item.height),dy))}:{x:dx,y:dy};
+    if(reduced)return {x:item.x,y:item.y,rotation:0,splat:item.splatter&&item.impact!=null&&clock>=item.impact?1:0,squash:0};
+    const frames=item.frames;if(!frames?.length)return {x:item.x,y:item.y};let lo=0,hi=frames.length/4-1;
+    while(lo<hi){const mid=Math.ceil((lo+hi)/2);if(frames[mid*4]<=clock)lo=mid;else hi=mid-1;}
+    const i=lo*4,j=Math.min(i+4,frames.length-4),span=frames[j]-frames[i],u=span>0?clamp((clock-frames[i])/span):0;
+    const since=item.impact==null?-1:clock-item.impact,squash=since>=0&&since<220?Math.sin(Math.PI*since/220)*(item.splatter ? .2 : .08):0;
+    const idle=clamp((clock-frames[frames.length-4])/600),phase=(clock+(item.seed%5000))/1100;
+    return {x:Math.max(0,Math.min(Math.max(0,width-item.width),frames[i+1]+(frames[j+1]-frames[i+1])*u+idle*.45*Math.sin(phase))),y:frames[i+2]+(frames[j+2]-frames[i+2])*u-idle*.25*(1+Math.cos(phase*.8)),rotation:frames[i+3]+(frames[j+3]-frames[i+3])*u+idle*.15*Math.sin(phase*.7),splat:item.splatter&&since>=0?clamp(since/180):0,squash};
   }
   function backingSettings(value={}){
     return {space:value?.space==='shared'?'shared':'separate',area:Number.isFinite(value?.area)?Math.max(.15,Math.min(.4,value.area)):.25};

@@ -654,6 +654,7 @@
     const fire=(look||theme)==='fire';node.classList.toggle('lvx-fire-texture',fire);
     if(fire){const paint=firePaint(clock);node.style.setProperty('--lvx-fire-image',paint.image);node.style.setProperty('--lvx-fire-embers',paint.embers);node.style.setProperty('--lvx-fire-smoke',paint.smoke);}
   }
+  const pilePreviewPlans=new WeakMap();
   function renderStylePreview(activeOnly=false){
     renderWordRulePreview();
     const sample=themePicker.querySelector('.lvx-motion-sample');if(sample){sample.dataset.theme=previewTheme;sample.querySelector('.lvx-tile-name').textContent=THEME_LABELS[previewTheme]+(previewTheme===state.theme?' · applied':' · preview');}
@@ -670,7 +671,7 @@
       const settings={...choreography,theme:tile.dataset.theme,emojiTags:!!editingWordSet().emojiTags},cues=LvChoreography.compose({source:{durationMs:words.length*450+1800},phrases:[{id:'preview',laneId:'lead',words}]},editingWordSet().rules,{...editingWordSet(),...heldSettings(choreography)});
       // Layout and painting must agree on emoji space and expression weights.
       const previewWidth=tile.querySelector('.lvx-tile-stage').clientWidth-16;
-      if(choreography.mode==='pile'){const measure=(text,font)=>{choreographyMeasure.font=`800 ${font}px Segoe UI`;return choreographyMeasure.measureText(text.toUpperCase()).width;},plan=LvChoreography.pileTrack(words,previewWidth,previewHeight,measure,{font:Math.min(24,previewHeight*.26)}),page=plan.pages.findLast(p=>p.startMs<=clock),items=new Map((page?.items||[]).map(item=>[item.id,item]));paintPileLine(line,words.map(word=>({...word,_pile:items.get(word.id)})),clock,previewWidth,previewHeight);}else choreographLine(line,words,clock,previewWidth,previewHeight,Math.min(64,previewHeight*.7),cues,Math.min(48,previewHeight*.54),settings);
+      if(choreography.mode==='pile'){const key=JSON.stringify([previewWidth,previewHeight,words.map(w=>[w.id,w.text,w.startMs,w.endMs])]);let cached=pilePreviewPlans.get(line);if(!cached||cached.key!==key){const measure=(text,font)=>{choreographyMeasure.font=`800 ${font}px Segoe UI`;return choreographyMeasure.measureText(text.toUpperCase()).width;};cached={key,plan:LvChoreography.pileTrack(words,previewWidth,previewHeight,measure,{font:Math.min(24,previewHeight*.26)})};pilePreviewPlans.set(line,cached);}const page=cached.plan.pages.findLast(p=>p.startMs<=clock),items=new Map((page?.items||[]).map(item=>[item.id,item]));paintPileLine(line,words.map(word=>({...word,_pile:items.get(word.id)})),clock,previewWidth,previewHeight);}else choreographLine(line,words,clock,previewWidth,previewHeight,Math.min(64,previewHeight*.7),cues,Math.min(48,previewHeight*.54),settings);
       expressLine(line,words,clock,cues,settings);
     }
   }
@@ -5796,6 +5797,7 @@
       node.classList.add('lvx-expression');node.dataset.expression=value.reason;node.dataset.authoredExpression=String(Boolean(effects?.length));
       const angle=(parseFloat(node.style.rotate)||0)*Math.PI/180,x=value.x*Math.cos(angle)+value.y*Math.sin(angle),y=-value.x*Math.sin(angle)+value.y*Math.cos(angle);
       node.style.transform=`translate(${x.toFixed(3)}px,${y.toFixed(3)}px) rotate(calc(${value.turn.toFixed(3)}deg + var(--lvx-beat-rotor,0deg))) scale(${value.scale.toFixed(4)}) perspective(8em) rotateY(calc(${(value.spin||0).toFixed(3)}deg + var(--lvx-beat-spin,0deg)))`;
+      if(node.dataset.pilePhysics)node.style.transform+=' scale(var(--lvx-pile-scale-x,1),var(--lvx-pile-scale-y,1))';
 
       const dance=LvChoreography.danceAt(cue,clock,{kind:motion??(danceAllowed?settings.dance:'off'),reduced:bloomMotion.matches,authored:motion===undefined&&!danceAllowed});
       node.dataset.dance=dance.kind;node.style.transformOrigin=dance.kind==='tip'?'50% 100%':'50% 50%';
@@ -5836,6 +5838,7 @@
   }
   function choreographLine(line,words,clock,width,height,maxFont,weights={},minFont=0,settings=choreography){
     if(typeof LvChoreography==='undefined')return;
+    for(const node of line.children)if(node.dataset.pilePhysics){delete node.dataset.pilePhysics;node.classList.remove('lvx-pile-splattered');for(const property of ['--lvx-pile-splat','--lvx-pile-scale-x','--lvx-pile-scale-y'])node.style.removeProperty(property);}
     if(settings.mode==='classic'&&!minFont&&!settings.dejaVu){landLine(line,words,clock,settings);return;}
     const tags=emojiTagsEnabled(settings);if(!settings.automatic)weights=Object.fromEntries(Object.entries(weights).map(([id,cue])=>[id,{emoji:cue.emoji,emojiCount:cue.emojiCount}]));
     const style=getComputedStyle(line),key=[width,height,maxFont,minFont,style.fontFamily,style.fontWeight,style.letterSpacing,style.textTransform,tags,settings.mode,settings.dejaVu,settings.upsideDown,settings.arrangement,settings.origin,words.map(w=>w.id+':'+w.text+':'+w.startMs+':'+w.endMs+':'+(weights[w.id]?.weight??1)+':'+(w.appearance?.look||'')+':'+(tags?weights[w.id]?.emoji||'':'')).join('|')].join(':');
@@ -6175,7 +6178,7 @@
     if(!pileCache||pileCache.score!==score||pileCache.tracks!==tracks||pileCache.deja!==deja||pileCache.library!==wordRuleSets||pileCache.key!==key){
       const groups=Array.from({length:tracks.count},()=>[]),cues=deja?.cues||expressionCues(score);
       for(const phrase of (deja?.projected||score).phrases){const slot=Object.hasOwn(tracks.slots,phrase.id)?tracks.slots[phrase.id]:undefined;if(slot===undefined)continue;const visible=phrase.words.filter(w=>!w.excluded),sets=deja?LvChoreography.dejaGroups(visible):visible.map((_,i)=>[i]),reuse=new Map();for(const group of sets)if(group.length>1)for(const index of group)reuse.set(visible[index].id,JSON.stringify([phrase.id,group[0]]));for(const word of visible)groups[slot].push({...word,phraseId:phrase.id,laneId:phrase.laneId,_dejaReuse:reuse.get(word.id)});}
-      const font=Math.max(4,Math.min(placement.maxFontPx,64,rowHeight*.27,width*.105));
+      const font=Math.max(4,Math.min(placement.maxFontPx,64,rowHeight*.27,width*.08));
       const measure=(text,size,word)=>{const shown=score.lyrics?.timingBasis==='caption-segments'?text:text.toUpperCase();let widest=0;for(const face of ['Impact','Segoe UI','Georgia']){choreographyMeasure.font=`800 ${size}px "${face}"`;widest=Math.max(widest,choreographyMeasure.measureText(shown).width);}return widest+(emojiTagsEnabled(choreography)&&cues[word.id]?.emoji?size*.75*(cues[word.id]?.emojiCount||1):0);};
       pileCache={score,tracks,deja,key,library:wordRuleSets,plans:groups.map(words=>LvChoreography.pileTrack(words,width,rowHeight,measure,{font}))};
     }
@@ -6185,7 +6188,7 @@
     return phrases;
   }
   function paintPileLine(line,words,clock,width,height,settings=choreography){
-    for(const [index,word]of words.entries()){const node=line.children[index],item=word._pile;if(!node)continue;if(!item){node.style.display='none';continue;}const point=LvChoreography.pileAt(item,clock,width,height,{reduced:bloomMotion.matches});if(!point){node.style.display='none';continue;}node.style.display='';node.classList.remove('lvx-wrapped-word');Object.assign(node.style,{position:'absolute',left:point.x.toFixed(3)+'px',top:point.y.toFixed(3)+'px',width:item.width.toFixed(3)+'px',height:item.height.toFixed(3)+'px',fontSize:item.font.toFixed(3)+'px',lineHeight:'1.3',rotate:'0deg',translate:'0 0',opacity:''});}
+    for(const [index,word]of words.entries()){const node=line.children[index],item=word._pile;if(!node)continue;if(!item){node.style.display='none';continue;}const point=LvChoreography.pileAt(item,clock,width,height,{reduced:bloomMotion.matches});if(!point){node.style.display='none';continue;}node.style.display='';node.dataset.pilePhysics='true';node.classList.remove('lvx-wrapped-word');node.classList.toggle('lvx-pile-splattered',point.splat>0);node.style.setProperty('--lvx-pile-splat',String(point.splat||0));const squash=point.squash||0,splat=point.splat||0;node.style.setProperty('--lvx-pile-scale-x',(1+squash+splat*.06).toFixed(3));node.style.setProperty('--lvx-pile-scale-y',(1-squash-splat*.1).toFixed(3));node.style.removeProperty('translate');Object.assign(node.style,{position:'absolute',left:point.x.toFixed(3)+'px',top:point.y.toFixed(3)+'px',width:item.width.toFixed(3)+'px',height:item.height.toFixed(3)+'px',fontSize:item.font.toFixed(3)+'px',lineHeight:'1.3',rotate:(point.rotation||0).toFixed(3)+'deg',opacity:''});}
     if(settings.dejaVu){showDejaGroup(line,words,clock,LvChoreography.dejaGroups(words));for(const [index,word]of words.entries())if(!word._pile&&line.children[index])line.children[index].style.display='none';}
     Object.assign(line.style,{position:'relative',width:width+'px',height:height+'px',maxWidth:'100%'});
   }
@@ -6210,7 +6213,7 @@
     if(stage.classList.contains('lvx-choreography-stage')===useVinyl)stage.classList.toggle('lvx-choreography-stage',!useVinyl);
     const stagePadding=useVinyl?'0px':'16px';if(stage.style.paddingTop!==stagePadding)stage.style.paddingTop=stagePadding;
     if(beatDisplayCache.score!==score||beatDisplayCache.map!==tempo.map||beatDisplayCache.linger!==linger){const ends=LvBeatTrack.presentationEnds(score,tempo.map,linger);beatDisplayCache={score,map:tempo.map,linger,ends:ends.phrases,units:ends.units};}
-    if(leadTrackCache.score!==score||leadTrackCache.ends!==beatDisplayCache.ends)leadTrackCache={score,ends:beatDisplayCache.ends,plan:LvChoreography.leadTrackPlan(score,beatDisplayCache.ends)};
+    if(leadTrackCache.score!==score||leadTrackCache.ends!==beatDisplayCache.ends||leadTrackCache.pile!==usePile)leadTrackCache={score,ends:beatDisplayCache.ends,pile:usePile,plan:usePile?LvChoreography.leadTrackPlan(score,{},0,true):LvChoreography.leadTrackPlan(score,beatDisplayCache.ends)};
     const leadTracks=leadTrackCache.plan,deja=choreography.dejaVu&&choreography.mode!=='vinyl'?dejaState(score):null;
     const active = LvScore.activeAt(score, mediaMs,{displayEnds:beatDisplayCache.ends});
     // Lead-in: an empty lane shows its next phrase dimmed up to 2s early, so a rewind is never a blank screen.

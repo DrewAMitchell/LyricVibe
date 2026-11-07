@@ -3565,6 +3565,10 @@
 #lvx-root .lvx-record-footer button{scroll-margin-bottom:90px}
 #lvx-root .lvx-sync-panel .lvx-record-footer{border-top:1px solid #567984;margin-top:4px;padding-top:3px}
 
+/* An occasional impact makes a tomato-like mark behind the readable word. */
+#lvx-root .lvx-pile-splattered{isolation:isolate}
+#lvx-root .lvx-pile-splattered::before{content:'';position:absolute;inset:-.18em -.22em;z-index:-1;pointer-events:none;opacity:calc(var(--lvx-pile-splat,0)*.72);transform:scale(calc(.6 + var(--lvx-pile-splat,0)*.4));background:radial-gradient(ellipse 37% 32% at 50% 52%,#d94736 98%,transparent),radial-gradient(ellipse 12% 19% at 20% 38%,#d94736 98%,transparent),radial-gradient(ellipse 11% 15% at 79% 32%,#d94736 98%,transparent),radial-gradient(ellipse 8% 14% at 76% 73%,#bd3430 98%,transparent),radial-gradient(ellipse 4% 7% at 7% 21%,#e7664b 98%,transparent),radial-gradient(ellipse 4% 7% at 93% 76%,#e7664b 98%,transparent)}
+
 /* Workspace navigation is a separate compact panel, not a full-width row. */
 #lvx-root .lvx-workspace-menu{position:fixed;z-index:61;width:min(248px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto;pointer-events:auto}
 #lvx-root .lvx-workspace-menu[hidden]{display:none!important}
