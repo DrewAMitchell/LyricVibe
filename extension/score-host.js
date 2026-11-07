@@ -204,6 +204,11 @@
     }
     const offlineCleanup=message.type==='LV_CAPTION_NOTES_CLEAN'&&exactExtensionPage(sender,'options.html');
     let key;if(offlineCleanup){const match=/^youtube:([A-Za-z0-9_-]{11})$/.exec(message.mediaKey||'');if(!match)throw fail('SOURCE_REQUIRED','Choose an exact YouTube score.');key=message.mediaKey;}else ({key}=await liveIdentity(tabId,message.mediaKey));
+    if(message.type==='LV_FORMAT_PREVIEW'){
+      if(!sourceOverlayBound(sender,tabId,key))throw fail('SOURCE_REQUIRED','Open the lyric overlay on this video first.');
+      if(!Array.isArray(message.words)||!message.words.length||message.words.length>5000||message.words.some(w=>typeof w!=='string'||!w.trim()||w.length>256||/\s/u.test(w))||message.words.join(' ').length>30000)throw fail('INVALID_TEXT','Choose up to 30,000 characters of lyrics.');
+      return {ok:true,result:await root.LvAnalysis.formatPreview(message.words)};
+    }
     if(message.type==='LV_SCORE_AUTHOR'){
       if(!sourceOverlayBound(sender,tabId,key))throw fail('SOURCE_REQUIRED','Start recording from the lyric overlay on this video.');
       return serial(key,async()=>{
@@ -444,7 +449,7 @@
     });
   }
   const types = new Set(['LV_ANALYSIS_CACHE_CLEAR_REQUEST', 'LV_EDITOR_OPEN', 'LV_LIGHT_EDITOR_OPEN', 'LV_SCORE_GET', 'LV_SCORE_CLOCK', 'LV_SCORE_OPERATION', 'LV_SCORE_IMPORT', 'LV_NATIVE_ALIGNMENT_IMPORT', 'LV_SCORE_UNDO', 'LV_SCORE_SEEK', 'LV_SCORE_TRANSPORT', 'LV_SCORE_REVIEW_APPLY', 'LV_ALIGNMENT_PREFERENCE_SET', 'LV_ANALYSIS_START', 'LV_ANALYSIS_STOP', 'LV_ANALYSIS_STATUS', 'LV_NATIVE_ANALYSIS_START', 'LV_NATIVE_ANALYSIS_STOP', 'LV_NATIVE_ANALYSIS_STATUS', 'LV_ALIGNMENT_PROPOSALS']);
-  types.add('LV_CAPTION_NOTES_CLEAN');types.add('LV_TEMPO_GET');types.add('LV_TEMPO_SET');types.add('LV_SCORE_AUTHOR');
+  types.add('LV_CAPTION_NOTES_CLEAN');types.add('LV_TEMPO_GET');types.add('LV_TEMPO_SET');types.add('LV_SCORE_AUTHOR');types.add('LV_FORMAT_PREVIEW');
   for (const type of ['LV_TIMING_SOURCES', 'LV_TIMING_COPY', 'LV_TIMING_PREPARE', 'LV_TIMING_CURRENT', 'LV_TIMING_VIEW', 'LV_TIMING_TUNE', 'LV_TIMING_UNDO', 'LV_TIMING_APPLY', 'LV_TIMING_CANCEL']) types.add(type);
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!types.has(message?.type)) return;

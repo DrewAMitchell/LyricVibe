@@ -15,6 +15,9 @@ env.backends.onnx.wasm.proxy = false;
 let transcriber;
 let provider;
 let busy = false;
+let formatter;
+const FORMAT_MODEL='Horizon-Labs/multilingual-punctuation-truecase-small';
+const FORMAT_REVISION='b18abbd2d30e8167e154df444b37faa4d6f5c2ea';
 
 function resample(pcm, rate) {
   if (rate === 16000) return pcm;
@@ -50,6 +53,19 @@ async function load() {
 }
 
 self.onmessage = async ({ data }) => {
+  if(data.type==='format'){
+    try{
+      if(!formatter)formatter=await pipeline('token-classification',FORMAT_MODEL,{revision:FORMAT_REVISION,device:'wasm',dtype:'q8'});
+      const result=[];
+      for(let start=0;start<data.words.length;start+=48){
+        const chunk=data.words.slice(start,start+48),parts=await formatter(chunk.join(' ').toLocaleLowerCase()),groups=[];
+        for(const part of parts){const piece=String(part.word||'');if(!groups.length||/^\s/u.test(piece))groups.push({word:piece.trimStart(),entity:part.entity});else{groups.at(-1).word+=piece;groups.at(-1).entity=part.entity;}}
+        if(groups.length!==chunk.length)throw Error('Model tokenization did not match input words.');result.push(...groups);
+      }
+      self.postMessage({type:'format-result',id:data.id,result});
+    }catch(_){self.postMessage({type:'format-error',id:data.id,message:'The local formatting model could not run.'});}
+    return;
+  }
   if (data.type === 'load') {
     try { await load(); } catch (_) { self.postMessage({ type: 'error', code: 'MODEL_LOAD_FAILED', message: 'The browser could not load the packaged runtime or model data.' }); }
     return;

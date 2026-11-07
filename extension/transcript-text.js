@@ -244,5 +244,26 @@
     return { operations: [...prefix,...operations, ...inserts], changes:[...changesBefore,...changes] };
   }
 
-  return { toText, diff };
+  // The model sees only word spellings, not lane markers or score timing.
+  // Its output is a separate preview; no score operation is produced here.
+  function formatWords(score){
+    return score.phrases.flatMap(visible).map(word=>{
+      const match=/^([\p{P}\p{S}]*)(.*?)([\p{P}\p{S}]*)$/u.exec(word.text);
+      return {id:word.id,prefix:match?.[1]||'',core:match?.[2]||'',suffix:match?.[3]||''};
+    }).filter(item=>item.core&&!/\s/u.test(item.core));
+  }
+  function formatPreview(score,items,predictions){
+    if(!Array.isArray(predictions)||predictions.length!==items.length)fail('FORMAT_MISMATCH','The formatting result did not match the lyrics; nothing changed.');
+    const formatted=new Map();let matched=0;
+    for(let i=0;i<items.length;i++){
+      const item=items[i],prediction=predictions[i],value=String(prediction?.word||'').normalize('NFKC').toLocaleLowerCase();
+      if(value!==item.core.normalize('NFKC').toLocaleLowerCase())continue;
+      const [mark,letterCase]=String(prediction.entity||'').split('|');if(!['0','.',',','?',':','-'].includes(mark)||!['lower','Cap','UPPER'].includes(letterCase))continue;
+      const chars=Array.from(item.core.toLocaleLowerCase()),cased=letterCase==='UPPER'?item.core.toLocaleUpperCase():letterCase==='Cap'?(chars[0]?.toLocaleUpperCase()||'')+chars.slice(1).join(''):chars.join('');
+      formatted.set(item.id,item.prefix+cased+(item.suffix||((mark==='0')?'':mark)));matched++;
+    }
+    const copy=structuredClone(score);for(const phrase of copy.phrases)for(const word of phrase.words)if(formatted.has(word.id))word.text=formatted.get(word.id);
+    return {text:toText(copy),matched,total:items.length};
+  }
+  return { toText, diff, formatWords, formatPreview };
 });

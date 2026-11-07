@@ -3384,6 +3384,10 @@
 #lvx-root .lvx-transcript-head-actions{display:flex;gap:5px}
 #lvx-root .lvx-transcript-head-actions button{min-height:36px}
 #lvx-root dialog.lvx-transcript-editor textarea{scrollbar-width:none;white-space:pre-wrap;overflow-wrap:anywhere;min-height:220px;border-color:#78929a}
+#lvx-root .lvx-format-preview{padding:8px 0;border-top:1px solid #608089;display:grid;gap:6px}
+#lvx-root .lvx-format-preview small{font:12px/1.4 system-ui;color:#c9d8da}
+#lvx-root dialog.lvx-transcript-editor .lvx-format-preview textarea{min-height:140px;font:13px/1.5 ui-monospace,Consolas,monospace}
+#lvx-root dialog.lvx-transcript-editor:has(.lvx-format-preview textarea:not([hidden]))>textarea{min-height:110px;height:110px}
 #lvx-root .lvx-transcript-editor>.lvx-tap-actions{bottom:-12px;background:#14232af7;border-top:1px solid #608089;padding:7px 0}
 #lvx-root .lvx-transcript-editor :focus-visible{outline:2px solid #f7cc70;outline-offset:2px}
 

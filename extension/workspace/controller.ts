@@ -262,9 +262,9 @@ export function createEditorController(options: EditorControllerOptions): Editor
     if (state.reviewRevision !== null && state.reviewRevision !== state.score.revision) clearReview();
     const selectionScore = visibleScore()!;
     const priorWord = state.selection.wordId && findWord(selectionScore, state.selection.wordId);
-    if (!priorWord) {
-      const firstPhrase = selectionScore.phrases[0];
-      const firstWord = firstPhrase?.words[0];
+    if (!priorWord || priorWord.word.excluded) {
+      const firstPhrase = selectionScore.phrases.find(p => p.id === (priorWord ? priorWord.phraseId : null) && p.words.some(w => !w.excluded)) || selectionScore.phrases.find(p => p.words.some(w => !w.excluded));
+      const firstWord = firstPhrase?.words.find(w => !w.excluded);
       state.selection = { phraseId: firstPhrase?.id ?? null, wordId: firstWord?.id ?? null, syllableId: null };
     } else {
       const syllableId = state.selection.syllableId && priorWord.word.syllables?.some(item => item.id === state.selection.syllableId)
@@ -284,9 +284,9 @@ export function createEditorController(options: EditorControllerOptions): Editor
       if (state.preview) {
         state.preview = null; previewEpoch++;
         if (state.draft) state.notice = { message: 'The source timing draft closed. Your unsent input is preserved; discard it before continuing.', kind: 'error' };
-        else if (state.score && (!state.selection.wordId || !findWord(state.score, state.selection.wordId))) {
-          const phrase = state.score.phrases[0];
-          state.selection = { phraseId: phrase?.id ?? null, wordId: phrase?.words[0]?.id ?? null, syllableId: null };
+        else if (state.score && (!state.selection.wordId || !findWord(state.score, state.selection.wordId) || findWord(state.score, state.selection.wordId)?.word.excluded)) {
+          const phrase = state.score.phrases.find(p=>p.words.some(w=>!w.excluded));
+          state.selection = { phraseId: phrase?.id ?? null, wordId: phrase?.words.find(word => !word.excluded)?.id ?? null, syllableId: null };
         }
         notify();
       }
@@ -300,7 +300,7 @@ export function createEditorController(options: EditorControllerOptions): Editor
     state.preview = { token: value.token, previewRevision: value.previewRevision as number, baseRevision: value.baseRevision as number, baseHash: value.baseHash as string, score: clone(score) };
     previewEpoch++;
     const current = state.selection.wordId && findWord(score, state.selection.wordId);
-    if (!current && !state.draft) { const phrase = score.phrases[0]; state.selection = { phraseId: phrase?.id ?? null, wordId: phrase?.words[0]?.id ?? null, syllableId: null }; }
+    if ((!current || current.word.excluded) && !state.draft) { const phrase = score.phrases.find(p=>p.id===(current?current.phraseId:null)&&p.words.some(w=>!w.excluded)) || score.phrases.find(p=>p.words.some(w=>!w.excluded)); state.selection = { phraseId: phrase?.id ?? null, wordId: phrase?.words.find(word => !word.excluded)?.id ?? null, syllableId: null }; }
     else if (current && !state.draft) state.selection = { phraseId: current.phraseId, wordId: current.word.id, syllableId: state.selection.syllableId && current.word.syllables?.some(item => item.id === state.selection.syllableId) ? state.selection.syllableId : null };
     if (state.draft) state.notice = { message: 'The source timing draft changed. Your unsent input is preserved; discard it before continuing.', kind: 'error' };
     notify();
@@ -841,7 +841,7 @@ export function createEditorController(options: EditorControllerOptions): Editor
     const phrase = currentScore.phrases.find(item => item.id === phraseId);
     if (!phrase) return false;
     const current = state.selection.wordId ? findWord(currentScore, state.selection.wordId) : null;
-    const word = current?.phraseId === phraseId ? current.word : phrase.words[0];
+    const word = current?.phraseId === phraseId && !current.word.excluded ? current.word : phrase.words.find(item => !item.excluded);
     state.selection = { phraseId, wordId: word?.id ?? null, syllableId: null };
     notify();
     return true;
@@ -856,7 +856,7 @@ export function createEditorController(options: EditorControllerOptions): Editor
       return false;
     }
     const located = findWord(currentScore, wordId);
-    if (!located) return false;
+    if (!located || located.word.excluded) return false;
     if (syllableId && !located.word.syllables?.some(item => item.id === syllableId)) return false;
     state.selection = { phraseId: located.phraseId, wordId, syllableId: nextSyllableId };
     notify();

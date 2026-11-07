@@ -30,7 +30,7 @@ function setup({ deferGuard = false } = {}) {
     connect() {}
     disconnect() { this.disconnected = true; }
   }
-  class Worker { constructor() { workerCreated = true; } }
+  class Worker { constructor() { workerCreated = true; } postMessage(message){if(message.type==='format')setImmediate(()=>this.onmessage?.({data:{type:'format-result',id:message.id,result:message.words.map(word=>({word,entity:'0|lower'}))}}));} terminate(){} }
   const sandbox = {
     LvScore: scoreCore, LvAnchors: anchors, LvNativeLive: native, LvSongPass: songPass, AudioContext, AudioWorkletNode, Worker, Float32Array, Int16Array, Date, crypto, btoa,
     performance: { now: () => 0 }, navigator: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop: () => stopped++, addEventListener() {} }] }) } },
@@ -262,6 +262,67 @@ test('whole-song capture runs the selected phrase windows and saves review-only 
   assert.equal(result.songPass.skipped, 2);
 });
 
+test('word timing corrected during song capture keeps audio and uses the new score revision', async () => {
+  const h=setup();h.clock.paused=true;
+  await h.request({type:'LV_ANALYSIS_OFFSCREEN_START',config:{engine:'native',wholeSong:true,tabId:7,mediaKey:h.clock.mediaKey,sessionId:'song-session',score:h.score,streamId:'synthetic'}});
+  try{
+    await [...h.intervals][0]();h.emitPcm(new Float32Array(16000).fill(.2),0);
+    const corrected=structuredClone(h.score);corrected.revision=5;corrected.phrases[0].words[0].endMs-=20;corrected.phrases[0].words[0].locked=true;corrected.phrases[0].words[0].provenance='manual';
+    h.request({type:'LV_SCORE_UPDATED',tabId:7,mediaKey:h.clock.mediaKey,score:corrected});
+    const state=(await h.request({type:'LV_ANALYSIS_OFFSCREEN_STATUS'})).analysis;
+    assert.equal(state.songPass.capturedMs,1000);assert.equal(state.expectedRevision,5);assert.notEqual(state.state,'error');
+    h.emitPcm(new Float32Array(464000).fill(.2),16000);h.context.currentTime=30;h.clock.currentTimeMs=30000;h.clock.paused=true;h.clock.ended=true;
+    await [...h.intervals][0]();await new Promise(resolve=>setTimeout(resolve,100));
+    const request=h.port.posts.find(message=>message.type==='analyze');assert.ok(request);assert.equal(request.source.expectedRevision,5);
+    assert.equal(h.outgoing.filter(m=>m.type==='LV_ALIGNMENT_PROPOSALS').length,0);
+  }finally{await h.request({type:'LV_ANALYSIS_OFFSCREEN_STOP'});}
+});
+
+test('word correction during song alignment cancels stale inference and reuses captured audio', async () => {
+  const h=setup();h.clock.paused=true;
+  await h.request({type:'LV_ANALYSIS_OFFSCREEN_START',config:{engine:'native',wholeSong:true,tabId:7,mediaKey:h.clock.mediaKey,sessionId:'song-session',score:h.score,streamId:'synthetic'}});
+  try{
+    await [...h.intervals][0]();h.emitPcm(new Float32Array(480000).fill(.2),0);h.context.currentTime=30;h.clock.currentTimeMs=30000;h.clock.paused=true;h.clock.ended=true;
+    await [...h.intervals][0]();await new Promise(resolve=>setTimeout(resolve,100));
+    const first=h.port.posts.find(m=>m.type==='analyze');assert.ok(first);
+    const corrected=structuredClone(h.score);corrected.revision=5;corrected.phrases[0].words[0].endMs-=20;corrected.phrases[0].words[0].locked=true;corrected.phrases[0].words[0].provenance='manual';
+    h.request({type:'LV_SCORE_UPDATED',tabId:7,mediaKey:h.clock.mediaKey,score:corrected});
+    assert.ok(h.port.posts.some(m=>m.type==='cancel'&&m.requestId===first.requestId));
+    h.port.onMessage.emit({version:native.VERSION,type:'status',state:'cancelled',requestId:first.requestId,sessionId:first.sessionId,source:{...first.source}});
+    await new Promise(resolve=>setTimeout(resolve,100));
+    const requests=h.port.posts.filter(m=>m.type==='analyze');assert.equal(requests.length,2);assert.equal(requests[1].source.expectedRevision,5);
+    assert.equal(h.outgoing.filter(m=>m.type==='LV_ALIGNMENT_PROPOSALS').length,0,'stale model result is never published');
+    assert.equal((await h.request({type:'LV_ANALYSIS_OFFSCREEN_STATUS'})).analysis.songPass.capturedMs,30000);
+  }finally{await h.request({type:'LV_ANALYSIS_OFFSCREEN_STOP'});}
+});
+
+test('a correction after completion re-aligns affected audio without recapturing the song', async()=>{
+  const h=setup();h.clock.paused=true;
+  await h.request({type:'LV_ANALYSIS_OFFSCREEN_START',config:{engine:'native',wholeSong:true,tabId:7,mediaKey:h.clock.mediaKey,sessionId:'song-session',score:h.score,streamId:'synthetic'}});
+  try{
+    await [...h.intervals][0]();h.emitPcm(new Float32Array(480000).fill(.2),0);h.context.currentTime=30;h.clock.currentTimeMs=30000;h.clock.paused=true;h.clock.ended=true;
+    await [...h.intervals][0]();await new Promise(resolve=>setTimeout(resolve,100));
+    const first=h.port.posts.find(m=>m.type==='analyze');assert.ok(first);
+    h.port.onMessage.emit({version:native.VERSION,type:'result',requestId:first.requestId,sessionId:first.sessionId,source:{...first.source},audio:{audioStartMs:first.audio.audioStartMs,sha256:first.audio.sha256},accepted:false,alignmentKind:'supplied-text-ctc',automaticAdmissionEnabled:false,adapter:'fixture',model:'fixture',modelRevision:'r1',words:[],warnings:[]});
+    await new Promise(resolve=>setTimeout(resolve,50));assert.equal((await h.request({type:'LV_ANALYSIS_OFFSCREEN_STATUS'})).analysis.state,'completed');
+    const corrected=structuredClone(h.score);corrected.revision=5;corrected.phrases[0].words[0].endMs-=20;corrected.phrases[0].words[0].locked=true;corrected.phrases[0].words[0].provenance='manual';
+    h.request({type:'LV_SCORE_UPDATED',tabId:7,mediaKey:h.clock.mediaKey,score:corrected});await new Promise(resolve=>setTimeout(resolve,100));
+    const requests=h.port.posts.filter(m=>m.type==='analyze');assert.equal(requests.length,2);assert.equal(requests[1].source.expectedRevision,5);assert.equal((await h.request({type:'LV_ANALYSIS_OFFSCREEN_STATUS'})).analysis.songPass.capturedMs,30000);
+  }finally{await h.request({type:'LV_ANALYSIS_OFFSCREEN_STOP'});}
+});
+
+test('format preview uses a separate worker and does not change an active song capture', async()=>{
+  const h=setup();h.clock.paused=true;
+  await h.request({type:'LV_ANALYSIS_OFFSCREEN_START',config:{engine:'native',wholeSong:true,tabId:7,mediaKey:h.clock.mediaKey,sessionId:'song-session',score:h.score,streamId:'synthetic'}});
+  try{
+    await [...h.intervals][0]();h.emitPcm(new Float32Array(16000).fill(.2),0);
+    const result=await h.request({type:'LV_FORMAT_PREVIEW',words:['i','love','you']});
+    assert.equal(result.ok,true);assert.equal(result.result.length,3);
+    const state=(await h.request({type:'LV_ANALYSIS_OFFSCREEN_STATUS'})).analysis;
+    assert.notEqual(state.state,'error');assert.equal(state.songPass.capturedMs,1000);assert.equal(state.expectedRevision,4);
+  }finally{await h.request({type:'LV_ANALYSIS_OFFSCREEN_STOP'});}
+});
+
 test('whole-song capture stops on a source clock jump without publishing partial alignment', async () => {
   const h=setup(); h.clock.paused=true;
   await h.request({type:'LV_ANALYSIS_OFFSCREEN_START',config:{engine:'native',wholeSong:true,tabId:7,mediaKey:h.clock.mediaKey,sessionId:'song-session',score:h.score,streamId:'synthetic'}});
@@ -297,13 +358,25 @@ test('a real clock jump after a delayed reply still stops capture without propos
   assert.equal(status.state,'error');assert.equal(status.error.code,'SONG_CLOCK_DISCONTINUITY');assert.equal(h.outgoing.some(m=>m.type==='LV_ALIGNMENT_PROPOSALS'),false);
 });
 
-test('a delayed clock reply does not permit missing audio to become a continuous capture', async () => {
+test('a missing audio span is retained as a gap and never sent as model audio', async () => {
   const h=setup();h.clock.paused=true;
   await h.request({type:'LV_ANALYSIS_OFFSCREEN_START',config:{engine:'native',wholeSong:true,tabId:7,mediaKey:h.clock.mediaKey,sessionId:'song-session',score:h.score,streamId:'synthetic'}});
   h.emitPcm(new Float32Array(16000).fill(.25),0);h.context.currentTime=.9;h.clock.currentTimeMs=1200;h.delayNextClock(.3);
   await [...h.intervals][0]();h.emitPcm(new Float32Array(16000).fill(.25),32000);await new Promise(resolve=>setImmediate(resolve));
   const status=(await h.request({type:'LV_ANALYSIS_OFFSCREEN_STATUS'})).analysis;
-  assert.equal(status.state,'error');assert.equal(status.error.code,'SONG_CAPTURE_GAP');assert.equal(h.outgoing.some(m=>m.type==='LV_ALIGNMENT_PROPOSALS'),false);
+  assert.notEqual(status.state,'error');assert.equal(status.songPass.capturedMs,3000);assert.equal(h.outgoing.some(m=>m.type==='LV_ALIGNMENT_PROPOSALS'),false);
+  h.emitPcm(new Float32Array(432000).fill(.25),48000);h.context.currentTime=30;h.clock.currentTimeMs=30000;h.clock.paused=true;h.clock.ended=true;
+  await [...h.intervals][0]();await new Promise(resolve=>setTimeout(resolve,100));const request=h.port.posts.find(m=>m.type==='analyze');assert.ok(request);assert.ok(request.audio.audioStartMs>=2000,'model window does not include the 1–2s gap');await h.request({type:'LV_ANALYSIS_OFFSCREEN_STOP'});
+});
+
+test('phrases intersecting a missing audio span are skipped rather than aligned against silence',async()=>{
+  const h=setup();h.clock.paused=true;
+  await h.request({type:'LV_ANALYSIS_OFFSCREEN_START',config:{engine:'native',wholeSong:true,tabId:7,mediaKey:h.clock.mediaKey,sessionId:'song-session',score:h.score,streamId:'synthetic'}});
+  try{
+    await [...h.intervals][0]();h.emitPcm(new Float32Array(328000).fill(.2),0);h.emitPcm(new Float32Array(136000).fill(.2),344000);
+    h.context.currentTime=30;h.clock.currentTimeMs=30000;h.clock.paused=true;h.clock.ended=true;await [...h.intervals][0]();await new Promise(resolve=>setTimeout(resolve,100));
+    const status=(await h.request({type:'LV_ANALYSIS_OFFSCREEN_STATUS'})).analysis;assert.equal(status.state,'completed');assert.equal(status.songPass.skipped,3);assert.equal(h.port.posts.filter(m=>m.type==='analyze').length,0);
+  }finally{await h.request({type:'LV_ANALYSIS_OFFSCREEN_STOP'});}
 });
 
 

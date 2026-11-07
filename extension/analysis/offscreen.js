@@ -5,8 +5,9 @@
   let session = null;
   let generation = 0;
   let lastErrorStatus = null;
+  let formatting = false;
   const send = message => chrome.runtime.sendMessage(message).catch(() => undefined);
-  const publicStatus = () => session ? { state: session.state, tabId: session.tabId, mediaKey: session.mediaKey, sessionId: session.sessionId, engine: session.engine || 'browser', wholeSong: Boolean(session.wholeSong), ...(session.wholeSong ? { songPass: { phase: session.songPhase || 'starting', completed: session.songCompleted || 0, total: session.songPlans?.length || 0, proposals: session.songProposals || 0, skipped: session.songSkipped || 0, capturedMs: session.songUsed ? Math.round(session.songUsed / 16) : 0, durationMs: session.score?.source?.durationMs || 0 } } : {}), lyricsHash: session.score?.lyrics?.contentHash || null, expectedRevision: session.score?.revision ?? null, provider: session.provider || null, model: session.model || null, modelRevision: session.modelRevision || null, language: session.language || 'en', method: session.engine === 'native' ? 'native-live-supplied-text-ctc' : 'top-one-transcription-anchors', confidenceValidated: false, automaticAdmissionEnabled: false, bufferedSeconds: session.used / (session.context?.sampleRate || 16000), droppedSeconds: session.droppedSeconds, windows: session.windows, ...(session.engine === 'native' && session.lastWindow ? { lastWindow: { ...session.lastWindow } } : {}), progress: session.progress || session.unsupportedReason || null, error: session.error || null } : lastErrorStatus || { state: 'stopped', bufferedSeconds: 0, automaticAdmissionEnabled: false };
+  const publicStatus = () => session ? { state: session.state, tabId: session.tabId, mediaKey: session.mediaKey, sessionId: session.sessionId, engine: session.engine || 'browser', wholeSong: Boolean(session.wholeSong), ...(session.wholeSong ? { songPass: { phase: session.songPhase || 'starting', completed: session.songCompleted || 0, total: session.songPlans?.length || 0, proposals: session.songProposals || 0, skipped: session.songSkipped || 0, gaps: session.songGaps?.length || 0, capturedMs: session.songUsed ? Math.round(session.songUsed / 16) : 0, durationMs: session.score?.source?.durationMs || 0 } } : {}), lyricsHash: session.score?.lyrics?.contentHash || null, expectedRevision: session.score?.revision ?? null, provider: session.provider || null, model: session.model || null, modelRevision: session.modelRevision || null, language: session.language || 'en', method: session.engine === 'native' ? 'native-live-supplied-text-ctc' : 'top-one-transcription-anchors', confidenceValidated: false, automaticAdmissionEnabled: false, bufferedSeconds: session.used / (session.context?.sampleRate || 16000), droppedSeconds: session.droppedSeconds, windows: session.windows, ...(session.engine === 'native' && session.lastWindow ? { lastWindow: { ...session.lastWindow } } : {}), progress: session.progress || session.unsupportedReason || null, error: session.error || null } : lastErrorStatus || { state: 'stopped', bufferedSeconds: 0, automaticAdmissionEnabled: false };
   function publish() { send({ type: 'LV_ANALYSIS_OFFSCREEN_STATE', analysis: publicStatus() }); }
   function scoreMatchesMedia(score, mediaKey) {
     try {
@@ -31,6 +32,7 @@
     clearInterval(s.clockTimer);
     clearTimeout(s.modelTimeout);
     clearTimeout(s.cancelTimeout);
+    clearTimeout(s.retentionTimer);
     s.worker?.terminate();
     if (s.nativePort) {
       if (s.inflight) {
@@ -79,6 +81,16 @@
   }
 
   async function nativeReply(s, message) {
+    if(s.wholeSong&&s.songPhase==='aligning'&&s.cancelPending&&message?.requestId===s.cancelPending.requestId&&message?.sessionId===s.sessionId){
+      if(message.type==='status'&&message.state==='accepted')return;
+      if(['status','result','error'].includes(message.type)){
+        try{LvNativeLive.validateEnvelope(message,s.cancelPending.expected);}catch(error){fail(s,error.code||'NATIVE_CANCEL_MISMATCH','The native host cancellation response was invalid.');return;}
+        clearTimeout(s.cancelTimeout);s.cancelTimeout=null;s.cancelPending=null;s.busy=false;
+        await send({type:'LV_ANALYSIS_OFFSCREEN_STATE',analysis:publicStatus()});
+        try{await songNext(s);}catch(error){fail(s,error.code||'NATIVE_REQUEST_FAILED','Could not prepare a corrected alignment window.');}
+      }
+      return;
+    }
     if (s.wholeSong && s.songPhase === 'aligning') { await songReply(s, message); return; }
     const pending = s.inflight;
     if (s.cancelPending && message?.requestId === s.cancelPending.requestId && message?.sessionId === s.sessionId) {
@@ -151,19 +163,27 @@
 
   async function songNext(s) {
     if (session !== s || s.songPhase !== 'aligning') return;
+    const planGeneration=s.songPlanGeneration||0;
     let plan, clip;
     while (s.songCompleted < s.songPlans.length) {
       plan = s.songPlans[s.songCompleted];
       clip = LvSongPass.extract(s.songPcm, s.songUsed, s.songOriginMs, plan);
-      if (clip && !clip.clipped) break;
+      const gap=clip&&(s.songGaps||[]).some(g=>plan.startMs<s.songOriginMs+g.end/16&&plan.endMs>s.songOriginMs+g.start/16);
+      if (clip && !clip.clipped && !gap) break;
       clip?.samples.fill(0); s.songSkipped += plan.expectedWords.length; s.songCompleted++;
     }
     if (s.songCompleted >= s.songPlans.length) {
       s.state = 'completed'; s.songPhase = 'complete';
-      lastErrorStatus = { ...publicStatus(), bufferedSeconds: 0 };
-      const status = lastErrorStatus;
-      await stop(true);
-      await send({ type: 'LV_ANALYSIS_OFFSCREEN_STATE', analysis: status });
+      if(s.songGuardActive){s.songGuardActive=false;await send({type:'LV_ANALYSIS_CONTROL_REQUEST',tabId:s.tabId,sessionId:s.sessionId,action:'guard-release',completed:true});}
+      if(session!==s)return;
+      s.progress={message:'Recent audio is available for quick timing corrections for five minutes.'};
+      await send({type:'LV_ANALYSIS_OFFSCREEN_STATE',analysis:publicStatus()});
+      clearTimeout(s.retentionTimer);s.retentionTimer=setTimeout(async()=>{
+        if(session!==s||s.songPhase!=='complete')return;
+        lastErrorStatus={...publicStatus(),bufferedSeconds:0,progress:{message:'Recent audio expired; run alignment again for new corrections.'}};
+        const status=lastErrorStatus;await stop(true);await send({type:'LV_ANALYSIS_OFFSCREEN_STATE',analysis:status});
+      },300000);
+      s.retentionTimer?.unref?.();
       return;
     }
     // A clipped phrase is never submitted as if the complete audio had been heard.
@@ -171,7 +191,7 @@
     const requestId = crypto.randomUUID();
     const request = await LvNativeLive.createRequest({ requestId, sessionId: s.sessionId, source, audioStartMs: clip.audioStartMs, playbackRate: 1, floatPcm: clip.samples, expectedWords: plan.expectedWords });
     clip.samples.fill(0);
-    if (session !== s || s.songPhase !== 'aligning') { request.audio.pcmBase64 = ''; return; }
+    if (session !== s || s.songPhase !== 'aligning' || planGeneration!==(s.songPlanGeneration||0)) { request.audio.pcmBase64 = ''; return; }
     const expected = { ...request, expectedWords: plan.expectedWords, audio: { ...request.audio, pcmBase64: undefined } };
     s.inflight = { requestId, source, expected, plan, accepted: false };
     try { s.nativePort.postMessage(request); }
@@ -196,11 +216,11 @@
         const expected = pending.expected.expectedWords.find(word => word.wordId === p.wordId);
         const phrase = s.score.phrases.find(item => item.id === expected?.phraseId);
         return phrase && p.startMs >= phrase.startMs && p.endMs <= phrase.endMs;
-      }).map(p => ({ ...p, preservePhraseBounds: true, evidenceId: `${pending.requestId}:${pending.plan.overlap ? 'mixed-vocals:' : ''}${pending.plan.segmented ? 'segmented:' : ''}${p.wordId}` }));
+      }).map(p => ({ ...p, preservePhraseBounds: true, ...(pending.plan.anchored?{reviewReason:pending.plan.prior==='repeat'?'Model estimate constrained by a timing pattern from another occurrence; listen and review.':'Model estimate constrained by manually timed words; listen and review.'}:{}), evidenceId: `${pending.requestId}:${pending.plan.overlap ? 'mixed-vocals:' : ''}${pending.plan.segmented ? 'segmented:' : ''}${pending.plan.anchored ? (pending.plan.prior==='repeat'?'repeat-prior:':'manual-bound:') : ''}${p.wordId}` }));
       result.diagnostics.sampleWindow.requestId = pending.requestId;
       if (result.proposals.length) {
         const response = await chrome.runtime.sendMessage({ type: 'LV_ALIGNMENT_PROPOSALS', engine: 'native', tabId: s.tabId, sessionId: s.sessionId, mediaKey: s.mediaKey, expectedRevision: s.score.revision, proposals: result.proposals, diagnostics: result.diagnostics });
-        if (session !== s) return;
+        if (session !== s || s.inflight !== pending) return;
         if (!response?.ok || response.score?.revision !== s.score.revision) throw Object.assign(new Error('The source or score changed.'), { code: response?.error?.code || 'REVISION_CONFLICT' });
         s.songProposals += result.proposals.length;
       }
@@ -227,7 +247,7 @@
     s.stream?.getTracks().forEach(track => track.stop()); s.stream = null;
     await s.context?.close().catch(() => undefined); s.context = null;
     if (session !== s) return;
-    publish();
+    await send({ type: 'LV_ANALYSIS_OFFSCREEN_STATE', analysis: publicStatus() });
     try { await songNext(s); } catch (error) { fail(s, error.code || 'NATIVE_REQUEST_FAILED', 'Could not prepare a whole-song alignment window.'); }
   }
 
@@ -359,10 +379,12 @@
     if (session !== s || !s.ready || !s.clock.anchor || performance.now() - s.lastClockAt > 750) { input.fill(0); return; }
     if (s.wholeSong) {
       if (s.songPhase !== 'capturing') { input.fill(0); return; }
-      if (data.droppedFrames || s.songUsed && data.startFrame !== s.songStartFrame + s.songUsed || s.songUsed + input.length > s.songPcm.length) {
+      const gap=s.songUsed?data.startFrame-(s.songStartFrame+s.songUsed):0;
+      if (gap<0 || s.songUsed&&data.droppedFrames>gap || s.songUsed + gap + input.length > s.songPcm.length) {
         input.fill(0); fail(s, 'SONG_CAPTURE_GAP', 'Audio capture was interrupted or exceeded its memory limit. Start the song pass again.'); return;
       }
       if (!s.songUsed) { s.songStartFrame = data.startFrame; s.songOriginMs = Math.max(0, s.clock.mediaAt(data.startFrame / data.sampleRate)); }
+      if(gap){s.songGaps.push({start:s.songUsed,end:s.songUsed+gap});s.songPcm.fill(0,s.songUsed,s.songUsed+gap);s.songUsed+=gap;}
       for (let i = 0; i < input.length; i++) { const v = Math.max(-1, Math.min(1, Number.isFinite(input[i]) ? input[i] : 0)); s.songPcm[s.songUsed + i] = v < 0 ? Math.round(v * 32768) : Math.round(v * 32767); }
       s.songUsed += input.length; input.fill(0); return;
     }
@@ -401,7 +423,7 @@
       if (s.wholeSong) {
         const planned = LvSongPass.plan(s.score);
         if (!planned.windows.length) throw Object.assign(new Error('No supported lyric phrases are available.'), { code: 'NO_ALIGNABLE_PHRASES' });
-        s.songPlans = planned.windows; s.songSkipped = planned.skipped.length; s.songCompleted = 0; s.songProposals = 0; s.songUsed = 0;
+        s.songPlans = planned.windows; s.songSkipped = planned.skipped.length; s.songCompleted = 0; s.songProposals = 0; s.songUsed = 0;s.songGaps=[];
         s.songPcm = new Int16Array(Math.ceil(s.score.source.durationMs * 16) + 32000);
         s.songPhase = 'starting';
       }
@@ -477,6 +499,31 @@
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('service-worker.js')) return;
     if (message.type === 'LV_SCORE_UPDATED' && session && message.mediaKey === session.mediaKey && message.tabId === session.tabId && message.score?.revision > session.score.revision && scoreMatchesMedia(message.score, session.mediaKey)) {
+      if(session.engine==='native'&&session.wholeSong&&!session.songFinishing&&['starting','waiting-start','capturing'].includes(session.songPhase)&&LvSongPass.canRebaseCapture(session.score,message.score)){
+        const planned=LvSongPass.plan(message.score);
+        if(planned.windows.length){session.score=message.score;session.songPlans=planned.windows;session.songSkipped=planned.skipped.length;session.progress={status:'Timing correction included in the upcoming alignment.'};publish();return;}
+      }
+      if(session.engine==='native'&&session.wholeSong&&session.songPhase==='complete'&&session.songPcm&&LvSongPass.canRebaseCapture(session.score,message.score)){
+        const s=session,changed=LvSongPass.changedTimingPhrases(s.score,message.score),planned=LvSongPass.plan(message.score);
+        const windows=planned.windows.filter(window=>window.expectedWords.some(word=>changed.has(word.phraseId))||window.prior==='repeat'&&changed.has(window.priorSourcePhraseId));
+        s.score=message.score;
+        if(!changed.size){publish();return;}
+        if(!windows.length){s.progress={message:'No compatible audio window for that correction; the saved timing remains unchanged.'};publish();return;}
+        clearTimeout(s.retentionTimer);s.retentionTimer=null;s.songPlans=windows;s.songSkipped=0;s.songCompleted=0;s.songProposals=0;s.songPlanGeneration=(s.songPlanGeneration||0)+1;s.songPhase='aligning';s.state='aligning';
+        s.progress={message:'Re-aligning corrected and matching repeated phrases from recent audio.'};
+        void send({type:'LV_ANALYSIS_OFFSCREEN_STATE',analysis:publicStatus()}).then(()=>songNext(s)).catch(error=>fail(s,error.code||'NATIVE_REQUEST_FAILED','Could not prepare a corrected alignment window.'));return;
+      }
+      if(session.engine==='native'&&session.wholeSong&&session.songPhase==='aligning'&&LvSongPass.canRebaseCapture(session.score,message.score)){
+        const s=session,planned=LvSongPass.plan(message.score);
+        if(planned.windows.length){
+          if(s.inflight&&!s.cancelPending)cancelInflight(s);
+          s.score=message.score;s.songPlans=planned.windows;s.songSkipped=planned.skipped.length;s.songCompleted=0;s.songProposals=0;s.songPlanGeneration=(s.songPlanGeneration||0)+1;
+          s.progress={status:'Timing correction received; re-aligning from the captured audio.'};
+          if(s.cancelPending)publish();
+          else void send({type:'LV_ANALYSIS_OFFSCREEN_STATE',analysis:publicStatus()}).then(()=>songNext(s)).catch(error=>fail(s,error.code||'NATIVE_REQUEST_FAILED','Could not prepare a corrected alignment window.'));
+          return;
+        }
+      }
       if (session.engine === 'native') { cancelInflight(session); fail(session, 'SCORE_REVISION_CHANGED', 'The score changed during native analysis; stop and start again.'); return; }
       session.score = message.score;
       clearWindow(session);
@@ -484,6 +531,16 @@
       return;
     }
     if (message.target !== 'lv-offscreen') return;
+    if(message.type==='LV_FORMAT_PREVIEW'){
+      if(formatting){respond({ok:false,error:{code:'FORMAT_BUSY',message:'A formatting suggestion is already running.'}});return;}
+      if(!Array.isArray(message.words)||!message.words.length||message.words.length>5000||message.words.some(w=>typeof w!=='string'||!w.trim()||w.length>256||/\s/u.test(w))||message.words.join(' ').length>30000){respond({ok:false,error:{code:'INVALID_TEXT',message:'Choose up to 30,000 characters of lyrics.'}});return;}
+      formatting=true;let worker;try{worker=new Worker(chrome.runtime.getURL('analysis/model-worker.bundle.js'),{type:'module'});}catch(_){formatting=false;respond({ok:false,error:{code:'FORMAT_FAILED',message:'The local formatting model could not start.'}});return;}const id=crypto.randomUUID();let done=false;
+      const finish=value=>{if(done)return;done=true;clearTimeout(timer);worker.terminate();formatting=false;respond(value);};
+      const timer=setTimeout(()=>finish({ok:false,error:{code:'FORMAT_TIMEOUT',message:'Formatting timed out. Your lyrics are unchanged.'}}),180000);
+      worker.onerror=()=>finish({ok:false,error:{code:'FORMAT_FAILED',message:'The local formatting model could not start.'}});
+      worker.onmessage=({data})=>{if(data?.id!==id)return;if(data.type==='format-result')finish({ok:true,result:data.result});else if(data.type==='format-error')finish({ok:false,error:{code:'FORMAT_FAILED',message:data.message}});};
+      worker.postMessage({type:'format',id,words:message.words});return true;
+    }
     if (message.type === 'LV_ANALYSIS_OFFSCREEN_START') {
       if (!message.config || !scoreMatchesMedia(message.config.score, message.config.mediaKey)) {
         respond({ ok: false, error: { code: 'INVALID_ANALYSIS_SCORE', message: 'Analysis requires a validated score bound to its media identity.' } }); return;

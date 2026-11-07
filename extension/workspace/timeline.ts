@@ -33,7 +33,7 @@ export function intersectingLanes(score: Immutable<LyricVibeScore>, range: ViewR
   return laneDefs.map(lane => {
     const words = score.phrases.filter(p => p.laneId === lane.id)
       .flatMap(phrase => phrase.words.map(word => ({ phrase, word })))
-      .filter(({ word }) => word.endMs + score.offsetMs >= range.startMs && word.startMs + score.offsetMs <= range.endMs)
+      .filter(({ word }) => !word.excluded && word.endMs + score.offsetMs >= range.startMs && word.startMs + score.offsetMs <= range.endMs)
       .sort((a, b) => a.word.startMs - b.word.startMs || a.word.id.localeCompare(b.word.id));
     const occupied: number[] = [];
     const items: TimelineItem[] = [];

@@ -378,6 +378,7 @@
     else if(a?.phase==='aligning')alignmentStatus.textContent=`Aligning ${a.completed||0}/${a.total||0} · ${a.proposals||0} new suggestions saved`;
     else if(stored||candidates){const label=stored?`${stored} suggestions`:`${candidates} automatic timings`;alignmentStatus.textContent=auto?`${label} · auto selected`:`${label} saved · choose Prefer auto`;}
     else alignmentStatus.textContent=a?.state==='completed'?'Alignment complete · no suggestions produced':'No auto timings yet';
+    if(a?.state==='completed'&&a.gaps)alignmentStatus.textContent+=` · ${a.gaps} audio gaps; review skipped words`;
     alignmentStatus.dataset.state=a?.state==='error'?'error':stored?'available':'idle';
   }
   playbackTiming.onchange=async()=>{if(!state.score)return;const score=state.score;playbackTiming.disabled=true;try{const result=await chrome.runtime.sendMessage({type:'LV_ALIGNMENT_PREFERENCE_SET',mediaKey:LvScore.mediaKey(score.source),expectedRevision:score.revision,lyricsHash:score.lyrics.contentHash,preference:{mode:playbackTiming.value,includeProposals:true}});if(!result?.ok)throw Error(result?.error?.message||'Timing preference could not be saved.');setHud('Playback timing preference saved. Automatic timings remain unverified.',false,true);}catch(error){playbackTiming.value=score.alignmentTiming?.mode||'manual';setHud(error.message,true,true);}finally{playbackTiming.disabled=!alignmentReviewCount&&!state.score?.alignmentTiming?.candidates?.length;}};
@@ -985,6 +986,26 @@
   }
   const panelPager=makePager(syncPanel,syncPanel.querySelector('header'),'Timing',125);
   const transcriptPager=makePager(syncButton('transcript-text'),transcriptDialog.querySelector('.lvx-transcript-pager'),'Lyrics',24);
+  const formatPanel=document.createElement('section');formatPanel.className='lvx-format-preview';
+  formatPanel.innerHTML='<button type="button" data-format="suggest">Suggest case &amp; punctuation</button><small data-format="status" role="status">Local preview · first use downloads about 300 MB. Original lyrics and timings stay unchanged.</small><textarea data-format="result" aria-label="Suggested lyric formatting" rows="5" readonly hidden></textarea><button type="button" data-format="copy" hidden>Copy suggestion</button>';
+  transcriptDialog.querySelector('.lvx-transcript-pager').after(formatPanel);
+  const formatButton=formatPanel.querySelector('[data-format=suggest]'),formatStatus=formatPanel.querySelector('[data-format=status]'),formatResult=formatPanel.querySelector('[data-format=result]'),formatCopy=formatPanel.querySelector('[data-format=copy]');
+  formatCopy.onclick=async()=>{try{await navigator.clipboard.writeText(formatResult.value);formatStatus.textContent='Suggestion copied. Original lyrics and timings are unchanged.';}catch(_){formatResult.focus();formatResult.select();formatStatus.textContent='Select and copy the suggestion. Original lyrics and timings are unchanged.';}};
+  let formatBusy=false;
+  formatButton.onclick=async()=>{
+    if(formatBusy||!timing.draft||transcript.dirty){formatStatus.textContent='Apply or undo lyric text edits before generating a separate suggestion.';return;}
+    const draft=timing.draft,score=draft.score,revision=draft.previewRevision,source=LvScore.mediaKey(score.source),items=LvTranscriptText.formatWords(score),area=syncButton('transcript-text'),original=area.value;
+    if(!items.length){formatStatus.textContent='No words are available to format.';return;}
+    formatBusy=true;formatButton.disabled=true;formatResult.hidden=true;formatCopy.hidden=true;formatStatus.textContent='Preparing a local suggestion; the first use downloads the model…';
+    try{
+      const response=await chrome.runtime.sendMessage({type:'LV_FORMAT_PREVIEW',mediaKey:source,words:items.map(item=>item.core)});
+      if(!response?.ok)throw Error(response?.error?.message||'Formatting did not complete.');
+      if(!transcriptDialog.open||timing.draft?.token!==draft.token||timing.draft?.previewRevision!==revision||transcript.dirty||area.value!==original||LvScore.mediaKey({url:location.href})!==source)throw Error('The lyrics changed while formatting. Generate a fresh suggestion.');
+      const result=LvTranscriptText.formatPreview(score,items,response.result);formatResult.value=result.text;formatResult.hidden=false;formatCopy.hidden=false;
+      formatStatus.textContent=`Suggested formatting · ${result.matched} of ${result.total} words matched. Review it below; the original lyrics and timings have not changed.`;
+    }catch(error){formatStatus.textContent=error.message||'Formatting failed. Original lyrics and timings are unchanged.';}
+    finally{formatBusy=false;formatButton.disabled=false;}
+  };
   const transcriptMove=transcriptDialog.querySelector('.lvx-transcript-move'),transcriptPlay=transcriptDialog.querySelector('[data-transcript-play]');
   function refreshTranscriptTransport(){const media=getMedia();transcriptPlay.disabled=!media||isAdvertisement();transcriptPlay.textContent=media&&!media.paused?'Ⅱ Pause':'▶ Play';transcriptPlay.setAttribute('aria-label',media&&!media.paused?'Pause video':'Play video');}
   transcriptPlay.onclick=()=>{const media=getMedia();if(!media||isAdvertisement())return;if(media.paused)media.play().catch(error=>setHud(error.message,true,true));else media.pause();refreshTranscriptTransport();};

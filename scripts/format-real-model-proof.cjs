@@ -1,0 +1,21 @@
+// Actual extension worker and local English-capable model; synthetic lyrics and audio only.
+const fs=require('fs'),path=require('path'),os=require('os'),assert=require('assert/strict'),{chromium}=require('playwright'),esbuild=require('esbuild');
+const root=path.resolve(__dirname,'..'),stage=fs.mkdtempSync(path.join(os.tmpdir(),'lv-format-real-')),extension=path.join(stage,'extension');
+const ledger=process.env.LV_PROBE_LEDGER;const mark=state=>{if(ledger)fs.appendFileSync(ledger,`\n- ${new Date().toISOString()} ${state} LyricVibe real formatting model fixture Node PID${process.pid}; isolated Chromium profile, closes in finally.\n`);};let context;
+(async()=>{
+ mark('START');fs.cpSync(path.join(root,'extension'),extension,{recursive:true});
+ await esbuild.build({entryPoints:[path.join(root,'extension/analysis/model-worker.js')],bundle:true,format:'esm',platform:'browser',target:'es2022',outfile:path.join(extension,'analysis/model-worker.bundle.js')});
+ const vendor=path.join(extension,'analysis/vendor');fs.mkdirSync(vendor,{recursive:true});for(const name of ['ort-wasm-simd-threaded.asyncify.mjs','ort-wasm-simd-threaded.asyncify.wasm'])fs.copyFileSync(path.join(root,'node_modules/onnxruntime-web/dist',name),path.join(vendor,name));
+ context=await chromium.launchPersistentContext(path.join(stage,'profile'),{executablePath:process.env.CHROMIUM_EXECUTABLE||chromium.executablePath(),headless:true,args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`,'--enable-unsafe-extension-debugging']});
+ const sw=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker',{timeout:30000}),page=await context.newPage();
+ await context.route('https://www.youtube.com/**',r=>r.fulfill({contentType:'text/html',body:'<!doctype html><title>Synthetic lyrics</title><meta itemprop="duration" content="PT8S"><link rel="canonical" href="https://www.youtube.com/watch?v=DEMO_ONLY01"><div id="movie_player"><video></video><button class="ytp-autonav-toggle-button" aria-checked="true"></button></div>'}));
+ await page.goto('https://www.youtube.com/watch?v=DEMO_ONLY01');
+ await page.evaluate(async()=>{const n=64000,b=new Uint8Array(44+n),v=new DataView(b.buffer),w=(i,s)=>[...s].forEach((x,j)=>b[i+j]=x.charCodeAt(0));w(0,'RIFF');v.setUint32(4,36+n,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,8000,true);v.setUint32(28,8000,true);v.setUint16(32,1,true);v.setUint16(34,8,true);w(36,'data');v.setUint32(40,n,true);b.fill(128,44);const video=document.querySelector('video');video.src=URL.createObjectURL(new Blob([b],{type:'audio/wav'}));await new Promise(r=>video.onloadedmetadata=r)});
+ const tabId=await sw.evaluate(async()=>(await chrome.tabs.query({url:'https://www.youtube.com/*'}))[0].id);
+ await sw.evaluate(async id=>{await injectOverlay(id);await LvScoreHost.ensure(id,{track:{title:'Synthetic',artist:'Fixture'},lyrics:{provider:'fixture',synced:'[00:01]i love you\n[00:04]again\n[00:07]'},hints:{url:'https://www.youtube.com/watch?v=DEMO_ONLY01',duration:8}})},tabId);
+ const before=await sw.evaluate(async()=>JSON.stringify((await chrome.storage.local.get('lvScore:youtube:DEMO_ONLY01'))['lvScore:youtube:DEMO_ONLY01']));
+ const [execution]=await sw.evaluate(async id=>chrome.scripting.executeScript({target:{tabId:id},func:async()=>await chrome.runtime.sendMessage({type:'LV_FORMAT_PREVIEW',mediaKey:'youtube:DEMO_ONLY01',words:['i','love','you','again']})}),tabId);
+ assert.equal(execution.result?.ok,true,JSON.stringify(execution.result));const result=execution.result.result;assert.equal(result.length,4);assert.equal(result[0].word,'i');assert.match(result[0].entity,/\|Cap$/);
+ const after=await sw.evaluate(async()=>JSON.stringify((await chrome.storage.local.get('lvScore:youtube:DEMO_ONLY01'))['lvScore:youtube:DEMO_ONLY01']));assert.equal(after,before,'the actual model path never changes saved lyric or timing');
+ console.log(JSON.stringify({ok:true,model:'Horizon-Labs/multilingual-punctuation-truecase-small',source:'synthetic',actualModel:true,scoreUnchanged:true,wordCount:result.length}));
+})().catch(error=>{console.error(error.stack);process.exitCode=1}).finally(async()=>{await context?.close();await esbuild.stop();mark('END')});

@@ -8,14 +8,23 @@ function fixture() {
   return {
     lanes: [{ id: 'lead', label: 'Lead', role: 'lead' }, { id: 'backing', label: 'Backing', role: 'backing' }],
     phrases: [
-      { id: 'p1', laneId: 'lead', startMs: 0, endMs: 2000, words: [word('a', "It's", 0, 300), word('b', 'an', 300, 500), word('c', 'ice-', 500, 900), word('d', 'breaker', 900, 1500)] },
+      { id: 'p1', laneId: 'lead', startMs: 0, endMs: 2000, words: [word('a', "It's", 0, 300), word('b', 'an', 300, 500), word('c', 'all-', 500, 900), word('d', 'nighter', 900, 1500)] },
       { id: 'p2', laneId: 'backing', startMs: 2000, endMs: 3000, words: [word('e', 'out', 2000, 2500), word('f', 'hidden', 2500, 2600, { excluded: true })] },
     ],
   };
 }
 
+test('format suggestions preserve source score, timing, syllables, lane markers and existing punctuation',()=>{
+  const score=fixture();score.phrases[0].words[0].syllables=[{id:'s1',text:"It's",startMs:0,endMs:300,provenance:'manual',locked:true}];
+  const original=JSON.stringify(score),items=transcript.formatWords(score);
+  const predictions=items.map((item,i)=>({word:item.core.toLocaleLowerCase(),entity:i===0?'0|Cap':i===3?'.|lower':'0|lower'}));
+  const output=transcript.formatPreview(score,items,predictions);
+  assert.equal(output.text,"It's an all- nighter.\n[backing] out");assert.equal(output.matched,5);assert.equal(JSON.stringify(score),original);
+  predictions[1].word='different';assert.match(transcript.formatPreview(score,items,predictions).text,/ an /);assert.throws(()=>transcript.formatPreview(score,items,[]),/did not match/);
+});
+
 test('toText writes one line per phrase with lane markers for non-lead lanes and hides excluded words', () => {
-  assert.equal(transcript.toText(fixture()), "It's an ice- breaker\n[backing] out");
+  assert.equal(transcript.toText(fixture()), "It's an all- nighter\n[backing] out");
 });
 
 test('unchanged text produces no operations', () => {
@@ -25,24 +34,24 @@ test('unchanged text produces no operations', () => {
 
 test('one-for-one word edits respell in place; word-count changes replace; deletions hide', () => {
   const score = fixture();
-  const result = transcript.diff(score, "It is an ice-breaker\n[backing] out");
+  const result = transcript.diff(score, "It is an all-nighter\n[backing] out");
   assert.deepEqual(result.operations, [
     { type: 'replaceWords', phraseId: 'p1', wordIds: ['a'], text: 'It is' },
-    { type: 'replaceWords', phraseId: 'p1', wordIds: ['c', 'd'], text: 'ice-breaker' },
+    { type: 'replaceWords', phraseId: 'p1', wordIds: ['c', 'd'], text: 'all-nighter' },
   ]);
-  const respell = transcript.diff(score, "It's an ice- breakr\n[backing] out");
-  assert.deepEqual(respell.operations, [{ type: 'setWordText', wordId: 'd', text: 'breakr' }]);
+  const respell = transcript.diff(score, "It's an all- nightr\n[backing] out");
+  assert.deepEqual(respell.operations, [{ type: 'setWordText', wordId: 'd', text: 'nightr' }]);
   assert.equal(respell.changes[0].kind, 'respell');
-  const hide = transcript.diff(score, "It's ice- breaker\n[backing] out");
+  const hide = transcript.diff(score, "It's all- nighter\n[backing] out");
   assert.deepEqual(hide.operations, [{ type: 'setWordExcluded', wordId: 'b', excluded: true }]);
 });
 
 test('pure insertions merge into the previous unchanged word, or the next at line start', () => {
   const score = fixture();
-  const result = transcript.diff(score, "Oh It's an ice- breaker baby\n[backing] out");
+  const result = transcript.diff(score, "Oh It's an all- nighter baby\n[backing] out");
   assert.deepEqual(result.operations, [
     { type: 'replaceWords', phraseId: 'p1', wordIds: ['a'], text: "Oh It's" },
-    { type: 'replaceWords', phraseId: 'p1', wordIds: ['d'], text: 'breaker baby' },
+    { type: 'replaceWords', phraseId: 'p1', wordIds: ['d'], text: 'nighter baby' },
   ]);
   assert.deepEqual(result.changes.map(c => c.kind), ['insert', 'insert']);
 });
@@ -55,15 +64,15 @@ test('insertions on both sides of one word combine into a single replacement', (
 
 test('lane markers move phrases between lanes; unknown brackets stay lyric text', () => {
   const score = fixture();
-  const moved = transcript.diff(score, "It's an ice- breaker\nout");
+  const moved = transcript.diff(score, "It's an all- nighter\nout");
   assert.deepEqual(moved.operations, [{ type: 'setPhraseLane', phraseId: 'p2', laneId: 'lead' }]);
-  const bracket = transcript.diff(score, "[Chorus] It's an ice- breaker\n[backing] out");
+  const bracket = transcript.diff(score, "[Chorus] It's an all- nighter\n[backing] out");
   assert.deepEqual(bracket.operations, [{ type: 'replaceWords', phraseId: 'p1', wordIds: ['a'], text: "[Chorus] It's" }]);
 });
 
 test('added lines become estimated phrases in the gap; removed lines hide their words', () => {
   const score = fixture();
-  const added = transcript.diff(score, "It's an ice- breaker\nnew line here\n[backing] out");
+  const added = transcript.diff(score, "It's an all- nighter\nnew line here\n[backing] out");
   assert.deepEqual(added.operations, [{ type: 'insertPhrase', afterPhraseId: 'p1', laneId: 'lead', text: 'new line here', startMs: 2000, endMs: 3500 }]);
   const removed = transcript.diff(score, '[backing] out');
   assert.deepEqual(removed.operations.map(o => [o.type, o.wordId]), [['setWordExcluded', 'a'], ['setWordExcluded', 'b'], ['setWordExcluded', 'c'], ['setWordExcluded', 'd']]);
@@ -71,8 +80,8 @@ test('added lines become estimated phrases in the gap; removed lines hide their 
 });
 
 test('pasting a transcript with extra and missing lines applies through score-core and round-trips', () => {
-  let score = core.createScore({ platform: 'youtube', videoId: 'proof123456', title: 'T', artist: 'A', durationMs: 20000 }, '[00:01.00]tokens on the desk\n[00:05.00]we check each token\n[00:09.00]extra verse words\n[00:14.00]last line\n[00:18.00]', { provider: 'proof', entryId: 'p', contentHash: 'c'.repeat(64) });
-  const pasted = 'tokens on the desk\nwe check each token fast\nbrand new line\nlast line';
+  let score = core.createScore({ platform: 'youtube', videoId: 'proof123456', title: 'T', artist: 'A', durationMs: 20000 }, '[00:01.00]money on the dash\n[00:05.00]we keep it moving\n[00:09.00]extra verse words\n[00:14.00]last line\n[00:18.00]', { provider: 'proof', entryId: 'p', contentHash: 'c'.repeat(64) });
+  const pasted = 'money on the dash\nwe keep it moving fast\nbrand new line\nlast line';
   const { operations, changes } = transcript.diff(score, pasted);
   for (const op of operations) score = core.applyOperation(score, op, score.revision);
   assert.equal(transcript.toText(score), pasted);
@@ -90,11 +99,11 @@ test('diff operations apply cleanly through score-core in emitted order', () => 
 
 test('preview accepts a respell with carried-over syllable timings and a replacement in one batch', () => {
   const variant = require('../extension/timing-variant.js');
-  let score = core.createScore({ platform: 'youtube', videoId: 'proof123456', title: 'T', artist: 'A', durationMs: 10000 }, '[00:01.00]stayin awake today\n[00:05.00]', { provider: 'proof', entryId: 'p', contentHash: 'b'.repeat(64) });
+  let score = core.createScore({ platform: 'youtube', videoId: 'proof123456', title: 'T', artist: 'A', durationMs: 10000 }, '[00:01.00]stayin alive tonight\n[00:05.00]', { provider: 'proof', entryId: 'p', contentHash: 'b'.repeat(64) });
   const w = score.phrases[0].words[0];
   score = core.applyOperation(score, { type: 'setWordSyllables', wordId: w.id, syllables: [{ id: 's1', text: 'stay', startMs: w.startMs, endMs: w.startMs + 100 }, { id: 's2', text: 'in', startMs: w.startMs + 100, endMs: w.endMs }] }, score.revision);
   const draft = { score, protectedIds: [w.id] };
-  const { operations } = transcript.diff(score, "stayin' awake all night");
+  const { operations } = transcript.diff(score, "stayin' alive all night");
   assert.deepEqual(operations.map(o => o.type), ['setWordText', 'replaceWords']);
   const carried = { type: 'setWordSyllables', wordId: w.id, spokenText: 'staying', syllables: [{ id: 's1', text: 'stay', startMs: w.startMs, endMs: w.startMs + 100, provenance: 'manual', locked: true, effects: [] }, { id: 's2', text: 'ing', startMs: w.startMs + 100, endMs: w.endMs, provenance: 'manual', locked: true, effects: [] }] };
   assert.throws(() => variant.operate(draft, [...operations, carried]), /MANUAL_PROTECTED|Enable editing/);
@@ -102,7 +111,7 @@ test('preview accepts a respell with carried-over syllable timings and a replace
   const word = next.phrases[0].words[0];
   assert.equal(word.text, "stayin'"); assert.equal(word.spokenText, 'staying');
   assert.deepEqual(word.syllables.map(s => [s.id, s.text, s.startMs]), [['s1', 'stay', w.startMs], ['s2', 'ing', w.startMs + 100]]);
-  assert.equal(transcript.toText(next), "stayin' awake all night");
+  assert.equal(transcript.toText(next), "stayin' alive all night");
 });
 
 test('a pasted transcript that drops a line and adds a new one in different places', () => {
@@ -118,7 +127,7 @@ test('a pasted transcript that drops a line and adds a new one in different plac
 });
 
 test('presence holds a short syllable for a minimum time, then fades over the afterglow', () => {
-  // "ter," in Sample Track phrase 1: 1412-1637ms, next word at 1881ms.
+  // "ter," in All Nighter phrase 1: 1412-1637ms, next word at 1881ms.
   const ter = { startMs: 1412, endMs: 1637 };
   assert.equal(core.presenceAt(ter, 1400), 0);
   assert.equal(core.presenceAt(ter, 1500), 1);
@@ -209,7 +218,7 @@ test('near-end backing starts at the last main word; existing backing timing is 
 test('doubled annotations round-trip independently without touching timing, syllables or effects', () => {
   const original=doubledFixture();let score=original;
   const apply=text=>{const result=transcript.diff(score,text);for(const op of result.operations)score=core.applyOperation(score,op,score.revision);return result;};
-  const text="(doubled) It's an(d) ice- breaker\n[backing] out(d)";
+  const text="(doubled) It's an(d) all- nighter\n[backing] out(d)";
   const result=apply(text);
   assert.deepEqual(result.operations.map(o=>o.type),['setPhraseDoubled','setWordDoubled','setWordDoubled']);
   assert.equal(transcript.toText(score),text);assert.deepEqual(transcript.diff(score,text).operations,[]);

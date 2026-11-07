@@ -10,7 +10,7 @@
   function publishSongStatus(value) {
     if (!value?.wholeSong || !Number.isInteger(value.tabId) || typeof value.mediaKey !== 'string') return;
     const pass = value.songPass || {};
-    const compact = { state: value.state, phase: pass.phase || 'starting', capturedMs: Math.floor((pass.capturedMs || 0) / 1000) * 1000, durationMs: pass.durationMs || 0, completed: pass.completed || 0, total: pass.total || 0, proposals: pass.proposals || 0, skipped: pass.skipped || 0, error: value.error?.message || null };
+    const compact = { state: value.state, phase: pass.phase || 'starting', capturedMs: Math.floor((pass.capturedMs || 0) / 1000) * 1000, durationMs: pass.durationMs || 0, completed: pass.completed || 0, total: pass.total || 0, proposals: pass.proposals || 0, skipped: pass.skipped || 0, gaps: pass.gaps || 0, error: value.error?.message || null };
     const key = JSON.stringify([value.tabId, value.mediaKey, compact]);
     if (key === lastTabStatus) return;
     lastTabStatus = key;
@@ -98,6 +98,12 @@
     try { return await chrome.runtime.sendMessage({ target: 'lv-offscreen', type: 'LV_ANALYSIS_CACHE_CLEAR' }); }
     finally { await chrome.offscreen.closeDocument(); }
   }
+  async function formatPreview(words) {
+    await ensureOffscreen();
+    const result=await chrome.runtime.sendMessage({target:'lv-offscreen',type:'LV_FORMAT_PREVIEW',words});
+    if(!result?.ok)throw typed(result?.error?.code||'FORMAT_FAILED',result?.error?.message||'Formatting did not complete.');
+    return result.result;
+  }
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!isOffscreen(sender)) return;
     if (message.type === 'LV_ANALYSIS_OFFSCREEN_STATE') { status = message.analysis; publishSongStatus(status); return; }
@@ -157,5 +163,5 @@
       catch (_) { port.disconnect(); close(); }
     });
   });
-  globalThis.LvAnalysis = { startAnalysis, stopAnalysis, analysisStatus, clearModelCache };
+  globalThis.LvAnalysis = { startAnalysis, stopAnalysis, analysisStatus, clearModelCache, formatPreview };
 })();
