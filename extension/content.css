@@ -3455,3 +3455,65 @@
 #lvx-root .lvx-timing-key [data-kind="take"]{text-decoration-color:#91d6ff}
 #lvx-root .lvx-word-timing-status{margin:5px 0;color:#e2e9ed;font:11px/1.4 system-ui}
 #lvx-root .lvx-capture-transcript p.lvx-word-timing-status{margin:5px 0;color:#e2e9ed;font:12px/1.4 system-ui}
+
+/* Related recorder actions share compact, titled borders. */
+#lvx-root .lvx-sync-panel .lvx-control-section{box-sizing:border-box;min-width:0;margin:6px 0 8px;padding:5px 8px 7px;border:1.5px solid #84aeb6;border-radius:6px;background:#10232a}
+#lvx-root .lvx-sync-panel .lvx-control-section>legend{padding:0 7px;color:#eef8f7;font:700 11px/1.2 system-ui;letter-spacing:.04em}
+#lvx-root .lvx-sync-panel .lvx-control-section>legend span{color:#b8dca7;font-size:10px}
+#lvx-root .lvx-sync-panel .lvx-control-section .lvx-capture-phases{margin:2px 0 5px}
+#lvx-root .lvx-sync-panel .lvx-control-section .lvx-perform-actions,#lvx-root .lvx-sync-panel .lvx-control-section .lvx-capture-transport{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;margin:4px 0}
+#lvx-root .lvx-sync-panel .lvx-control-section :is(.lvx-perform-actions,.lvx-capture-transport) button{display:flex;align-items:center;justify-content:center;gap:5px;min-width:0;min-height:31px;padding:4px 5px;font:600 11px/1.15 system-ui;white-space:normal}
+#lvx-root .lvx-sync-panel .lvx-control-section :is(.lvx-record-choices,.lvx-other-parts){display:flex;flex-wrap:wrap;align-items:center;gap:4px 9px;margin:4px 0 0;padding:3px 0 0;border:0}
+#lvx-root .lvx-sync-panel .lvx-control-section :is(.lvx-record-choices,.lvx-other-parts) label{display:inline-flex;align-items:center;gap:4px;font:11px/1.2 system-ui;color:#d6e7e9}
+#lvx-root .lvx-sync-panel .lvx-control-section .lvx-lead-in{justify-content:flex-end;margin-top:4px;font-size:10px}
+#lvx-root .lvx-sync-panel .lvx-control-section .lvx-lead-in input{min-height:26px;padding:2px 4px}
+#lvx-root .lvx-sync-panel .lvx-control-section button::before{content:"";display:inline-block;width:14px;height:14px;flex:none;background:currentColor;mask:var(--lvx-control-icon) center/contain no-repeat;-webkit-mask:var(--lvx-control-icon) center/contain no-repeat}
+#lvx-root .lvx-sync-panel .lvx-control-section .lvx-capture-phases button::before,#lvx-root .lvx-sync-panel .lvx-control-section button:not([data-icon])::before{display:none}
+#lvx-root .lvx-sync-panel .lvx-control-section [data-icon="play"]{--lvx-control-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 3l15 9-15 9z'/%3E%3C/svg%3E")}
+#lvx-root .lvx-sync-panel .lvx-control-section [data-icon="stop"]{--lvx-control-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='5' y='5' width='14' height='14' rx='2'/%3E%3C/svg%3E")}
+#lvx-root .lvx-sync-panel .lvx-control-section [data-icon="fix"]{--lvx-control-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 16.5V20h3.5L19 8.5 15.5 5zM21 6.5a1 1 0 0 0 0-1.4l-2.1-2.1a1 1 0 0 0-1.4 0l-1 1L20 7.5z'/%3E%3C/svg%3E")}
+#lvx-root .lvx-sync-panel .lvx-control-section [data-icon="restart"]{--lvx-control-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M5 4h2v16H5zm14 1v14L9 12z'/%3E%3C/svg%3E")}
+#lvx-root .lvx-sync-panel .lvx-control-section [data-icon="replay"]{--lvx-control-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 4a8 8 0 1 1-7.8 10h2.1A6 6 0 1 0 7 8H4V3l4 4-4 4V9h4a8 8 0 0 1 4-5z'/%3E%3C/svg%3E")}
+#lvx-root .lvx-sync-panel .lvx-control-section [data-icon="next"]{--lvx-control-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M5 5v14l10-7zm12-1h2v16h-2z'/%3E%3C/svg%3E")}
+#lvx-root .lvx-sync-panel .lvx-control-section [data-icon="undo"]{--lvx-control-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 5 2 11l6 6v-4h6a4 4 0 0 1 4 4v2h2v-2a6 6 0 0 0-6-6H8z'/%3E%3C/svg%3E")}
+#lvx-root .lvx-sync-panel .lvx-workspace-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px;margin-bottom:6px}
+#lvx-root .lvx-sync-panel .lvx-workspace-tabs>button{min-height:26px;padding:3px 5px}
+#lvx-root .lvx-sync-panel .lvx-effect-pads{grid-template-columns:repeat(3,minmax(0,1fr))}
+#lvx-root .lvx-sync-panel .lvx-completion-heading{gap:5px}
+#lvx-root .lvx-sync-panel .lvx-completion-heading>strong{flex:1}
+#lvx-root .lvx-sync-panel .lvx-completion-info{display:inline-grid;place-items:center;width:19px;height:19px;min-height:19px;padding:0;border-radius:50%;border:1px solid #8caeb4;background:#223d47;color:#e6f4f3;font:700 11px/1 system-ui}
+#lvx-root .lvx-sync-panel .lvx-control-section :is(.lvx-record-choices,.lvx-other-parts){display:inline-flex;vertical-align:top;margin-right:6px}
+#lvx-root .lvx-sync-panel .lvx-control-section :is(.lvx-record-choices,.lvx-other-parts) small:not([hidden]):not(:empty){flex-basis:100%;display:block}
+#lvx-root .lvx-sync-panel :is(.lvx-sync-notice,.lvx-sync-save-status){margin:3px 0;line-height:1.25}
+#lvx-root .lvx-sync-panel .lvx-sync-nav{margin:4px 0}
+#lvx-root .lvx-sync-panel .lvx-record-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;margin-top:4px}
+#lvx-root .lvx-sync-panel .lvx-record-options :is(.lvx-record-choices,.lvx-other-parts){display:contents}
+#lvx-root .lvx-sync-panel .lvx-record-options .lvx-toggle-host{min-width:0}
+#lvx-root .lvx-sync-panel .lvx-record-options .lvx-toggle{width:100%;min-width:0;min-height:28px;padding:4px 3px;font:600 10px/1.1 system-ui}
+#lvx-root .lvx-sync-panel .lvx-record-options small:not([hidden]):not(:empty){grid-column:1/-1;font-size:10px;line-height:1.3}
+#lvx-root .lvx-sync-panel .lvx-completion-grid>strong{display:block;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+#lvx-root .lvx-sync-panel .lvx-control-section .lvx-capture-phases button{min-height:28px;padding:3px 4px}
+#lvx-root .lvx-sync-panel .lvx-control-section:has(.lvx-capture-transport){position:relative;margin-top:12px}
+#lvx-root .lvx-sync-panel .lvx-control-section:has(.lvx-capture-transport)>.lvx-lead-in{position:absolute;right:8px;top:-17px;margin:0;padding:0 4px;background:#10232a}
+#lvx-root .lvx-sync-panel .lvx-control-section:has(.lvx-capture-transport)>.lvx-lead-in input{width:44px;min-height:24px}
+#lvx-root .lvx-sync-panel .lvx-review-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin:3px 0}
+#lvx-root .lvx-sync-panel .lvx-review-actions button{min-width:0;min-height:30px;padding:5px;font-size:11px}
+#lvx-root .lvx-sync-panel .lvx-auto-review-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
+#lvx-root .lvx-sync-panel .lvx-effect-controls .lvx-effect-targets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:2px 0 6px;padding:0 0 5px}
+#lvx-root .lvx-sync-panel .lvx-effect-controls .lvx-tap-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}
+#lvx-root .lvx-sync-panel .lvx-effect-controls .lvx-tap-actions button{min-width:0;min-height:32px;padding:4px;font-size:11px;white-space:normal}
+#lvx-root .lvx-sync-panel .lvx-effect-controls .lvx-effect-pads button{min-height:36px;padding:5px;font-size:11px}
+#lvx-root .lvx-sync-panel .lvx-sync-notice{min-height:0}
+#lvx-root .lvx-sync-panel .lvx-sync-nav button{width:30px;min-height:28px;line-height:1;font-size:18px}
+#lvx-root .lvx-sync-panel .lvx-completion{margin-top:7px}
+#lvx-root .lvx-sync-panel .lvx-completion-heading{position:relative;top:-8px;margin-bottom:-5px}
+#lvx-root .lvx-sync-panel .lvx-completion-heading>strong{flex:0 1 auto;min-width:0;padding:0 6px;background:#142c34}
+#lvx-root .lvx-sync-panel .lvx-completion-heading>small{margin-left:auto}
+#lvx-root .lvx-theme-picker .lvx-theme-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+#lvx-root .lvx-sidebar[data-orientation=horizontal]:is(:hover,:focus-within,.lvx-sidebar-pinned) .lvx-hud{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media(max-width:680px){#lvx-root .lvx-sidebar[data-orientation=horizontal]:is(:hover,:focus-within,.lvx-sidebar-pinned) .lvx-hud{grid-template-columns:repeat(2,minmax(0,1fr))}}
+#lvx-root .lvx-studio-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px;margin-bottom:8px}
+#lvx-root .lvx-studio-tabs>button{min-height:32px;padding:4px 6px}
+#lvx-root .lvx-quick-mixer{margin-top:12px;border:1.5px solid #84aeb6;border-radius:6px}
+#lvx-root .lvx-quick-mixer>header{position:relative;top:-16px;margin-bottom:-10px}
+#lvx-root .lvx-quick-mixer>header strong{padding:0 6px;background:#142b35}
