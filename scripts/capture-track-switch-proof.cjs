@@ -56,7 +56,11 @@ const probe=state=>{if(process.env.LV_PROBE_LEDGER)fs.appendFileSync(process.env
   await page.keyboard.press('q');assert.equal(await evaluate(()=>__qa.tapping.take.marks.length),1,'Quick correction keeps completed input while deciding');
   await page.getByRole('button',{name:'Lyrics or typo'}).click();await waitFor(()=>document.querySelector('.lvx-transcript-editor').open);
   assert.deepEqual(await evaluate(()=>{const p=__qa.timing.draft.score.phrases[0];return [p.startMs,p.endMs]}),[1000,2000],'Completed phrase survives opening lyrics');
-  await evaluate(()=>{document.querySelector('[data-sync=transcript-close]').click();document.querySelector('video').paused=false;return __qa.armTapTake();});
+  await evaluate(()=>{const a=document.querySelector('[data-sync=transcript-text]');a.setRangeText('MAIN WON',a.selectionStart,a.selectionEnd,'end');a.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[data-sync=transcript-apply]').click();});
+  await waitFor(()=>!document.querySelector('.lvx-transcript-editor').open&&!__qa.timing.busy);
+  assert.equal(await evaluate(()=>__qa.timing.draft.score.phrases[__qa.timing.phraseIndex].id),'phrase-1','Applying a correction keeps the selected track and phrase');
+  assert.match(await evaluate(()=>__qa.timing.draft.score.phrases[0].words.map(w=>w.text).join(' ')),/MAIN WON/);
+  await evaluate(()=>{document.querySelector('video').paused=false;return __qa.armTapTake();});
   await switchKey('ArrowDown');assert.equal(await lane(),'backing');
   assert.equal(await evaluate(()=>document.querySelector('video').currentTime),2,'Track switch must not seek');
   assert.equal(await evaluate(()=>document.querySelector('video').paused),false);

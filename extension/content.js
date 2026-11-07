@@ -1331,7 +1331,7 @@
     catch(error){setSyncNotice('Capture backup failed; your lyric text is retained. '+error.message,'error');return;}
     let result=transcriptReview();if(!result)return;
     if(!result.operations.length){transcript.dirty=false;transcript.shownFor=null;refreshTimingPanel();return;}
-    const binding=tapBinding(),text=syncButton('transcript-text').value;
+    const binding=tapBinding(),text=syncButton('transcript-text').value,selectedPhraseId=timingPhrase()?.id,selectedWordId=tapping.wordId;
     timing.busy=true;refreshTimingPanel();
     try{
       if(result.changes.some(c=>c.kind==='add-backing')){
@@ -1343,7 +1343,9 @@
       const {extra,notes}=await respellSyllables(result.operations);
       const response=await timingRequest('LV_TIMING_TUNE',{operations:[...result.operations,...extra],allowProtected:true});
       rebindRecording(response.preview);timing.draft=response.preview;timing.auditioned=false;state.scoreSignature='';
-      if(!timingPhrase()?.words.some(w=>!w.excluded))selectInitialTimingPhrase();
+      const selectedIndex=timing.draft.score.phrases.findIndex(p=>p.id===selectedPhraseId&&p.words.some(w=>!w.excluded));
+      if(selectedIndex>=0){timing.phraseIndex=selectedIndex;const words=timingPhrase().words.filter(w=>!w.excluded);tapping.wordId=words.find(w=>w.id===selectedWordId)?.id||words[0].id;}
+      else selectInitialTimingPhrase();
       transcript.dirty=false;transcript.shownFor=null;transcriptDialog.close();
       setSyncNotice(`${result.changes.length} lyric changes are in the preview${extra.length?` · ${extra.length} words kept their syllable timings`:''}${notes.length?' · '+notes.join('; '):''}. Undo preview reverts; Save timings keeps them.`);
     }catch(error){setSyncNotice(error.message,'error');}finally{timing.busy=false;refreshTimingPanel();}
@@ -3056,6 +3058,7 @@
         timing.view='proposed';selectInitialTimingPhrase();
       }
       timing.busy=false;
+      if(options.phraseId&&timing.draft){const index=timing.draft.score.phrases.findIndex(p=>p.id===options.phraseId&&p.words.some(w=>!w.excluded));if(index>=0){timing.phraseIndex=index;tapping.wordId=timingPhrase().words.find(w=>!w.excluded)?.id;tapping.backAnchorMs=Math.round(getMediaTimeMs());}}
       const area=syncButton('transcript-text');
       if(!timing.draft&&!transcript.dirty){area.value='';state.plainLyrics={text:'',mediaKey:LvScore.mediaKey({url:location.href}),provider:'Manual paste'};}
       transcript.shownFor=transcript.dirty?transcript.shownFor:null;refreshTranscriptEditor();if(!transcriptDialog.open)transcriptDialog.show();refreshTranscriptTransport();requestAnimationFrame(transcriptPager.refresh);
