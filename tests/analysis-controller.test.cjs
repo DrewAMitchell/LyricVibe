@@ -3,11 +3,21 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
+const scoreCore = require('../extension/score-core.js');
 
 function event() {
   const listeners = new Set();
   return { addListener: fn => listeners.add(fn), removeListener: fn => listeners.delete(fn), emit: (...args) => { for (const fn of listeners) fn(...args); } };
 }
+
+test('whole-song start accepts a paused source at a nonstandard speed and requests managed capture', async () => {
+  const onMessage=event(), onConnect=event(); let startedConfig, open=false;
+  const score=scoreCore.createScore({videoId:'FIXTURE0001',durationMs:30000},'[00:20]wake me up',{contentHash:'a'.repeat(64)});
+  const chrome={runtime:{id:'fixture-extension',getURL:file=>`chrome-extension://fixture-extension/${file}`,onMessage,onConnect,getContexts:async()=>open?[{}]:[],sendMessage:async message=>{if(message.type==='LV_ANALYSIS_OFFSCREEN_START'){startedConfig=message.config;return {analysis:{state:'starting'}};}return {};}},offscreen:{createDocument:async()=>{open=true},closeDocument:async()=>{open=false}},tabs:{sendMessage:async()=>({mediaKey:'youtube:FIXTURE0001',paused:true,seeking:false,playbackRate:.5})},tabCapture:{getMediaStreamId:async()=> 'test-stream'}};
+  const sandbox={chrome,LvScore:scoreCore,crypto:require('node:crypto').webcrypto};vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../extension/analysis/controller.js'),'utf8'),sandbox);
+  await sandbox.LvAnalysis.startAnalysis({tabId:7,score,engine:'native',wholeSong:true});
+  assert.equal(startedConfig.wholeSong,true);assert.equal(startedConfig.engine,'native');
+});
 
 test('source-scoped Stop preserves another tab analysis and closes the matching source', async () => {
   const onMessage = event();

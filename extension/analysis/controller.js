@@ -56,7 +56,7 @@
     if (clock?.mediaKey !== mediaKey) throw typed('SOURCE_MISMATCH', 'The score no longer belongs to the selected video.');
     if (clock.isAd) throw typed('ADVERTISEMENT_ACTIVE', 'Wait for the advertisement to finish.');
     if (!wholeSong && (clock.paused || clock.seeking)) throw typed('PLAYBACK_REQUIRED', 'Play the selected video before enabling audio analysis.');
-    if (wholeSong && (engine !== 'native' || clock.playbackRate !== 1)) throw typed('PLAYBACK_RATE_UNSUPPORTED', 'Set the source video to normal speed before whole-song alignment.');
+    if (wholeSong && engine !== 'native') throw typed('PLAYBACK_RATE_UNSUPPORTED', 'Whole-song alignment requires the native analysis engine.');
     if (wholeSong && (!Number.isSafeInteger(score.source.durationMs) || score.source.durationMs <= 0 || score.source.durationMs > 1200000)) throw typed('SONG_DURATION_UNSUPPORTED', 'Whole-song alignment needs a known duration of at most 20 minutes.');
     await ensureOffscreen();
     if (token !== generation) return status;

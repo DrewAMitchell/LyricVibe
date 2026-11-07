@@ -321,6 +321,43 @@ test('live operations use the host and remain host-saved rather than local-expor
   controller.dispose();
 });
 
+test('save draft and align commits the exact preview before starting the whole-song pass', async () => {
+  const saved=makeScore(), key=core.mediaKey(saved.source), draftScore=structuredClone(saved);
+  draftScore.phrases[0].words[0].startMs+=20;
+  const preview={token:'preview-a',previewRevision:2,baseRevision:saved.revision,baseHash:saved.lyrics.contentHash,score:draftScore};
+  const committed={...draftScore,revision:saved.revision+1};
+  const runtime=captureRuntime({respond:async m=>m.type==='LV_SCORE_GET'?{ok:true,score:saved,review:[]}:m.type==='LV_TIMING_VIEW'?{ok:true,preview}:m.type==='LV_TIMING_APPLY'?{ok:true,score:committed}:m.type==='LV_NATIVE_ANALYSIS_START'?{ok:true,analysis:{state:'starting',wholeSong:true}}:{ok:false,error:{code:'UNHANDLED'}}});
+  const controller=createEditorController(controllerOptions({runtime,mode:'youtube',tabId:17,requestedMediaKey:key}));
+  assert.equal((await controller.initialize()).ok,true);await new Promise(resolve=>setImmediate(resolve));
+  const visible=controller.getState().score;
+  const result=await controller.dispatch({type:'LV_NATIVE_ANALYSIS_START',...envelope(visible),wholeSong:true,savePreview:true});
+  assert.equal(result.ok,true,JSON.stringify(result));
+  const apply=runtime.sent.find(m=>m.type==='LV_TIMING_APPLY'),start=runtime.sent.find(m=>m.type==='LV_NATIVE_ANALYSIS_START');
+  assert.equal(apply.token,'preview-a');assert.equal(apply.previewRevision,2);assert.equal(start.expectedRevision,committed.revision);assert.equal(start.wholeSong,true);
+  assert.equal(controller.getState().preview,null);assert.equal(controller.getState().score.phrases[0].words[0].startMs,draftScore.phrases[0].words[0].startMs);
+  controller.dispose();
+});
+
+test('a changed preview is preserved and never starts alignment', async () => {
+  const saved=makeScore(),key=core.mediaKey(saved.source),preview={token:'preview-a',previewRevision:2,baseRevision:saved.revision,baseHash:saved.lyrics.contentHash,score:structuredClone(saved)};
+  const runtime=captureRuntime({respond:async m=>m.type==='LV_SCORE_GET'?{ok:true,score:saved,review:[]}:m.type==='LV_TIMING_VIEW'?{ok:true,preview}:m.type==='LV_TIMING_APPLY'?{ok:false,error:{code:'PREVIEW_CONFLICT',message:'Preview changed.'}}:{ok:false,error:{code:'UNHANDLED'}}});
+  const controller=createEditorController(controllerOptions({runtime,mode:'youtube',tabId:17,requestedMediaKey:key}));
+  assert.equal((await controller.initialize()).ok,true);await new Promise(resolve=>setImmediate(resolve));
+  const result=await controller.dispatch({type:'LV_NATIVE_ANALYSIS_START',...envelope(controller.getState().score),wholeSong:true,savePreview:true});
+  assert.equal(result.ok,false);assert.equal(result.error.code,'PREVIEW_CONFLICT');assert.ok(controller.getState().preview);assert.equal(runtime.sent.some(m=>m.type==='LV_NATIVE_ANALYSIS_START'),false);
+  controller.dispose();
+});
+
+test('after saving a draft, an alignment setup failure reports the completed save', async () => {
+  const saved=makeScore(),key=core.mediaKey(saved.source),preview={token:'preview-a',previewRevision:0,baseRevision:saved.revision,baseHash:saved.lyrics.contentHash,score:structuredClone(saved)};
+  const runtime=captureRuntime({respond:async m=>m.type==='LV_SCORE_GET'?{ok:true,score:saved,review:[]}:m.type==='LV_TIMING_VIEW'?{ok:true,preview}:m.type==='LV_TIMING_APPLY'?{ok:true,score:{...saved,revision:saved.revision+1}}:m.type==='LV_NATIVE_ANALYSIS_START'?{ok:true,analysis:{state:'error',error:{code:'SONG_PLAY_FAILED',message:'Playback was blocked.'}}}:{ok:false,error:{code:'UNHANDLED'}}});
+  const controller=createEditorController(controllerOptions({runtime,mode:'youtube',tabId:17,requestedMediaKey:key}));
+  assert.equal((await controller.initialize()).ok,true);await new Promise(resolve=>setImmediate(resolve));
+  const result=await controller.dispatch({type:'LV_NATIVE_ANALYSIS_START',...envelope(controller.getState().score),wholeSong:true,savePreview:true});
+  assert.equal(result.ok,false);assert.match(result.error.message,/draft saved.*Playback was blocked/i);assert.equal(controller.getState().preview,null);
+  controller.dispose();
+});
+
 test('review package proposals remain review-only until an explicit apply request', async () => {
   const controller = createEditorController(controllerOptions());
   const packageData = makePackage();

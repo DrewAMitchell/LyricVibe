@@ -17,6 +17,18 @@
         throw Object.assign(new Error('YouTube autoplay could not be turned off; whole-song alignment did not start.'), { code: 'AUTOPLAY_GUARD_UNAVAILABLE' });
       }
     }
+    const originalRate = media.playbackRate;
+    const changedRate = Number.isFinite(originalRate) && originalRate !== 1;
+    if (changedRate) {
+      try {
+        media.playbackRate = 1;
+        if (media.playbackRate !== 1) throw new Error('rate unchanged');
+      } catch (_) {
+        toggle.removeEventListener('pointerdown', userInput, true); toggle.removeEventListener('keydown', userInput, true);
+        if (changed && !userChanged && toggle.isConnected && toggle.getAttribute('aria-checked') === 'false') toggle.click();
+        throw Object.assign(new Error('The source could not switch to normal speed for whole-song alignment.'), { code: 'SONG_RATE_FAILED' });
+      }
+    }
     function hold(sameMedia = true) {
       if (!sameMedia) return;
       media.pause();
@@ -30,6 +42,7 @@
         if (released) return; released = true;
         if (completed) hold(sameMedia);
         toggle.removeEventListener('pointerdown', userInput, true); toggle.removeEventListener('keydown', userInput, true);
+        if (sameMedia && changedRate && media.playbackRate === 1) { try { media.playbackRate = originalRate; } catch (_) { /* Source may have been detached. */ } }
         if (changed && !userChanged && toggle.isConnected && toggle.getAttribute('aria-checked') === 'false') toggle.click();
       },
     };

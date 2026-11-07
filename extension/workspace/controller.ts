@@ -336,7 +336,8 @@ export function createEditorController(options: EditorControllerOptions): Editor
     if (request.mediaKey !== core.mediaKey(state.score.source)) throw makeError("SOURCE_MISMATCH", "Editor source does not match request.");
     if (request.lyricsHash !== state.score.lyrics.contentHash) throw makeError("LYRIC_REVISION_MISMATCH", "Editor lyric hash does not match request.");
     if (request.expectedRevision !== visibleScore()?.revision) throw makeError("REVISION_CONFLICT", "Editor revision changed; read state before retrying.");
-    if (state.preview && !audition) throw makeError("PREVIEW_PENDING", "This is the live YouTube timing draft. Save or discard it in the timing panel before editing here.");
+    const saveAndAlign = request.type === "LV_NATIVE_ANALYSIS_START" && request.wholeSong === true && request.savePreview === true;
+    if (state.preview && !audition && !saveAndAlign) throw makeError("PREVIEW_PENDING", "This is the live YouTube timing draft. Save or discard it in the timing panel before editing here.");
   }
 
   function clearReview(): void {
@@ -883,15 +884,27 @@ export function createEditorController(options: EditorControllerOptions): Editor
       if (request.type === "LV_SCORE_UNDO") return await applyMutation(request.type, {}, request.expectedRevision);
       if ((request.type === "LV_NATIVE_ANALYSIS_START" || request.type === "LV_NATIVE_ANALYSIS_STOP" || request.type === "LV_NATIVE_ANALYSIS_STATUS" || request.type === "LV_ANALYSIS_START" || request.type === "LV_ANALYSIS_STOP" || request.type === "LV_ANALYSIS_STATUS") && live) {
         const bindingEpoch = sourceEpoch;
+        let savedPreview = false;
+        if (request.type === "LV_NATIVE_ANALYSIS_START" && request.wholeSong === true && request.savePreview === true && state.preview) {
+          const preview = state.preview;
+          const applied = await send('LV_TIMING_APPLY', { expectedRevision: state.score!.revision, lyricsHash: state.score!.lyrics.contentHash, token: preview.token, previewRevision: preview.previewRevision });
+          if (disposed || bindingEpoch !== sourceEpoch) throw makeError("SELECTION_CHANGED", "The timing draft was saved, but the source changed before alignment started.");
+          if (!applied.score) throw makeError("INVALID_SCORE", "The timing draft was saved, but its updated score was unavailable. Refresh before aligning.");
+          setScore(applied.score as LyricVibeScore);
+          savedPreview = true;
+        }
         const requestScoreEpoch = scoreEpoch;
-        const result = await send(request.type, { expectedRevision: state.score!.revision, lyricsHash: state.score!.lyrics.contentHash, ...(request.type === "LV_NATIVE_ANALYSIS_START" && request.wholeSong === true ? { wholeSong: true } : {}) });
+        let result: UnknownRecord;
+        try { result = await send(request.type, { expectedRevision: state.score!.revision, lyricsHash: state.score!.lyrics.contentHash, ...(request.type === "LV_NATIVE_ANALYSIS_START" && request.wholeSong === true ? { wholeSong: true } : {}) }); }
+        catch (cause) { if (savedPreview) throw makeError("ALIGNMENT_START_FAILED", `Timing draft saved. Alignment did not start: ${errorOf(cause, 'ANALYSIS_FAILED').message}`); throw cause; }
         if (disposed || bindingEpoch !== sourceEpoch) throw makeError("SELECTION_CHANGED", "Source selection changed while analysis was pending.");
         if (requestScoreEpoch !== scoreEpoch) throw makeError("REVISION_CONFLICT", "Score changed while analysis was pending. Read the current state before retrying.");
         const analysis = result.analysis || result.status || result;
         setAnalysis(analysis);
         if (isRecord(analysis) && analysis.state === "error") {
           const nested = isRecord(analysis.error) ? analysis.error : {};
-          return failure(makeError(typeof nested.code === "string" ? nested.code : "ANALYSIS_FAILED", typeof nested.message === "string" ? nested.message : "Analysis could not start."), "ANALYSIS_FAILED");
+          const message = typeof nested.message === "string" ? nested.message : "Analysis could not start.";
+          return failure(makeError(typeof nested.code === "string" ? nested.code : "ANALYSIS_FAILED", savedPreview ? `Timing draft saved. Alignment did not start: ${message}` : message), "ANALYSIS_FAILED");
         }
         setNotice(request.type.endsWith("_START") ? "Analysis requested. Timings remain unverified suggestions until reviewed." : request.type.endsWith("_STOP") ? "Analysis stopped." : "Analysis status refreshed.", "success");
         return { ok: true, analysis };

@@ -1,6 +1,6 @@
 /* Isolated Chrome: real tab capture and extension contexts; synthetic source and mocked model. */
-const fs=require('fs'),path=require('path'),assert=require('assert/strict'),{chromium}=require('playwright'),esbuild=require('esbuild');
-const root=path.resolve(__dirname,'..'),stage=path.join(root,'.verification/whole-song-capture-fixture'),extension=path.join(stage,'extension');
+const fs=require('fs'),path=require('path'),os=require('os'),assert=require('assert/strict'),{chromium}=require('playwright'),esbuild=require('esbuild');
+const root=path.resolve(__dirname,'..'),stage=fs.mkdtempSync(path.join(os.tmpdir(),'lv-whole-song-proof-')),extension=path.join(stage,'extension');
 const wait=ms=>new Promise(r=>setTimeout(r,ms));let context;
 (async()=>{
  fs.mkdirSync(stage,{recursive:true});fs.cpSync(path.join(root,'extension'),extension,{recursive:true});
@@ -17,16 +17,21 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));let context;
  const tabId=await sw.evaluate(async()=>(await chrome.tabs.query({url:'https://www.youtube.com/*'}))[0].id);
  const bcdp=await context.browser().newBrowserCDPSession(),targets=await bcdp.send('Target.getTargets',{filter:[{type:'tab',exclude:false}]});const target=targets.targetInfos.find(t=>t.url.includes('DEMO_ONLY01'));assert.ok(target,'fixture tab target');await bcdp.send('Extensions.triggerAction',{id:extId,targetId:target.targetId});
  await sw.evaluate(async id=>{await injectOverlay(id);await LvScoreHost.ensure(id,{track:{title:'Synthetic',artist:'Fixture'},lyrics:{provider:'fixture',synced:'[00:01.00]hello world\n[00:04.00]second phrase\n[00:07.00]'},hints:{url:'https://www.youtube.com/watch?v=DEMO_ONLY01',duration:8}})},tabId);
- await page.evaluate(() => document.querySelector('video').play()); await wait(500);
+ await page.evaluate(() => { const video=document.querySelector('video'); video.pause(); video.playbackRate=.5; });
  const editor=await context.newPage();await editor.goto(`chrome-extension://${extId}/editor.html?sourceTab=${tabId}&mediaKey=${encodeURIComponent('youtube:DEMO_ONLY01')}`);await editor.locator('[data-word-id]').first().waitFor({timeout:5000});
- const original=await editor.evaluate(()=>JSON.stringify(LvEditor.getState().score.phrases));
  await editor.waitForFunction(()=>LvEditor.getState().clockSeen,null,{timeout:10000});
- await editor.getByRole('button',{name:'Align whole song'}).click();
- await wait(1200);const sourceMs=await page.evaluate(()=>document.querySelector('video').currentTime*1000);const editorClock=await editor.evaluate(()=>LvEditor.getState().playback.mediaMs);assert.ok(sourceMs>500 && Math.abs(sourceMs-editorClock)<800,`unfocused source clock ${sourceMs} vs editor ${editorClock}`);
+ const initialBound=await editor.evaluate(()=>{const s=LvEditor.getState().score;return {tabId:Number(new URL(location.href).searchParams.get('sourceTab')),mediaKey:LvScore.mediaKey(s.source),expectedRevision:s.revision,lyricsHash:s.lyrics.contentHash}});
+ const initialDraft=await editor.evaluate(async envelope=>chrome.runtime.sendMessage({type:'LV_TIMING_PREPARE',...envelope,fromSaved:true}),initialBound);assert.equal(initialDraft.ok,true,JSON.stringify(initialDraft));
+ const initialWord=initialDraft.preview.score.phrases[0].words[0];
+ const initialTuned=await editor.evaluate(async x=>chrome.runtime.sendMessage({type:'LV_TIMING_TUNE',...x.bound,token:x.token,previewRevision:0,changes:[{wordId:x.id,startMs:x.start+15,endMs:x.end}]}),{bound:initialBound,token:initialDraft.preview.token,id:initialWord.id,start:initialWord.startMs,end:initialWord.endMs});assert.equal(initialTuned.ok,true,JSON.stringify(initialTuned));
+ await editor.getByText(/Live timing draft/).waitFor();
+ const original=await editor.evaluate(()=>JSON.stringify(LvEditor.getState().score.phrases));
+ await editor.getByRole('button',{name:'Save draft & align'}).click();
+ await wait(1200);const sourceMs=await page.evaluate(()=>document.querySelector('video').currentTime*1000);const editorClock=await editor.evaluate(()=>LvEditor.getState().playback.mediaMs);assert.equal(await page.evaluate(()=>document.querySelector('video').playbackRate),1);assert.ok(sourceMs>500 && Math.abs(sourceMs-editorClock)<800,`unfocused source clock ${sourceMs} vs editor ${editorClock}`);
  let status,sawAligning=false,deadline=Date.now()+35000;
  while(Date.now()<deadline){status=await sw.evaluate(()=>LvAnalysis.analysisStatus());if(status.state==='aligning'){sawAligning=true;assert.equal(await page.locator('.ytp-autonav-toggle-button').getAttribute('aria-checked'),'false','autoplay stays disabled while the model is processing');}if(status.state==='completed'||status.state==='error')break;await wait(250)}
  assert.equal(sawAligning,true,'model phase was observed');
- assert.equal(status.state,'completed',JSON.stringify(status));assert.ok(status.songPass.proposals>0,JSON.stringify(status));const endState=await page.evaluate(()=>({autonavWouldRun:document.body.dataset.autonavWouldRun,toggle:document.querySelector('.ytp-autonav-toggle-button').getAttribute('aria-checked'),paused:document.querySelector('video').paused}));assert.deepEqual(endState,{autonavWouldRun:'false',toggle:'true',paused:true});
+ assert.equal(status.state,'completed',JSON.stringify(status));assert.ok(status.songPass.proposals>0,JSON.stringify(status));await page.waitForFunction(()=>document.querySelector('video').playbackRate===.5);const endState=await page.evaluate(()=>({autonavWouldRun:document.body.dataset.autonavWouldRun,toggle:document.querySelector('.ytp-autonav-toggle-button').getAttribute('aria-checked'),paused:document.querySelector('video').paused,rate:document.querySelector('video').playbackRate}));assert.deepEqual(endState,{autonavWouldRun:'false',toggle:'true',paused:true,rate:.5});
  await editor.waitForFunction(()=>LvEditor.getState().review.length>0,null,{timeout:6000});
  assert.equal(await editor.evaluate(()=>JSON.stringify(LvEditor.getState().score.phrases)),original,'saved timing unchanged');
  assert.ok(await editor.getByText(/Alignment complete/).isVisible());
@@ -35,7 +40,7 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));let context;
  const other=await context.newPage();await other.goto(`chrome-extension://${extId}/editor.html?sourceTab=${tabId}&mediaKey=${encodeURIComponent('youtube:DEMO_ONLY01')}`);await other.waitForFunction(()=>Boolean(LvEditor.getState().score));
  const bound=await other.evaluate(()=>{const s=LvEditor.getState().score;return {tabId:Number(new URL(location.href).searchParams.get('sourceTab')),mediaKey:LvScore.mediaKey(s.source),expectedRevision:s.revision,lyricsHash:s.lyrics.contentHash}});
  const draft=await other.evaluate(async envelope=>chrome.runtime.sendMessage({type:'LV_TIMING_PREPARE',...envelope,fromSaved:true}),bound);assert.equal(draft.ok,true,JSON.stringify(draft));await editor.getByText(/Live timing draft/).waitFor();
- const word=draft.preview.score.phrases[0].words[0],tuned=await other.evaluate(async x=>chrome.runtime.sendMessage({type:'LV_TIMING_TUNE',...x.bound,token:x.token,previewRevision:0,changes:[{wordId:x.id,startMs:x.start+15,endMs:x.end}]}),{bound,token:draft.preview.token,id:word.id,start:word.startMs,end:word.endMs});assert.equal(tuned.ok,true,JSON.stringify(tuned));
+ const word=draft.preview.score.phrases[0].words[0],tuned=await other.evaluate(async x=>chrome.runtime.sendMessage({type:'LV_TIMING_TUNE',...x.bound,token:x.token,previewRevision:0,allowProtected:true,changes:[{wordId:x.id,startMs:x.start+15,endMs:x.end}]}),{bound,token:draft.preview.token,id:word.id,start:word.startMs,end:word.endMs});assert.equal(tuned.ok,true,JSON.stringify(tuned));
  await editor.waitForFunction(({id,start})=>document.querySelector(`[data-word-id="${id}"]`)?.getAttribute('data-start-ms')===String(start),{id:word.id,start:word.startMs+15});
  const blocked=await other.evaluate(async x=>chrome.runtime.sendMessage({type:'LV_SCORE_OPERATION',...x.bound,operation:{type:'setOffset',offsetMs:3}}),{bound});assert.equal(blocked.error.code,'PREVIEW_PENDING');
  const cancelled=await other.evaluate(async x=>chrome.runtime.sendMessage({type:'LV_TIMING_CANCEL',...x.bound,token:x.token,previewRevision:1}),{bound,token:draft.preview.token});assert.equal(cancelled.ok,true);await editor.waitForFunction(()=>!document.querySelector('.live-preview-notice'));

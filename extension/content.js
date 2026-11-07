@@ -4109,7 +4109,7 @@
       if (message.action !== 'start' || key !== message.mediaKey || songAutoplayGuard) { sendResponse({ ok: false, error: { code: 'SOURCE_CHANGED', message: 'The source changed or an autoplay guard is already active.' } }); return; }
       const media = getMedia(), toggle = document.querySelector('.ytp-autonav-toggle-button');
       globalThis.LvAutoplayGuard.begin(toggle, media).then(handle => {
-        if (key !== LvScore.mediaKey({ url: location.href }) || songAutoplayGuard) { handle.release(); sendResponse({ ok: false, error: { code: 'SOURCE_CHANGED', message: 'The source changed while preparing alignment.' } }); return; }
+        if (key !== LvScore.mediaKey({ url: location.href }) || songAutoplayGuard) { handle.release({sameMedia:key === LvScore.mediaKey({url:location.href})}); sendResponse({ ok: false, error: { code: 'SOURCE_CHANGED', message: 'The source changed while preparing alignment.' } }); return; }
         songAutoplayGuard = { sessionId: message.sessionId, mediaKey: key, handle };
         sendResponse({ ok: true });
       }, error => sendResponse({ ok: false, error: { code: error.code || 'AUTOPLAY_GUARD_UNAVAILABLE', message: error.message } }));
