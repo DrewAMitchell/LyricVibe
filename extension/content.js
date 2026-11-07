@@ -5007,7 +5007,7 @@
       }
       observeMetadata();
     };
-    const onPageEvent=event=>{if(watching&&(!event.target||!root.contains(event.target)))schedule();};
+    const onPageEvent=event=>{if(watching&&(!(event.target instanceof Node)||!root.contains(event.target)))schedule();};
     const navStart=()=>{navigating=true;begin();};
     const navEnd=()=>{navigating=false;if(watching){observeMetadata();resumed=true;schedule();}};
     const reset=()=>{navigating=false;begin();resumed=true;sync();schedule();};

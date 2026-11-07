@@ -4,11 +4,12 @@ const start=source.indexOf('  function setupTrackChangeObserver() {');
 const watcher=source.slice(start,source.indexOf('\n  /* ═',start+10));
 function harness(){
  let now=0,sequence=0,focused=true,reads=0;const timers=new Map(),messages=[],observed=new Set();
- const events=()=>{const handlers=new Map();return {addEventListener(n,f){if(!handlers.has(n))handlers.set(n,[]);handlers.get(n).push(f)},fire(n){for(const f of handlers.get(n)||[])f({target:null})}}};
+ const events=()=>{const handlers=new Map();return {addEventListener(n,f){if(!handlers.has(n))handlers.set(n,[]);handlers.get(n).push(f)},fire(n,target=null){for(const f of handlers.get(n)||[])f({target})}}};
  const document={...events(),readyState:'complete',querySelectorAll:()=>[{id:'title'}]};
  const window=events(), hints={url:'https://www.youtube.com/watch?v=AAAAAAAAAAA',track:'A',mediaReady:true};
  const add=(fn,delay,interval)=>{const id=++sequence;timers.set(id,{fn,at:now+delay,interval});return id};
- const context=vm.createContext({document,window,root:{contains:()=>false},performance:{now:()=>now},state:{active:false},observationFocused:()=>focused,
+ class Node {};
+ const context=vm.createContext({document,window,Node,root:{contains:node=>{assert.notEqual(node,window);return false}},performance:{now:()=>now},state:{active:false},observationFocused:()=>focused,
   listenGlobal:(target,name,listener,options)=>target.addEventListener(name,listener,options),
   getPageHints:()=>{reads++;return hints},LvScore:require('../extension/score-core.js'),chrome:{runtime:{sendMessage:async m=>messages.push(m)}},
   MutationObserver:class {constructor(fn){this.fn=fn}observe(){observed.add(this)}disconnect(){observed.delete(this)}},
@@ -19,6 +20,9 @@ function harness(){
  return {context,hints,messages,document,window,advance,reads:()=>reads,observers:()=>observed.size,timers:()=>timers.size,
   mutation:()=>{for(const o of [...observed])o.fn()},focus:value=>{focused=value;window.fire(value?'focus':'blur')},status:()=>vm.runInContext('watcher.status()',context)};
 }
+test('window navigation events schedule detection without passing Window to Node.contains',()=>{
+ const h=harness();h.advance(1800);const before=h.reads();h.window.fire('popstate',h.window);h.advance(500);assert.ok(h.reads()>before);
+});
 test('track watching detaches observers and timers while unfocused and reconciles exactly one stable change on return',()=>{
  const h=harness();h.advance(1800);assert.equal(h.messages.filter(m=>m.type==='LV_TRACK_CHANGED').length,1);
  h.messages.length=0;h.focus(false);const reads=h.reads();assert.equal(h.observers(),0);assert.equal(h.timers(),0);
