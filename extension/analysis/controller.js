@@ -96,9 +96,17 @@
     }
     if (message.type === 'LV_ANALYSIS_CONTROL_REQUEST') {
       if (!status.sessionId || message.sessionId !== status.sessionId || message.tabId !== status.tabId || status.engine !== 'native' || !status.wholeSong) { respond({ ok: false, error: 'ANALYSIS_SOURCE_MISMATCH' }); return; }
-      const command = message.action === 'seek-start' ? { type: 'LV_SCORE_SEEK', mediaKey: status.mediaKey, mediaMs: 0 } : message.action === 'play' ? { type: 'LV_SCORE_TRANSPORT', mediaKey: status.mediaKey, action: 'play' } : null;
+      const command = message.action === 'seek-start' ? { type: 'LV_SCORE_SEEK', mediaKey: status.mediaKey, mediaMs: 0 } : message.action === 'play' ? { type: 'LV_SCORE_TRANSPORT', mediaKey: status.mediaKey, action: 'play' } : ['guard-start', 'guard-hold', 'guard-release'].includes(message.action) ? { type: 'LV_SONG_AUTOPLAY_GUARD', mediaKey: status.mediaKey, sessionId: status.sessionId, action: message.action.slice(6), completed: message.completed === true } : null;
       if (!command) { respond({ ok: false, error: 'INVALID_OPERATION' }); return; }
-      chrome.tabs.sendMessage(message.tabId, command).then(result => respond(result), () => respond({ ok: false, error: 'SOURCE_TAB_UNAVAILABLE' }));
+      const token = generation;
+      chrome.tabs.sendMessage(message.tabId, command).then(async result => {
+        // Stop can race an asynchronous YouTube toggle; restore it even if the
+        // offscreen caller has already been closed by the time start resolves.
+        if (message.action === 'guard-start' && result?.ok && token !== generation) {
+          await chrome.tabs.sendMessage(message.tabId, { ...command, action: 'release' }).catch(() => undefined);
+        }
+        respond(result);
+      }, () => respond({ ok: false, error: 'SOURCE_TAB_UNAVAILABLE' }));
       return true;
     }
   });

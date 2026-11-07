@@ -4087,9 +4087,34 @@
   /* ══════════════════════════════════════
      MESSAGE LISTENER
      ══════════════════════════════════════ */
+  let songAutoplayGuard = null;
   if (typeof chrome === 'undefined' || !chrome.runtime?.onMessage) return; // extension context invalidated
   listenRuntime((message, sender, sendResponse) => {
     if (!message || !message.type) return;
+    if (message.type === 'LV_SONG_AUTOPLAY_GUARD') {
+      if (sender.id !== chrome.runtime.id || typeof message.sessionId !== 'string') { sendResponse({ ok: false, error: { code: 'SOURCE_REQUIRED', message: 'Autoplay guard requires the active alignment session.' } }); return; }
+      if (message.action === 'release') {
+        if (songAutoplayGuard?.sessionId === message.sessionId) {
+          const guard = songAutoplayGuard; songAutoplayGuard = null;
+          guard.handle.release({ completed: message.completed === true, sameMedia: guard.mediaKey === LvScore.mediaKey({ url: location.href }) });
+        }
+        sendResponse({ ok: true }); return;
+      }
+      if (message.action === 'hold') {
+        if (songAutoplayGuard?.sessionId !== message.sessionId) { sendResponse({ ok: false, error: { code: 'SOURCE_CHANGED', message: 'The autoplay guard is no longer active.' } }); return; }
+        songAutoplayGuard.handle.hold(songAutoplayGuard.mediaKey === LvScore.mediaKey({ url: location.href }));
+        sendResponse({ ok: true }); return;
+      }
+      const key = LvScore.mediaKey({ url: location.href });
+      if (message.action !== 'start' || key !== message.mediaKey || songAutoplayGuard) { sendResponse({ ok: false, error: { code: 'SOURCE_CHANGED', message: 'The source changed or an autoplay guard is already active.' } }); return; }
+      const media = getMedia(), toggle = document.querySelector('.ytp-autonav-toggle-button');
+      globalThis.LvAutoplayGuard.begin(toggle, media).then(handle => {
+        if (key !== LvScore.mediaKey({ url: location.href }) || songAutoplayGuard) { handle.release(); sendResponse({ ok: false, error: { code: 'SOURCE_CHANGED', message: 'The source changed while preparing alignment.' } }); return; }
+        songAutoplayGuard = { sessionId: message.sessionId, mediaKey: key, handle };
+        sendResponse({ ok: true });
+      }, error => sendResponse({ ok: false, error: { code: error.code || 'AUTOPLAY_GUARD_UNAVAILABLE', message: error.message } }));
+      return true;
+    }
     if(message.type==='LV_WATCH_STATUS'){sendResponse({ok:true,version:1,enabled:overlayEnabled,active:observationFocused()&&document.readyState==='complete'&&trackWatch?.ready(),navigationToken:trackWatch?.token()});return;}
     if(message.type==='LV_RESET_VIDEO'){resetCurrentVideo();sendResponse({ok:true});return;}
     if(message.type==='LV_OVERLAY_RESUME'){show();sendResponse({ok:true,version:1});return;}
@@ -4136,7 +4161,7 @@
       const media = getMedia();
       const youtube = youtubeMediaState();
       const blocked = isAdvertisement() || youtube?.clockUsable === false;
-      sendResponse({ mediaKey: LvScore.mediaKey({ url: location.href }), currentTimeMs: Math.round((media?.currentTime || 0) * 1000), durationMs: Number.isFinite(media?.duration) ? Math.round(media.duration * 1000) : null, paused: blocked || (media?.paused ?? true), playbackRate: media?.playbackRate || 1, seeking: blocked || media?.seeking || false, isAd: isAdvertisement(), reason: youtube?.reason || null });
+      sendResponse({ mediaKey: LvScore.mediaKey({ url: location.href }), currentTimeMs: Math.round((media?.currentTime || 0) * 1000), durationMs: Number.isFinite(media?.duration) ? Math.round(media.duration * 1000) : null, ended: Boolean(media?.ended), autoplayGuardValid: songAutoplayGuard ? songAutoplayGuard.handle.valid() : null, paused: blocked || (media?.paused ?? true), playbackRate: media?.playbackRate || 1, seeking: blocked || media?.seeking || false, isAd: isAdvertisement(), reason: youtube?.reason || null });
       return;
     }
     if (message.type === 'LV_SCORE_UPDATED') {
@@ -7331,6 +7356,7 @@
       setSyncNotice('This previous LyricVibe session still holds unsaved work. Keep this page open while you recover it.','warn');
       return false;
     }
+    if (songAutoplayGuard) { songAutoplayGuard.handle.release(); songAutoplayGuard = null; }
     teardown();
     globalLifetime.abort();
     for(const listener of runtimeListeners){try{chrome.runtime.onMessage.removeListener?.(listener);}catch(_){}}

@@ -11,6 +11,23 @@ export function songRange(score: Immutable<LyricVibeScore>): ViewRange {
   return { startMs: 0, endMs: end };
 }
 
+/** A playback-focused window without changing the underlying song range. */
+export function phraseWindow(score: Immutable<LyricVibeScore>, sourceMs: number, count: 3 | 5) {
+  const lead = (score.lanes as readonly { id: string; role: string }[]).find(lane => lane.role === 'lead')?.id;
+  const primary = score.phrases.filter(phrase => phrase.laneId === lead);
+  const phrases = [...(primary.length ? primary : score.phrases)].sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
+  if (!phrases.length) return null;
+  const time = sourceMs - score.offsetMs;
+  let index = 0;
+  for (let i = 0; i < phrases.length && phrases[i].startMs <= time; i++) index = i;
+  const begin = Math.max(0, Math.min(phrases.length - count, index - Math.floor(count / 2)));
+  const window = phrases.slice(begin, begin + count);
+  const start = Math.max(0, window[0].startMs + score.offsetMs);
+  const end = Math.max(start + 250, ...window.map(phrase => phrase.endMs + score.offsetMs));
+  const padding = Math.max(150, (end - start) * .035);
+  return { phraseId: phrases[index].id, key: window.map(phrase => phrase.id).join(':'), startMs: Math.max(0, start - padding), endMs: end + padding };
+}
+
 export function intersectingLanes(score: Immutable<LyricVibeScore>, range: ViewRange): TimelineLane[] {
   const laneDefs = score.lanes as readonly { id: string; label: string; role: string }[];
   return laneDefs.map(lane => {

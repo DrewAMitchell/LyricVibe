@@ -1,5 +1,6 @@
 [
   "analysis/anchors.js",
+  "analysis/autoplay-guard.js",
   "analysis/capture-worklet.js",
   "analysis/controller.js",
   "analysis/model-worker.bundle.js",

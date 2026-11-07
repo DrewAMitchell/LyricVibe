@@ -47,3 +47,14 @@ details > summary:focus-visible { outline:2px solid var(--accent); outline-offse
 .analysis-footer .song-align:disabled { color: #899b8e; border-color: #425248; }
 @media (max-width: 650px) { .analysis-footer { padding: 6px 12px; } .analysis-footer > span:first-child { display: none; } .analysis-footer > button:last-child { margin-left: 0; } }
 .song-pass-status { flex: none; }
+/* Keep playback and navigation compact while the lyric lanes remain dominant. */
+.workspace-header { min-height: 54px; padding-top: 8px; padding-bottom: 8px; }
+.workspace-transport { min-height: 48px; padding-top: 6px; padding-bottom: 6px; }
+.phrase-navigation { min-height: 48px; padding-top: 6px; padding-bottom: 6px; }
+.follow-count select { min-height: 30px; max-width: 95px; padding: 4px; font-size: 10px; }
+@media (max-width:650px) {
+  .phrase-navigation { flex-wrap: wrap; row-gap: 4px; }
+  .phrase-picker { flex: 1 1 calc(100% - 90px); max-width: none; }
+  .zoom-controls { order: 2; flex: 1; margin-left: 0; }
+  .phrase-navigation > button[aria-expanded] { order: 3; }
+}

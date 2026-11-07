@@ -128,7 +128,7 @@ test('spoofed, malformed and wrong-media score updates leave buffered evidence a
   const update = { type: 'LV_SCORE_UPDATED', mediaKey: h.clock.mediaKey, tabId: 4, score: { ...h.score, revision: 2 } };
   h.emit(update, { id: 'fixture-extension', url: 'chrome-extension://fixture-extension/editor.html' });
   h.emit({ ...update, score: { revision: 2 } });
-  h.emit({ ...update, score: { ...h.score, revision: 2, source: { ...h.score.source, videoId: 'FIXTURE0003' } } });
+  h.emit({ ...update, score: { ...h.score, revision: 2, source: { ...h.score.source, videoId: 'FIXTURE0002' } } });
   h.emit({ ...update, score: { ...h.score, revision: 2, phrases: [{ ...h.score.phrases[0], endMs: -1 }] } });
   assert.equal((await h.request({ type: 'LV_ANALYSIS_OFFSCREEN_STATUS' })).analysis.bufferedSeconds, 0.256);
   h.worklet.port.onmessage({ data: { pcm: new Float32Array(192000 - 4096), startFrame: 4096, sampleRate: 16000 } });
@@ -142,7 +142,7 @@ test('authorized Start still rejects a malformed or media-mismatched score befor
   assert.equal(response.ok, false);
   assert.equal(response.error.code, 'INVALID_ANALYSIS_SCORE');
   assert.equal(h.worker, undefined);
-  const wrongMedia = await h.request({ type: 'LV_ANALYSIS_OFFSCREEN_START', config: { tabId: 4, mediaKey: 'youtube:FIXTURE0003', score: h.score } });
+  const wrongMedia = await h.request({ type: 'LV_ANALYSIS_OFFSCREEN_START', config: { tabId: 4, mediaKey: 'youtube:FIXTURE0002', score: h.score } });
   assert.equal(wrongMedia.error.code, 'INVALID_ANALYSIS_SCORE');
   assert.equal(h.context, undefined);
 });
@@ -165,4 +165,13 @@ test('synthetic audio worklet bounds cross-thread queue to four PCM blocks and r
   assert.equal(capture.messages.length, 5);
   assert.equal(capture.messages[4].droppedFrames, 8192);
   assert.equal(capture.messages[4].startFrame, 16384);
+});
+
+test('audio worklet flush retains the partial final block before reporting completion', () => {
+  let Capture;
+  class AudioWorkletProcessor { constructor() { this.messages=[]; this.port={postMessage:message=>this.messages.push(message)}; } }
+  const sandbox={AudioWorkletProcessor,Float32Array,currentFrame:3200,sampleRate:16000,registerProcessor:(_,processor)=>{Capture=processor}};
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../extension/analysis/capture-worklet.js'),'utf8'),sandbox);
+  const capture=new Capture();capture.process([[new Float32Array(128).fill(.25)]]);capture.port.onmessage({data:{type:'flush'}});
+  assert.equal(capture.messages.length,2);assert.equal(capture.messages[0].startFrame,3200);assert.equal(capture.messages[0].pcm.length,128);assert.equal(capture.messages[1].type,'flushed');
 });

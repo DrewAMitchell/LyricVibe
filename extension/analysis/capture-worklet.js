@@ -3,7 +3,17 @@
 class LvPcmCapture extends AudioWorkletProcessor {
   constructor() {
     super(); this.buffer = new Float32Array(2048); this.used = 0; this.startFrame = 0; this.pending = 0; this.droppedFrames = 0;
-    this.port.onmessage = ({ data }) => { if (data.type === 'ack') this.pending = Math.max(0, this.pending - 1); };
+    this.port.onmessage = ({ data }) => {
+      if (data.type === 'ack') this.pending = Math.max(0, this.pending - 1);
+      if (data.type === 'flush') {
+        if (this.used) {
+          const pcm = this.buffer.slice(0, this.used);
+          this.port.postMessage({ pcm, startFrame: this.startFrame, sampleRate, droppedFrames: this.droppedFrames }, [pcm.buffer]);
+          this.pending++; this.buffer = new Float32Array(2048); this.used = 0; this.droppedFrames = 0;
+        }
+        this.port.postMessage({ type: 'flushed' });
+      }
+    };
   }
   process(inputs) {
     const channels = inputs[0];

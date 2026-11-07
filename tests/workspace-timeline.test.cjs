@@ -48,3 +48,13 @@ test('dragging and resizing preserve parent containment, duration and integer mi
   assert.deepEqual(movedInterval(item, -9999, 'end', 1000, 2000), { startMs: 1200, endMs: 1200 });
   assert.deepEqual(movedInterval(item, 1.7, 'move', 1000, 2000), { startMs: 1202, endMs: 1502 });
 });
+const { phraseWindow } = require('../.verification/workspace-timeline.cjs');
+test('follow windows keep three or five lead phrases around the source playhead without changing score timing', () => {
+  const value=core.createScore({platform:'youtube',videoId:'FIXTURE0001',durationMs:40000},'[00:02]one\n[00:06]two\n[00:10]three\n[00:14]four\n[00:18]five\n[00:22]six',{contentHash:'a'.repeat(64)});
+  value.offsetMs=250; const before=JSON.stringify(value),three=phraseWindow(value,14250,3),five=phraseWindow(value,14250,5);
+  assert.equal(three.phraseId,value.phrases[3].id);
+  assert.ok(three.startMs<=value.phrases[2].startMs+250 && three.endMs>=value.phrases[4].endMs+250);
+  assert.ok(five.startMs<three.startMs && five.endMs>three.endMs);
+  assert.equal(phraseWindow(value,0,3).phraseId,value.phrases[0].id);
+  assert.equal(JSON.stringify(value),before);
+});

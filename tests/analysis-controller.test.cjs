@@ -59,3 +59,14 @@ test('service worker native bridge binds the exact offscreen session and rejects
   onConnect.emit(foreign);
   assert.equal(foreign.disconnected, true);
 });
+
+test('stopping during autoplay guard setup restores the original setting after setup resolves', async () => {
+  const onMessage=event(), onConnect=event(), sent=[]; let resolveGuard;
+  const chrome={runtime:{id:'fixture-extension',getURL:file=>`chrome-extension://fixture-extension/${file}`,onMessage,onConnect,getContexts:async()=>[],sendMessage:async()=>({})},tabs:{sendMessage:async(tabId,message)=>{sent.push(message.action);if(message.action==='start')return new Promise(resolve=>{resolveGuard=resolve});return {ok:true}}},offscreen:{closeDocument:async()=>{}}};
+  const sandbox={chrome,crypto:require('node:crypto').webcrypto};vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../extension/analysis/controller.js'),'utf8'),sandbox);
+  const sender={id:'fixture-extension',url:'chrome-extension://fixture-extension/analysis/offscreen.html'};
+  onMessage.emit({type:'LV_ANALYSIS_OFFSCREEN_STATE',analysis:{sessionId:'pass',tabId:3,mediaKey:'youtube:FIXTURE0001',engine:'native',wholeSong:true}},sender,()=>{});
+  const response=new Promise(resolve=>onMessage.emit({type:'LV_ANALYSIS_CONTROL_REQUEST',sessionId:'pass',tabId:3,action:'guard-start'},sender,resolve));
+  await sandbox.LvAnalysis.stopAnalysis();resolveGuard({ok:true});await response;
+  assert.deepEqual(sent,['start','release']);
+});

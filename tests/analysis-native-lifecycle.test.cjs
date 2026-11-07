@@ -25,7 +25,7 @@ function setup() {
     async close() { this.closed = true; }
   }
   class AudioWorkletNode {
-    constructor() { worklet = this; this.port = { close() {}, postMessage() {} }; }
+    constructor() { worklet = this; this.port = { close() {}, postMessage(message) { if (message.type === 'flush') setImmediate(() => this.onmessage?.({ data: { type: 'flushed' } })); } }; }
     connect() {}
     disconnect() { this.disconnected = true; }
   }
@@ -242,7 +242,7 @@ test('whole-song capture runs the selected phrase windows and saves review-only 
   h.emitPcm(new Float32Array(480000).fill(0.25), 0);
   h.context.currentTime = 30;
   h.clock.currentTimeMs = 30000;
-  h.clock.paused = true;
+  h.clock.paused = true; h.clock.ended = true;
   await [...h.intervals][0]();
   await new Promise(resolve => setTimeout(resolve, 100));
   const request = h.port.posts.find(message => message.type === 'analyze');

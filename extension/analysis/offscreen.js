@@ -27,6 +27,7 @@
     const s = session;
     session = null;
     if (!s) return;
+    if (s.songGuardActive) { s.songGuardActive = false; await send({ type: 'LV_ANALYSIS_CONTROL_REQUEST', tabId: s.tabId, sessionId: s.sessionId, action: 'guard-release' }); }
     clearInterval(s.clockTimer);
     clearTimeout(s.modelTimeout);
     clearTimeout(s.cancelTimeout);
@@ -210,9 +211,17 @@
   }
 
   async function finishSongCapture(s) {
-    if (session !== s || s.songPhase !== 'capturing') return;
-    s.songPhase = 'aligning'; s.state = 'aligning';
+    if (session !== s || s.songPhase !== 'capturing' || s.songFinishing) return;
+    s.songFinishing = true;
     clearInterval(s.clockTimer); s.clockTimer = null;
+    if (s.worklet) await Promise.race([new Promise(resolve => { s.songFlushResolve = resolve; s.worklet.port.postMessage({ type: 'flush' }); }), new Promise(resolve => setTimeout(resolve, 1000))]);
+    s.songFlushResolve = null;
+    if (session !== s) return;
+    s.songPhase = 'aligning'; s.state = 'aligning';
+    if (s.songGuardActive) {
+      const held = await send({ type: 'LV_ANALYSIS_CONTROL_REQUEST', tabId: s.tabId, sessionId: s.sessionId, action: 'guard-hold' });
+      if (!held?.ok) { fail(s, 'AUTOPLAY_GUARD_UNAVAILABLE', 'The source could not be held safely after capture.'); return; }
+    }
     if (s.worklet) { s.worklet.port.onmessage = null; s.worklet.port.close(); s.worklet.disconnect(); s.worklet = null; }
     s.source?.disconnect(); s.source = null;
     s.stream?.getTracks().forEach(track => track.stop()); s.stream = null;
@@ -310,8 +319,8 @@
         }
         if (s.wholeSong && s.songPhase === 'capturing') {
           if (clock.isAd) { fail(s, 'ADVERTISEMENT_ACTIVE', 'An advertisement interrupted the song pass. Existing suggestions are retained.'); return; }
-          const endMs = Number.isFinite(clock.durationMs) && clock.durationMs > 0 ? Math.min(clock.durationMs, s.score.source.durationMs) : s.score.source.durationMs;
-          if (s.songUsed > 0 && (clock.currentTimeMs >= endMs - 40 || clock.paused && clock.currentTimeMs >= endMs - 300)) { void finishSongCapture(s); return; }
+          if (clock.autoplayGuardValid === false) { fail(s, 'AUTOPLAY_GUARD_CHANGED', 'YouTube autoplay changed during capture; the song pass stopped.'); return; }
+          if (clock.ended && s.songUsed > 0) { void finishSongCapture(s); return; }
           if (clock.playbackRate !== 1 || clock.seeking || clock.paused) { fail(s, 'SONG_CAPTURE_INTERRUPTED', 'Playback changed during the song pass. Start again at normal speed.'); return; }
         }
         const update = s.clock.update(clock, (before + after) / 2);
@@ -403,6 +412,7 @@
       s.worklet.connect(s.context.destination);
       s.pcm = new Float32Array(Math.round(s.context.sampleRate * WINDOW_SEC));
       s.worklet.port.onmessage = ({ data }) => {
+        if (data.type === 'flushed') { s.songFlushResolve?.(); return; }
         try { pcm(s, data); } finally { if (session === s) s.worklet.port.postMessage({ type: 'ack' }); }
       };
       s.stream.getTracks().forEach(track => track.addEventListener('ended', () => { if (session === s && !(s.wholeSong && s.songPhase === 'aligning')) fail(s, 'CAPTURE_ENDED', 'The browser ended tab audio capture.'); }));
@@ -439,6 +449,10 @@
       s.phase = 'capturing';
       if (s.wholeSong && session === s) {
         s.songPhase = 'waiting-start';
+        const guard = await chrome.runtime.sendMessage({ type: 'LV_ANALYSIS_CONTROL_REQUEST', tabId: s.tabId, sessionId: s.sessionId, action: 'guard-start' });
+        if (!guard?.ok) throw Object.assign(new Error(guard?.error?.message || 'YouTube autoplay could not be paused safely.'), { code: guard?.error?.code || 'AUTOPLAY_GUARD_UNAVAILABLE' });
+        if (session !== s) { await send({ type: 'LV_ANALYSIS_CONTROL_REQUEST', tabId: s.tabId, sessionId: s.sessionId, action: 'guard-release' }); return; }
+        s.songGuardActive = true;
         const seek = await chrome.runtime.sendMessage({ type: 'LV_ANALYSIS_CONTROL_REQUEST', tabId: s.tabId, sessionId: s.sessionId, action: 'seek-start' });
         if (!seek?.ok) throw Object.assign(new Error('The source could not seek to the beginning.'), { code: 'SONG_SEEK_FAILED' });
         const play = await chrome.runtime.sendMessage({ type: 'LV_ANALYSIS_CONTROL_REQUEST', tabId: s.tabId, sessionId: s.sessionId, action: 'play' });
@@ -446,7 +460,7 @@
         await clockTick(s);
       }
       publish();
-    } catch (error) { fail(s, error.code || 'CAPTURE_SETUP_FAILED', s.wholeSong && /^(SONG_|NO_ALIGNABLE)/.test(error.code || '') ? error.message : 'The selected tab audio could not be captured and routed.', { phase: s.phase, causeName: error?.name, causeCode: error?.code }); }
+    } catch (error) { fail(s, error.code || 'CAPTURE_SETUP_FAILED', s.wholeSong && /^(SONG_|NO_ALIGNABLE|AUTOPLAY_)/.test(error.code || '') ? error.message : 'The selected tab audio could not be captured and routed.', { phase: s.phase, causeName: error?.name, causeCode: error?.code }); }
   }
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
