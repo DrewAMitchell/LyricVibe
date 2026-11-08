@@ -5718,7 +5718,7 @@
     return ['estimate','phrase','words','syllables'].indexOf(authoring.level)>=need?'done':'todo';
   }
   let beatDisplayCache={score:null,map:null,ends:{}};
-  let leadTrackCache={score:null,ends:null,plan:null},pileCache=null,dejaCache=null;
+  let leadTrackCache={score:null,ends:null,plan:null},backingTrackCache={score:null,ends:null,plan:null},pileCache=null,dejaCache=null;
   const leadTrackColors=['#bfe8ff','#ffdeb1','#e6d1ff','#c9f0c7','#ffd1dc','#d5e7a6'];
   const leadTrackFonts=['',"'Segoe UI Variable','Segoe UI',sans-serif","Georgia,serif","'Trebuchet MS',sans-serif"];
   function applyLeadTrackStyle(node,laneId,plan){const index=plan?.multi&&Object.hasOwn(plan.laneColors,laneId)?plan.laneColors[laneId]:undefined,color=index===undefined?'':leadTrackColors[index%leadTrackColors.length],font=index===undefined?'':leadTrackFonts[index%leadTrackFonts.length];for(const [prop,value] of [['--lvx-color-main',color],['--lvx-color-accent',color],['--lvx-font-main',font]])if(node.style.getPropertyValue(prop)!==value){if(value)node.style.setProperty(prop,value);else node.style.removeProperty(prop);}return color;}
@@ -5729,7 +5729,7 @@
   // hidden; unsaved work remains owned by its existing recovery path.
   function clearDerivedSongRender(){
     displaySyllables={key:null,basis:null,score:null,suggestions:new Map(),pending:false};
-    beatDisplayCache={score:null,map:null,ends:{}};leadTrackCache={score:null,ends:null,plan:null};pileCache=null;dejaCache=null;
+    beatDisplayCache={score:null,map:null,ends:{}};leadTrackCache={score:null,ends:null,plan:null};backingTrackCache={score:null,ends:null,plan:null};pileCache=null;dejaCache=null;
     expressionPlan={score:null,cues:{}};
     savedPromptCache={score:null,lane:null,events:[]};
     beatStyledNodes.clear();beatGrooveLetters.clear();
@@ -6224,6 +6224,7 @@
     const stagePadding=useVinyl?'0px':'16px';if(stage.style.paddingTop!==stagePadding)stage.style.paddingTop=stagePadding;
     if(beatDisplayCache.score!==score||beatDisplayCache.map!==tempo.map||beatDisplayCache.linger!==linger){const ends=LvBeatTrack.presentationEnds(score,tempo.map,linger);beatDisplayCache={score,map:tempo.map,linger,ends:ends.phrases,units:ends.units};}
     if(leadTrackCache.score!==score||leadTrackCache.ends!==beatDisplayCache.ends||leadTrackCache.pile!==usePile)leadTrackCache={score,ends:beatDisplayCache.ends,pile:usePile,plan:usePile?LvChoreography.leadTrackPlan(score,{},0,true):LvChoreography.leadTrackPlan(score,beatDisplayCache.ends)};
+    if(backingTrackCache.score!==score||backingTrackCache.ends!==beatDisplayCache.ends)backingTrackCache={score,ends:beatDisplayCache.ends,plan:LvChoreography.leadTrackPlan(score,beatDisplayCache.ends,2000,false,'backing')};
     const leadTracks=leadTrackCache.plan,deja=choreography.dejaVu&&choreography.mode!=='vinyl'?dejaState(score):null;
     const active = LvScore.activeAt(score, mediaMs,{displayEnds:beatDisplayCache.ends});
     // Lead-in: an empty lane shows its next phrase dimmed up to 2s early, so a rewind is never a blank screen.
@@ -6325,8 +6326,10 @@
         }
       }
       const authoredRegion=regionFrame.find(r=>r.target.id===phrase.id),settings=backing||authoredRegion||stageEdit.active||choreography.mode==='vinyl'?{...choreography,mode:'classic',dejaVu:Boolean(deja),automatic:false,dance:'off'}:choreography;
-      const peers=active.phrases.filter(p=>isBacking(p)===backing),area=backing?areas.backing:areas.main,slot=backing?peers.indexOf(phrase):(Object.hasOwn(leadTracks.slots,phrase.id)?leadTracks.slots[phrase.id]:0),count=backing?Math.max(1,peers.length):leadTracks.count;
-      let rect={x:area.x+8,y:area.y+area.height*slot/count+8,width:Math.max(1,area.width-16),height:Math.max(1,area.height/count-16)};
+      const area=backing?areas.backing:areas.main,plan=backing?backingTrackCache.plan:leadTracks,slot=Object.hasOwn(plan.slots,phrase.id)?plan.slots[phrase.id]:0,count=plan.count;
+      // Backing parts share the height and use stable side-by-side slots. A
+      // part ending must not suddenly resize every other backing lyric.
+      let rect=backing?{x:area.x+area.width*slot/count+8,y:area.y+8,width:Math.max(1,area.width/count-16),height:Math.max(1,area.height-16)}:{x:area.x+8,y:area.y+area.height*slot/count+8,width:Math.max(1,area.width-16),height:Math.max(1,area.height/count-16)};
       if(regionLayout){rect=authoredRegion?{x:authoredRegion.rect.x*stageWidth,y:authoredRegion.rect.y*stageHeight,width:authoredRegion.rect.width*stageWidth,height:authoredRegion.rect.height*stageHeight}:{x:placement.left/100*stageWidth+rect.x*placement.width/100,y:placement.top/100*stageHeight+rect.y*placement.height/100,width:rect.width*placement.width/100,height:rect.height*placement.height/100};}
       const identity=[...stage.children].find(el=>el.dataset.vocalFor===phrase.id);
       if(!backing&&leadTracks.multi){const color=applyLeadTrackStyle(line,phrase.laneId,leadTracks),height=Math.min(20,Math.max(12,rect.height*.16));if(identity){identity.style.setProperty('--lvx-track-color',color);Object.assign(identity.style,{left:rect.x+'px',top:rect.y+'px',width:rect.width+'px',height:height+'px',opacity:String(phrase.opacity)});}rect.y+=height;rect.height=Math.max(1,rect.height-height);}

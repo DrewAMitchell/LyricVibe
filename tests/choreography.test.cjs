@@ -290,7 +290,7 @@ test('lead vocal slots remain stable through lead-in, overlap and exit without d
   const adjacent={lanes:score.lanes,phrases:[phrase('a','a',1000,2000),phrase('b','b',3500,4500)]};assert.equal(leadTrackPlan(adjacent).count,2,'lead-in is included in conflict planning');
   const separate={lanes:score.lanes,phrases:[phrase('a','a',1000,2000),phrase('b','b',5000,6000)]};assert.equal(leadTrackPlan(separate).count,1,'nonoverlapping tracks reuse the same full-size region');assert.equal(leadTrackPlan(separate,{a:4000}).count,2,'a lingering line reserves its slot');
   const unison={lanes:score.lanes,phrases:[phrase('one','a',1000,6000),phrase('two','a',3000,4000)]};const u=leadTrackPlan(unison);assert.equal(u.count,2);assert.notEqual(u.slots.one,u.slots.two);
-  const touching={lanes:score.lanes,phrases:[phrase('first','a',1000,2000),phrase('next','a',2000,3000)]};const pile=leadTrackPlan(touching,{},0,true);assert.equal(pile.count,1,'back-to-back phrases share a pile');assert.equal(pile.slots.first,pile.slots.next);assert.equal(leadTrackPlan(unison,{},0,true).count,2,'genuinely overlapping leads retain separate regions');
+  const touching={lanes:score.lanes,phrases:[phrase('first','a',1000,2000),phrase('next','a',2000,3000)]};const pile=leadTrackPlan(touching,{},0,true);assert.equal(pile.count,1,'back-to-back phrases share a pile');assert.equal(pile.slots.first,pile.slots.next);const merged=leadTrackPlan(unison,{},0,true);assert.equal(merged.count,1,'overlapping phrases on one singer share a pile');assert.equal(merged.slots.one,merged.slots.two);assert.equal(leadTrackPlan(score,{},0,true).count,2,'overlapping different singers keep separate piles');
 });
 
 

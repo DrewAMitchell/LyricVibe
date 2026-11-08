@@ -466,16 +466,18 @@
   // Reserve a stable slot for each voice that can be visible simultaneously.
   // Lead-ins are included so the first singer does not move when another is previewed.
   // Non-overlapping voices may share a slot. Authored stage regions remain separate.
-  function leadTrackPlan(score,displayEnds={},leadInMs=2000,exclusiveEnds=false){
-    const lanes=(score.lanes||[]).filter(l=>l.role==='lead'),nodes=[],byPhrase=new Map();
+  function leadTrackPlan(score,displayEnds={},leadInMs=2000,exclusiveEnds=false,role='lead'){
+    const lanes=(score.lanes||[]).filter(l=>l.role===role),nodes=[],byPhrase=new Map();
     for(const lane of lanes){
       const phrases=(score.phrases||[]).filter(p=>p.laneId===lane.id&&p.words?.some(w=>!w.excluded)).sort((a,b)=>a.startMs-b.startMs||a.id.localeCompare(b.id));
       const voices=[];
       for(const phrase of phrases){
-        let voice=voices.find(v=>exclusiveEnds?v.until<=phrase.startMs:v.until<phrase.startMs);
+        // A pile is per singer: overlapping phrases from the same lane share
+        // its physics rather than creating a second pile for that singer.
+        let voice=exclusiveEnds?voices[0]:voices.find(v=>v.until<phrase.startMs);
         if(!voice){voice={laneId:lane.id,index:voices.length,until:-1,intervals:[],neighbors:new Set()};voices.push(voice);nodes.push(voice);}
         const end=Math.max(phrase.endMs,Number.isFinite(displayEnds[phrase.id])?displayEnds[phrase.id]:phrase.endMs);
-        voice.until=end;voice.intervals.push({start:Math.max(0,phrase.startMs-leadInMs),end});byPhrase.set(phrase.id,voice);
+        voice.until=Math.max(voice.until,end);voice.intervals.push({start:Math.max(0,phrase.startMs-leadInMs),end});byPhrase.set(phrase.id,voice);
       }
     }
     const overlaps=(a,b)=>{const aa=a.intervals.slice().sort((x,y)=>x.start-y.start),bb=b.intervals.slice().sort((x,y)=>x.start-y.start);let i=0,j=0;while(i<aa.length&&j<bb.length){if(exclusiveEnds?aa[i].start<bb[j].end&&bb[j].start<aa[i].end:aa[i].start<=bb[j].end&&bb[j].start<=aa[i].end)return true;if(exclusiveEnds?aa[i].end<=bb[j].end:aa[i].end<bb[j].end)i++;else j++;}return false;};
