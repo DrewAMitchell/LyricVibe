@@ -5,5 +5,6 @@ test('export rejects invalid time, raster and frame-rate requests before renderi
 test('live bass cannot silently become a different offline performance',()=>{const p=fixture();p.score.stageItems=[{id:'bass',type:'speakers',startMs:1000,endMs:2000,rect:{x:0,y:0,width:1,height:1},strength:1,beatsPerPulse:1,response:'bass',provenance:'manual'}];assert.throws(()=>exp.validate(p),e=>e.code==='EXPORT_LIVE_AUDIO');p.clip.startMs=2000;p.clip.endMs=3000;assert.equal(exp.validate(p),p);});
 
 test('word pile layout survives the overlay package contract',()=>{const p=fixture();p.display.choreography.mode='pile';assert.equal(exp.validate(JSON.parse(JSON.stringify(p))).display.choreography.mode,'pile');});
+test('word burst layout and main-track-name preference survive the overlay package contract',()=>{const p=fixture();p.display.choreography.mode='burst';p.display.backingDisplay.leadLabels=true;const copy=exp.validate(JSON.parse(JSON.stringify(p)));assert.equal(copy.display.choreography.mode,'burst');assert.equal(copy.display.backingDisplay.leadLabels,true);});
 
 test('déjà vu setting survives the overlay package contract',()=>{const p=fixture();p.display.choreography.dejaVu=true;assert.equal(exp.validate(JSON.parse(JSON.stringify(p))).display.choreography.dejaVu,true);});

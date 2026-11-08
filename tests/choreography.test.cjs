@@ -177,8 +177,9 @@ test('preferred minimum yields to fitting the whole phrase without changing word
 
 test('backing has one bounded budget while shared space returns full main height',()=>{
   const {backingSettings,vocalAreas}=require('../extension/choreography.js');
-  assert.deepEqual(backingSettings(),{space:'shared',area:.25});
-  assert.deepEqual(backingSettings({space:'bad',area:5}),{space:'shared',area:.4});
+  assert.deepEqual(backingSettings(),{space:'shared',area:.25,leadLabels:false});
+  assert.deepEqual(backingSettings({space:'bad',area:5}),{space:'shared',area:.4,leadLabels:false});
+  assert.equal(backingSettings({leadLabels:true}).leadLabels,true);
   assert.equal(backingSettings({area:NaN}).area,.25);
   assert.deepEqual(vocalAreas(1000,800,true),{main:{x:0,y:0,width:1000,height:800},backing:{x:100,y:600,width:800,height:200}});
   assert.equal(vocalAreas(1000,800,true,{space:'separate'}).main.height,600,'an explicitly selected separate area remains available');
@@ -293,6 +294,19 @@ test('lead vocal slots remain stable through lead-in, overlap and exit without d
   const touching={lanes:score.lanes,phrases:[phrase('first','a',1000,2000),phrase('next','a',2000,3000)]};const pile=leadTrackPlan(touching,{},0,true);assert.equal(pile.count,1,'back-to-back phrases share a pile');assert.equal(pile.slots.first,pile.slots.next);const merged=leadTrackPlan(unison,{},0,true);assert.equal(merged.count,1,'overlapping phrases on one singer share a pile');assert.equal(merged.slots.one,merged.slots.two);assert.equal(leadTrackPlan(score,{},0,true).count,2,'overlapping different singers keep separate piles');
 });
 
+
+test('pile follows active singers and clears another singer’s old pile during a solo',()=>{
+ const {pileVoicesAt}=require('../extension/choreography.js'),p=(id,laneId,startMs,endMs)=>({id,laneId,startMs,endMs,words:[{id:id+'-word'}]}),score={lanes:[{id:'q',role:'lead'},{id:'o',role:'lead'},{id:'back',role:'backing'}],phrases:[p('q1','q',0,2000),p('o1','o',1000,4000),p('b','back',1500,3500),p('o2','o',4100,5000)]};
+ const duet=pileVoicesAt(score,1500);assert.equal(duet.count,1);assert.equal(duet.slots.q1,0);assert.equal(duet.slots.o1,0);assert.equal(duet.multi,true,'simultaneous singers share one physics space');const solo=pileVoicesAt(score,2500);assert.equal(solo.count,1);assert.equal(solo.slots.q1,undefined);assert.equal(solo.slots.o1,0);assert.equal(pileVoicesAt(score,4050).key,'o','last singer stays visible in a short rest');assert.deepEqual(pileVoicesAt(score,2500),solo,'seeking reconstructs the same regions');
+});
+
+test('word burst holds at the center then sends bounded letters outward on the source clock',()=>{
+ const {burstTrack,pileAt}=require('../extension/choreography.js'),words=[{id:'first',phraseId:'p',laneId:'lead',text:'HELLO',startMs:0,endMs:500},{id:'second',phraseId:'p',laneId:'lead',text:'AGAIN',startMs:800,endMs:1200}],before=structuredClone(words),measure=(text,font)=>text.length*font*.55,plan=burstTrack(words,600,360,measure,{font:50}),[first,second]=plan.pages[0].items;
+ assert.equal(first.x,(600-first.width)/2);assert.equal(first.y,(360-first.height)/2);assert.equal(first.impact,500);assert.equal(first.fragments.map(f=>f.text).join(''),'HELLO');assert.equal(second.impact,1200);assert.ok(first.fragments.every(f=>f.frames.length>8));
+ const points=first.fragments.map(f=>pileAt({...f,startMs:first.impact,seed:first.seed},1100,600,360));assert.ok(points.some(p=>Math.abs(p.x-300)>80||Math.abs(p.y-180)>60),'letters fly outward');assert.ok(points.every(p=>p.x>=0&&p.y>=0&&p.x<=600&&p.y<=360));
+ const small=(list)=>burstTrack(list,300,180,measure,{font:35}).pages[0].items[0],firstOnly=small([words[0]]),interacting=small([words[0],{...words[1],id:'word0',startMs:600,endMs:700}]),positions=item=>item.fragments.map(f=>pileAt({...f,startMs:item.impact,seed:item.seed},1000,300,180));assert.notDeepEqual(positions(interacting),positions(firstOnly),'later debris moves earlier debris through collisions');
+ assert.deepEqual(plan,burstTrack(words,600,360,measure,{font:50}));assert.deepEqual(words,before);assert.equal(pileAt(first,first.startMs,600,360,{reduced:true}).rotation,0);
+});
 
 test('pile enters from one edge, breaks some words into colliding letters and replays deterministically',()=>{
  const {pileTrack,pileAt}=require('../extension/choreography.js'),words=Array.from({length:45},(_,i)=>({id:'word-'+i,phraseId:'p'+Math.floor(i/5),laneId:'lead',text:'lyric'+i,startMs:i*250})),plan=pileTrack(words,500,300,(text,font)=>text.length*font*.55,{font:38,maxWords:12});

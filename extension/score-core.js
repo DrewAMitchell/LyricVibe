@@ -14,7 +14,7 @@
     wordEffects: Object.freeze(['shake','tilt','pulse','bounce','glow','groove','echo','glitch','spin','rotor']),
     beatEffects: Object.freeze(['pulse','breath','color','bounce','glow','groove','echo','glitch','spin','rotor']),
     landings: Object.freeze(['settle','glide','drop','still']),
-    layouts: Object.freeze(['classic','fall','puzzle','vinyl','pile'])
+    layouts: Object.freeze(['classic','fall','puzzle','vinyl','pile','burst'])
   });
   const EFFECTS = new Set(["shake", "tilt", "pulse", "bounce", "glow", "groove", "echo", "glitch", "spin", "rotor"]);
   const REVEAL_EASINGS = new Set(["linear", "ease-out", "ease-in-out"]);
