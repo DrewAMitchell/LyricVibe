@@ -494,20 +494,21 @@
     const hash=text=>{let n=2166136261;for(const ch of String(text)){n^=ch.codePointAt(0);n=Math.imul(n,16777619);}return n>>>0;};
     let page=null,area=0;
     for(const word of ordered){
-      const measured=word._dejaReuse?reuseWidths.get(word._dejaReuse):measure(word.text,font,word),size=Math.max(4,Math.min(font,font*(width*.84/Math.max(1,measured)))),w=Math.min(width,Math.max(1,measured*size/font+size*.12)),h=Math.min(height,Math.max(1,size*1.3)),padX=Math.min((width-w)/2,h*.08+2),padY=Math.min((height-h)/2,w*.08+2),seed=hash(word.id);
+      const measured=word._dejaReuse?reuseWidths.get(word._dejaReuse):measure(word.text,font,word),size=Math.max(4,Math.min(font,font*(width*.92/Math.max(1,measured)))),w=Math.min(width,Math.max(1,measured*size/font+size*.04)),h=Math.min(height,Math.max(1,size*1.15)),padX=Math.min((width-w)/2,1),padY=Math.min((height-h)/2,1),seed=hash(word.id);
       const repeated=word._dejaReuse&&page?.items.at(-1)?.reuseKey===word._dejaReuse;
-      if(!page||page.items.length>=maxWords||!repeated&&page.items.length&&area+(w+padX*2)*(h+padY*2)>width*height*.58){page={startMs:word.startMs,items:[]};pages.push(page);area=0;}
+      if(!page||page.items.length>=maxWords||!repeated&&page.items.length&&area+(w+padX*2)*(h+padY*2)>width*height*.8){page={startMs:word.startMs,items:[]};pages.push(page);area=0;}
       const previous=page.items.at(-1),reuse=word._dejaReuse&&previous?.reuseKey===word._dejaReuse;
-      const item={id:word.id,phraseId:word.phraseId,laneId:word.laneId,startMs:word.startMs,width:w,height:h,padX,padY,font:size,edge:0,seed,reuseKey:word._dejaReuse,splatter:seed%4===0,frames:[]};
+      const glyphs=typeof Intl.Segmenter==='function'?[...new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(word.text)].map(x=>x.segment):Array.from(word.text);
+      const item={id:word.id,phraseId:word.phraseId,laneId:word.laneId,startMs:word.startMs,width:w,height:h,padX,padY,font:size,edge:0,seed,reuseKey:word._dejaReuse,breakApart:!word._dejaReuse&&seed%4===0&&glyphs.length>1&&glyphs.length<=16,glyphs,frames:[]};
       if(reuse)item.reuseId=previous.reuseId||previous.id;else area+=(w+padX*2)*(h+padY*2);
       page.items.push(item);
     }
     for(let index=0;index<pages.length;index++){
       const current=pages[index],overflow=[];
       for(;;){
-        let previous=null;for(const item of current.items){item.frames=[];delete item.impact;delete item.reuseId;if(item.reuseKey&&previous?.reuseKey===item.reuseKey)item.reuseId=previous.reuseId||previous.id;previous=item;}
+        let previous=null;for(const item of current.items){item.frames=[];delete item.impact;delete item.fragments;delete item.reuseId;if(item.reuseKey&&previous?.reuseKey===item.reuseKey)item.reuseId=previous.reuseId||previous.id;previous=item;}
         simulatePile(current,width,height);
-        if(current.items.length<=1||current.items.every(item=>item.y>=-.5))break;
+        if(current.items.length<=1||current.items.every(item=>item.fragments?.length?item.fragments.every(f=>f.y>=-.5):item.y>=-.5))break;
         overflow.unshift(current.items.pop());
       }
       if(overflow.length)pages.splice(index+1,0,{startMs:overflow[0].startMs,items:overflow});
@@ -517,12 +518,12 @@
   function simulatePile(page,width,height){
     const step=1000/30,bodies=[],byId=new Map(),lastStart=page.items.at(-1)?.startMs??page.startMs;
     let next=0,now=page.startMs,lastSpawn=now;
-    const record=(b,t)=>{b.item.frames.push(t,b.x+b.item.padX,b.y+b.item.padY,b.angle);};
+    const record=(b,t)=>{const target=b.fragment||b.item;target.frames.push(t,b.x+(b.fragment?0:b.item.padX),b.y+(b.fragment?0:b.item.padY),b.angle);};
     while(next<page.items.length||now<lastStart+2200){
       if(next<page.items.length&&now-lastSpawn>2200&&page.items[next].startMs>now+step){now=page.items[next].startMs;for(const b of bodies){b.vx=0;b.vy=0;b.spin=0;record(b,now);}}
       while(next<page.items.length&&page.items[next].startMs<=now+.001){
         const item=page.items[next++];lastSpawn=now;
-        if(item.reuseId){const base=byId.get(item.reuseId);if(base){base.x=Math.max(0,Math.min(width-base.w,(width-base.w)*(.28+.44*(item.seed%997)/997)));base.y=-base.h-2;base.vx=((item.seed>>>10)%161)-80;base.vy=220+(item.seed>>>18)%130;base.spin=((item.seed>>>15)%81)-40;base.impactItem=item;item.frames=base.item.frames;item.splatter=base.item.splatter;record(base,now);continue;}}
+        if(item.reuseId){const base=byId.get(item.reuseId);if(base){base.x=Math.max(0,Math.min(width-base.w,(width-base.w)*(.28+.44*(item.seed%997)/997)));base.y=-base.h-2;base.vx=((item.seed>>>10)%161)-80;base.vy=220+(item.seed>>>18)%130;base.spin=((item.seed>>>15)%81)-40;base.impactItem=item;item.frames=base.item.frames;record(base,now);continue;}}
         const w=item.width+item.padX*2,h=item.height+item.padY*2,span=Math.max(0,width-w),f=(item.seed%997)/997,body={item,impactItem:item,w,h,x:span*(.28+.44*f),y:-h-2,vx:((item.seed>>>10)%161)-80,vy:220+(item.seed>>>18)%130,angle:((item.seed>>>5)%15)-7,spin:((item.seed>>>15)%81)-40};
         bodies.push(body);byId.set(item.id,body);record(body,item.startMs);
       }
@@ -530,30 +531,40 @@
       const dt=step/1000;now+=step;
       for(const b of bodies){b.vy+=850*dt;b.x+=b.vx*dt;b.y+=b.vy*dt;b.angle=Math.max(-9,Math.min(9,b.angle+b.spin*dt));b.spin*=.96;b.vx*=.995;
         if(b.x<0){b.x=0;b.vx=Math.abs(b.vx)*.18;}if(b.x+b.w>width){b.x=Math.max(0,width-b.w);b.vx=-Math.abs(b.vx)*.18;}
-        if(b.y+b.h>=height){b.y=height-b.h;if(b.vy>45)b.vy=-b.vy*.18;else b.vy=0;b.vx*=.8;b.spin*=.8;if(b.impactItem.impact==null)b.impactItem.impact=now;}}
+        if(b.y+b.h>=height){b.y=height-b.h;if(b.vy>45)b.vy=-b.vy*.18;else b.vy=0;b.vx*=.8;b.spin*=.8;if(!b.fragment&&b.impactItem.impact==null)b.impactItem.impact=now;}}
       for(let pass=0;pass<14;pass++)for(let i=0;i<bodies.length;i++)for(let j=i+1;j<bodies.length;j++){
         const a=bodies[i],b=bodies[j],ox=Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x),oy=Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y);
         if(ox<=0||oy<=0)continue;
-        if(oy<=ox){const upper=a.y+a.h/2<b.y+b.h/2?a:b,lower=upper===a?b:a,push=oy/2+.01;upper.y-=push;lower.y+=push;const relative=upper.vy-lower.vy;if(relative>0){const impulse=relative*.54,side=upper.x+upper.w/2<lower.x+lower.w/2?-1:1,lateral=Math.min(70,relative*.22);upper.vy-=impulse;lower.vy+=impulse;upper.vx+=side*lateral;lower.vx-=side*lateral*.4;upper.spin+=side*Math.min(18,relative*.04);if(upper.impactItem.impact==null)upper.impactItem.impact=now;}}
+        if(oy<=ox){const upper=a.y+a.h/2<b.y+b.h/2?a:b,lower=upper===a?b:a,push=oy/2+.01;upper.y-=push;lower.y+=push;const relative=upper.vy-lower.vy;if(relative>0){const impulse=relative*.54,side=upper.x+upper.w/2<lower.x+lower.w/2?-1:1,lateral=Math.min(70,relative*.22);upper.vy-=impulse;lower.vy+=impulse;upper.vx+=side*lateral;lower.vx-=side*lateral*.4;upper.spin+=side*Math.min(18,relative*.04);if(!upper.fragment&&upper.impactItem.impact==null)upper.impactItem.impact=now;}}
         else{const left=a.x+a.w/2<b.x+b.w/2?a:b,right=left===a?b:a,push=ox/2+.01;left.x-=push;right.x+=push;const relative=left.vx-right.vx;if(relative>0){left.vx-=relative*.52;right.vx+=relative*.52;}}
         for(const body of [a,b]){body.x=Math.max(0,Math.min(width-body.w,body.x));if(body.y+body.h>height){body.y=height-body.h;body.vy=Math.min(0,body.vy);}}
       }
+      // Replace a few impacted words with individual colliding letter bodies.
+      // Bound their count so a dense song cannot stall the renderer.
+      let fragments=bodies.filter(b=>b.fragment).length;
+      for(let i=bodies.length-1;i>=0;i--){const b=bodies[i],item=b.impactItem;
+        if(b.fragment||!item.breakApart||item.impact==null||item.fragments||fragments+item.glyphs.length>48)continue;
+        record(b,now);bodies.splice(i,1);item.fragments=[];const unit=item.width/item.glyphs.length;
+        item.glyphs.forEach((glyph,index)=>{const fragment={text:glyph,width:unit,height:item.height,frames:[]};item.fragments.push(fragment);
+          const piece={item,fragment,w:unit,h:item.height,x:b.x+item.padX+index*unit,y:b.y+item.padY,vx:b.vx+(index-(item.glyphs.length-1)/2)*18,vy:Math.min(-25,b.vy-60-(index%3)*14),angle:b.angle,spin:((item.seed>>>(index%16))%81)-40};bodies.push(piece);record(piece,now);});
+        fragments+=item.glyphs.length;
+      }
       for(const b of bodies)record(b,now);
     }
-    for(const item of page.items){const base=item.reuseId?byId.get(item.reuseId)?.item:item;if(base&&base!==item){item.frames=base.frames;item.splatter=base.splatter;}const f=item.frames;item.x=f.length?f[f.length-3]:0;item.y=f.length?f[f.length-2]:height-item.height;}
+    for(const item of page.items){const base=item.reuseId?byId.get(item.reuseId)?.item:item;if(base&&base!==item)item.frames=base.frames;const f=item.frames;item.x=f.length?f[f.length-3]:0;item.y=f.length?f[f.length-2]:height-item.height;for(const fragment of item.fragments||[]){const frames=fragment.frames;fragment.x=frames[frames.length-3];fragment.y=frames[frames.length-2];}}
   }
   function pileAt(item,clock,width,height,{reduced=false}={}){
     if(clock<item.startMs)return null;
-    if(reduced)return {x:item.x,y:item.y,rotation:0,splat:item.splatter&&item.impact!=null&&clock>=item.impact?1:0,squash:0};
+    if(reduced)return {x:item.x,y:item.y,rotation:0,squash:0};
     const frames=item.frames;if(!frames?.length)return {x:item.x,y:item.y};let lo=0,hi=frames.length/4-1;
     while(lo<hi){const mid=Math.ceil((lo+hi)/2);if(frames[mid*4]<=clock)lo=mid;else hi=mid-1;}
     const i=lo*4,j=Math.min(i+4,frames.length-4),span=frames[j]-frames[i],u=span>0?clamp((clock-frames[i])/span):0;
-    const since=item.impact==null?-1:clock-item.impact,squash=since>=0&&since<220?Math.sin(Math.PI*since/220)*(item.splatter ? .2 : .08):0;
+    const since=item.impact==null?-1:clock-item.impact,squash=since>=0&&since<220?Math.sin(Math.PI*since/220)*.08:0;
     const idle=clamp((clock-frames[frames.length-4])/600),phase=(clock+(item.seed%5000))/1100;
-    return {x:Math.max(0,Math.min(Math.max(0,width-item.width),frames[i+1]+(frames[j+1]-frames[i+1])*u+idle*.45*Math.sin(phase))),y:frames[i+2]+(frames[j+2]-frames[i+2])*u-idle*.25*(1+Math.cos(phase*.8)),rotation:frames[i+3]+(frames[j+3]-frames[i+3])*u+idle*.15*Math.sin(phase*.7),splat:item.splatter&&since>=0?clamp(since/180):0,squash};
+    return {x:Math.max(0,Math.min(Math.max(0,width-item.width),frames[i+1]+(frames[j+1]-frames[i+1])*u+idle*.45*Math.sin(phase))),y:frames[i+2]+(frames[j+2]-frames[i+2])*u-idle*.25*(1+Math.cos(phase*.8)),rotation:frames[i+3]+(frames[j+3]-frames[i+3])*u+idle*.15*Math.sin(phase*.7),squash};
   }
   function backingSettings(value={}){
-    return {space:value?.space==='shared'?'shared':'separate',area:Number.isFinite(value?.area)?Math.max(.15,Math.min(.4,value.area)):.25};
+    return {space:value?.space==='separate'?'separate':'shared',area:Number.isFinite(value?.area)?Math.max(.15,Math.min(.4,value.area)):.25};
   }
   // All backing lanes share one budget, independent of their phrase count.
   function vocalAreas(width,height,hasBacking,value){

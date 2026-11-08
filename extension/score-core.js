@@ -160,7 +160,9 @@
       if(/^(chorus|verse(?:\s+\d+)?|intro|outro|bridge|pre-chorus|instrumental)$/i.test(name))return null;
       if(!name||name.length>80||name.includes(':'))return null;
       let n=1;while(lanes.some(l=>l.id===`vocal-${n}`))n++;
-      const lane={id:`vocal-${n}`,role:'lead',label:name};lanes.push(lane);return lane.id;
+      // Explicit backing headers create backing lanes; existing lane roles are
+      // always preserved, including any role the user deliberately edited.
+      const lane={id:`vocal-${n}`,role:/^backing(?:\s*\d+)?$/i.test(name)?'backing':'lead',label:name};lanes.push(lane);return lane.id;
     };
     String(text).replace(/\r\n?/g,'\n').split('\n').forEach((line,index)=>{
       const only=/^\s*\[([^\[\]]+)\]\s*$/.exec(line);

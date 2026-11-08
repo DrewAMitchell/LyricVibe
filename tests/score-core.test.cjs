@@ -732,3 +732,12 @@ test('saved syllables retain source-bound note events and uncalibrated capture-s
  assert.deepEqual(moved.phrases[0].words[0].syllables[0].captureEvidence,evidence,'score editing never rewrites original observations');
  const bad=structuredClone(op);bad.words[0].syllables[0].captureEvidence.relativeWeight=100;assert.throws(()=>score.applyOperation(base,bad,base.revision),/speed prior/);
 });
+test('new backing headers default to backing while existing track roles remain authoritative',()=>{
+ const {parseVocalText}=require('../extension/score-core.js');
+ const lanes=[{id:'lead',label:'Singer',role:'lead'},{id:'chosen',label:'Backing 3',role:'lead'}];
+ const result=parseVocalText('[Backing 2]\none\n[backing2]\ntwo\n[Backing 3]\nthree',lanes);
+ assert.equal(result.lanes.find(l=>l.label==='Backing 2').role,'backing');
+ assert.equal(result.lanes.find(l=>l.label==='backing2').role,'backing');
+ assert.equal(result.lanes.find(l=>l.id==='chosen').role,'lead');
+ assert.deepEqual(lanes,[{id:'lead',label:'Singer',role:'lead'},{id:'chosen',label:'Backing 3',role:'lead'}]);
+});

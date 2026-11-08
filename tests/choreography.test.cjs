@@ -177,10 +177,11 @@ test('preferred minimum yields to fitting the whole phrase without changing word
 
 test('backing has one bounded budget while shared space returns full main height',()=>{
   const {backingSettings,vocalAreas}=require('../extension/choreography.js');
-  assert.deepEqual(backingSettings(),{space:'separate',area:.25});
-  assert.deepEqual(backingSettings({space:'bad',area:5}),{space:'separate',area:.4});
+  assert.deepEqual(backingSettings(),{space:'shared',area:.25});
+  assert.deepEqual(backingSettings({space:'bad',area:5}),{space:'shared',area:.4});
   assert.equal(backingSettings({area:NaN}).area,.25);
-  assert.deepEqual(vocalAreas(1000,800,true),{main:{x:0,y:0,width:1000,height:600},backing:{x:100,y:600,width:800,height:200}});
+  assert.deepEqual(vocalAreas(1000,800,true),{main:{x:0,y:0,width:1000,height:800},backing:{x:100,y:600,width:800,height:200}});
+  assert.equal(vocalAreas(1000,800,true,{space:'separate'}).main.height,600,'an explicitly selected separate area remains available');
   assert.equal(vocalAreas(1000,800,true,{space:'shared',area:.3}).main.height,800);
   assert.equal(vocalAreas(1000,800,false).main.height,800);
 });
@@ -293,12 +294,12 @@ test('lead vocal slots remain stable through lead-in, overlap and exit without d
 });
 
 
-test('pile enters from one edge, collides, splatters selectively and replays deterministically',()=>{
+test('pile enters from one edge, breaks some words into colliding letters and replays deterministically',()=>{
  const {pileTrack,pileAt}=require('../extension/choreography.js'),words=Array.from({length:45},(_,i)=>({id:'word-'+i,phraseId:'p'+Math.floor(i/5),laneId:'lead',text:'lyric'+i,startMs:i*250})),plan=pileTrack(words,500,300,(text,font)=>text.length*font*.55,{font:38,maxWords:12});
- assert.ok(plan.pages.length>1);for(const page of plan.pages){assert.ok(page.items.length<=12);for(const [i,a] of page.items.entries()){assert.ok(a.x>=0&&a.y>=-2&&a.x+a.width<=500+.01&&a.y+a.height<=300+.01);for(const b of page.items.slice(i+1)){const x=Math.min(a.x+a.width,b.x+b.width)-Math.max(a.x,b.x),y=Math.min(a.y+a.height,b.y+b.height)-Math.max(a.y,b.y);assert.ok(x<2||y<2,'settled bodies do not substantially overlap');}}}
- const all=plan.pages.flatMap(p=>p.items);assert.ok(all.every(item=>item.edge===0&&pileAt(item,item.startMs,500,300).y<0),'every word enters through the top');assert.ok(all.some(item=>item.splatter)&&all.some(item=>!item.splatter));
- const splat=all.find(item=>item.splatter&&item.impact!=null),whole=all.find(item=>!item.splatter&&item.impact!=null);assert.ok(pileAt(splat,splat.impact+200,500,300).splat>0);assert.equal(pileAt(whole,whole.impact+200,500,300).splat,0);
- const page=plan.pages[0],first=page.items[0],before=pileAt(first,first.startMs+900,500,300),after=pileAt(first,page.items.at(-1).startMs+1500,500,300);assert.ok(Math.abs(before.x-after.x)+Math.abs(before.y-after.y)>2,'later impacts move an earlier word');assert.equal(pileAt(first,first.startMs-1,500,300),null);assert.deepEqual(pileAt(first,first.startMs+350,500,300),pileAt(first,first.startMs+350,500,300));const idle=pileAt(first,page.items.at(-1).startMs+5000,500,300),later=pileAt(first,page.items.at(-1).startMs+5800,500,300);assert.notDeepEqual(idle,later,'settled pile retains slight motion');assert.ok(Math.abs(idle.x-later.x)<1.5&&Math.abs(idle.y-later.y)<1.5);const reduced=pileAt(first,first.startMs,500,300,{reduced:true});assert.equal(reduced.x,first.x);assert.equal(reduced.y,first.y);assert.deepEqual(plan,pileTrack(words,500,300,(text,font)=>text.length*font*.55,{font:38,maxWords:12}));
+ assert.ok(plan.pages.length>1);for(const page of plan.pages){assert.ok(page.items.length<=12);for(const item of page.items){const pieces=item.fragments||[item];for(const piece of pieces)assert.ok(piece.x>=-2&&piece.y>=-2&&piece.x+piece.width<=500+2&&piece.y+piece.height<=300+2,'settled pieces stay inside the stage');}}
+ const all=plan.pages.flatMap(p=>p.items);assert.ok(all.every(item=>item.edge===0&&pileAt(item,item.startMs,500,300).y<0),'every word enters through the top');assert.ok(all.some(item=>item.fragments?.length)&&all.some(item=>!item.fragments));
+ const broken=all.find(item=>item.fragments?.length);assert.equal(broken.fragments.map(f=>f.text).join(''),words.find(w=>w.id===broken.id).text);assert.ok(broken.fragments.every(f=>f.frames.length>4),'letters have independent collision trajectories');
+ const page=plan.pages[0],first=page.items[0];assert.ok(page.items.some(item=>{const body=item.fragments?.[0]||item,frames=body.frames;return frames.length>8&&Math.abs(frames[1]-frames[frames.length-3])+Math.abs(frames[2]-frames[frames.length-2])>2;}),'pieces move during the collision pass');assert.equal(pileAt(first,first.startMs-1,500,300),null);assert.deepEqual(pileAt(first,first.startMs+350,500,300),pileAt(first,first.startMs+350,500,300));const idle=pileAt(first,page.items.at(-1).startMs+5000,500,300),later=pileAt(first,page.items.at(-1).startMs+5800,500,300);assert.notDeepEqual(idle,later,'settled pile retains slight motion');assert.ok(Math.abs(idle.x-later.x)<1.5&&Math.abs(idle.y-later.y)<1.5);const reduced=pileAt(first,first.startMs,500,300,{reduced:true});assert.equal(reduced.x,first.x);assert.equal(reduced.y,first.y);assert.deepEqual(plan,pileTrack(words,500,300,(text,font)=>text.length*font*.55,{font:38,maxWords:12}));
 });
 
 
