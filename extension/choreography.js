@@ -510,7 +510,7 @@
       if(!page||page.items.length>=maxWords||!repeated&&page.items.length&&area+(w+padX*2)*(h+padY*2)>width*height*.8){page={startMs:word.startMs,items:[]};pages.push(page);area=0;}
       const previous=page.items.at(-1),reuse=word._dejaReuse&&previous?.reuseKey===word._dejaReuse;
       const glyphs=typeof Intl.Segmenter==='function'?[...new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(word.text)].map(x=>x.segment):Array.from(word.text);
-      const item={id:word.id,phraseId:word.phraseId,laneId:word.laneId,startMs:word.startMs,width:w,height:h,padX,padY,font:size,edge:0,seed,reuseKey:word._dejaReuse,breakApart:!word._dejaReuse&&seed%4===0&&glyphs.length>1&&glyphs.length<=16,glyphs,frames:[]};
+      const item={id:word.id,phraseId:word.phraseId,laneId:word.laneId,startMs:word.startMs,endMs:Number.isFinite(word.endMs)?word.endMs:word.startMs,width:w,height:h,padX,padY,font:size,edge:0,seed,reuseKey:word._dejaReuse,breakApart:!word._dejaReuse&&seed%4===0&&glyphs.length>1&&glyphs.length<=16,glyphs,frames:[]};
       if(reuse)item.reuseId=previous.reuseId||previous.id;else area+=(w+padX*2)*(h+padY*2);
       page.items.push(item);
     }
@@ -525,6 +525,22 @@
       if(overflow.length)pages.splice(index+1,0,{startMs:overflow[0].startMs,items:overflow});
     }
     return {width,height,pages};
+  }
+  // Reclaim a full pile by moving the old page out below the camera while
+  // the next page enters. A still-sung word starts its departure only at end.
+  function pilePageItemsAt(plan,clock,{reduced=false}={}){
+    const pages=plan.pages||[],current=pages.findLastIndex(page=>page.startMs<=clock);if(current<0)return [];
+    const result=[],duration=reduced?350:900;
+    for(let index=0;index<=current;index++){
+      const page=pages[index],boundary=index<current?pages[index+1].startMs:null;
+      for(const item of page.items){
+        if(item.startMs>clock||clock>=(item.expiresAt??Infinity))continue;
+        if(boundary===null){result.push({...item,_panY:0,_panOpacity:1});continue;}
+        const start=Math.max(boundary,item.endMs??item.startMs),t=clamp((clock-start)/duration);if(t>=1)continue;
+        const eased=t*t*(3-2*t);result.push({...item,_panY:reduced?0:plan.height*eased,_panOpacity:reduced?1-eased:1});
+      }
+    }
+    return result;
   }
   function simulatePile(page,width,height){
     const step=1000/30,bodies=[],byId=new Map(),lastStart=page.items.at(-1)?.startMs??page.startMs;
@@ -654,5 +670,5 @@
     const a=points[i-1],b=points[i],u=clamp((t-a.t)/(b.t-a.t));
     return {x:a.x+(b.x-a.x)*u,y:a.y+(b.y-a.y)*u};
   }
-  const api={pathPosition,emojiMapDelta,applyEmojiMapDelta,resolveWordSet,validateEmojiMap,parseEmojiMap,formatEmojiMap,wordSetFor,coinSpin,stagePerformanceAt,layoutOrigins,landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,validateWordRuleSets,wordRuleAt,vinylTrack,vinylAt,paintVinyl,dejaGroups,dejaIds,dejaPhrase,leadTrackPlan,pileVoicesAt,pileTrack,burstTrack,pileAt,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
+  const api={pathPosition,emojiMapDelta,applyEmojiMapDelta,resolveWordSet,validateEmojiMap,parseEmojiMap,formatEmojiMap,wordSetFor,coinSpin,stagePerformanceAt,layoutOrigins,landingStyles,landingAt,accentShadow,layout,readablePages,arrival,compose,expressionAt,danceAt,wordRuleMotions,wordRuleEffects,defaultWordRules,ruleWord,validateWordRules,validateWordRuleSets,wordRuleAt,vinylTrack,vinylAt,paintVinyl,dejaGroups,dejaIds,dejaPhrase,leadTrackPlan,pileVoicesAt,pileTrack,pilePageItemsAt,burstTrack,pileAt,backingSettings,vocalAreas,firePalettes,fireFrame};root.LvChoreography=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

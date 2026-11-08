@@ -300,6 +300,12 @@ test('pile follows active singers and clears another singer’s old pile during 
  const duet=pileVoicesAt(score,1500);assert.equal(duet.count,1);assert.equal(duet.slots.q1,0);assert.equal(duet.slots.o1,0);assert.equal(duet.multi,true,'simultaneous singers share one physics space');const solo=pileVoicesAt(score,2500);assert.equal(solo.count,1);assert.equal(solo.slots.q1,undefined);assert.equal(solo.slots.o1,0);assert.equal(pileVoicesAt(score,4050).key,'o','last singer stays visible in a short rest');assert.deepEqual(pileVoicesAt(score,2500),solo,'seeking reconstructs the same regions');
 });
 
+test('a full pile pans out as new words enter without losing a held word',()=>{
+ const {pilePageItemsAt}=require('../extension/choreography.js'),plan={height:300,pages:[{startMs:0,items:[{id:'old',startMs:0,endMs:500},{id:'held',startMs:100,endMs:1600}]},{startMs:1000,items:[{id:'new',startMs:1000,endMs:1400}]}]};
+ const at=t=>Object.fromEntries(pilePageItemsAt(plan,t).map(item=>[item.id,item]));assert.deepEqual(Object.keys(at(999)),['old','held']);assert.deepEqual(Object.keys(at(1000)),['old','held','new']);assert.equal(at(1000).old._panY,0);assert.ok(at(1450).old._panY>0&&at(1450).old._panY<300);assert.equal(at(1450).held._panY,0,'a sung word remains in place');assert.ok(at(1800).held._panY>0);assert.equal(at(1900).old,undefined);assert.equal(at(2500).held,undefined);assert.deepEqual(at(1450),at(1450),'seeks reconstruct the same transition');
+ const reduced=pilePageItemsAt(plan,1175,{reduced:true}).find(item=>item.id==='old');assert.equal(reduced._panY,0);assert.ok(reduced._panOpacity>0&&reduced._panOpacity<1,'reduced motion fades rather than pans');
+});
+
 test('word burst holds at the center then sends bounded letters outward on the source clock',()=>{
  const {burstTrack,pileAt}=require('../extension/choreography.js'),words=[{id:'first',phraseId:'p',laneId:'lead',text:'HELLO',startMs:0,endMs:500},{id:'second',phraseId:'p',laneId:'lead',text:'AGAIN',startMs:800,endMs:1200}],before=structuredClone(words),measure=(text,font)=>text.length*font*.55,plan=burstTrack(words,600,360,measure,{font:50}),[first,second]=plan.pages[0].items;
  assert.equal(first.x,(600-first.width)/2);assert.equal(first.y,(360-first.height)/2);assert.equal(first.impact,500);assert.equal(first.fragments.map(f=>f.text).join(''),'HELLO');assert.equal(second.impact,1200);assert.ok(first.fragments.every(f=>f.frames.length>8));
